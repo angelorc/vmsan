@@ -257,6 +257,7 @@ export class Jailer {
     if (config.cgroup) {
       const cgroupVer = detectCgroupVersion();
       if (cgroupVer === 2) {
+        args.push("--cgroup-version", "2");
         args.push("--cgroup", `cpu.max=${config.cgroup.cpuQuotaUs} ${config.cgroup.cpuPeriodUs}`);
         args.push("--cgroup", `memory.max=${config.cgroup.memoryBytes}`);
       } else {
@@ -266,11 +267,13 @@ export class Jailer {
       }
     }
 
+    args.push("--", "--api-sock", "run/firecracker.socket");
+
     if (config.seccompFilter && existsSync(config.seccompFilter)) {
       args.push("--seccomp-filter", config.seccompFilter);
+    } else {
+      args.push("--no-seccomp");
     }
-
-    args.push("--", "--api-sock", "run/firecracker.socket");
 
     execFileSync("sudo", args, { stdio: "pipe" });
   }

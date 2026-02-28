@@ -41,6 +41,31 @@ need_cmd curl
 need_cmd tar
 need_cmd git
 
+# --- prerequisites ---
+
+install_pkg() {
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update -qq && apt-get install -y -qq "$@" >/dev/null 2>&1
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y -q "$@" >/dev/null 2>&1
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y -q "$@" >/dev/null 2>&1
+  else
+    error "Cannot install packages: no supported package manager (apt-get, dnf, yum)"
+  fi
+}
+
+MISSING_PKGS=()
+command -v unzip       >/dev/null 2>&1 || MISSING_PKGS+=(unzip)
+command -v unsquashfs  >/dev/null 2>&1 || MISSING_PKGS+=(squashfs-tools)
+command -v mkfs.ext4   >/dev/null 2>&1 || MISSING_PKGS+=(e2fsprogs)
+
+if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
+  info "Installing prerequisites: ${MISSING_PKGS[*]}..."
+  install_pkg "${MISSING_PKGS[@]}"
+  success "Prerequisites installed"
+fi
+
 if ! command -v bun >/dev/null 2>&1; then
   info "Bun not found — installing..."
   curl -fsSL https://bun.sh/install | bash
@@ -130,9 +155,9 @@ else
   tune2fs -m 0 "$ROOTFS_PATH" >/dev/null 2>&1
 
   MOUNT_TMP=$(mktemp -d)
-  sudo mount -o loop "$ROOTFS_PATH" "$MOUNT_TMP"
-  sudo cp -a "$SQUASHFS_TMP/rootfs/." "$MOUNT_TMP/"
-  sudo umount "$MOUNT_TMP"
+  mount -o loop "$ROOTFS_PATH" "$MOUNT_TMP"
+  cp -a "$SQUASHFS_TMP/rootfs/." "$MOUNT_TMP/"
+  umount "$MOUNT_TMP"
   rmdir "$MOUNT_TMP"
 
   rm -rf "$SQUASHFS_TMP"

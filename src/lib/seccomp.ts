@@ -38,8 +38,8 @@ export function compileSeccompFilter(jsonPath: string, outputPath: string, arch?
  *
  * 1. If a compiled BPF exists at paths.seccompDir/default.bpf, return it.
  * 2. If the JSON source exists, try to compile it; return BPF path on success.
- * 3. If compilation fails (seccompiler-bin not installed), return the JSON path
- *    so the jailer can attempt to use it directly (Firecracker >= 1.5 supports JSON).
+ * 3. If compilation fails (seccompiler-bin not installed), return null
+ *    (Firecracker requires compiled BPF, not raw JSON).
  * 4. If no filter source exists at all, return null.
  */
 export function ensureSeccompFilter(paths: VmsanPaths): string | null {
@@ -84,10 +84,10 @@ export function ensureSeccompFilter(paths: VmsanPaths): string | null {
     consola.debug(`seccomp: compiled BPF filter at ${bpfPath}`);
     return bpfPath;
   } catch {
-    // seccompiler-bin not available; return JSON path for Firecracker >= 1.5
+    // seccompiler-bin not available; Firecracker requires compiled BPF — cannot use JSON directly.
     consola.warn(
-      "seccomp: BPF compilation failed (seccompiler-bin not available?); falling back to JSON filter",
+      "seccomp: BPF compilation failed (seccompiler-bin not available?); seccomp filtering disabled. Install seccompiler-bin for seccomp support.",
     );
-    return sourceJson;
+    return null;
   }
 }

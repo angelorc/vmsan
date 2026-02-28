@@ -8,7 +8,9 @@ const SUDO_COMMANDS = new Set(["create", "start", "stop", "remove", "rm"]);
 
 const subCommand = process.argv[2];
 if (subCommand && SUDO_COMMANDS.has(subCommand) && process.getuid?.() !== 0) {
-  consola.error(`"vmsan ${subCommand}" requires root. Run with: sudo env "PATH=$PATH" vmsan ${subCommand}`);
+  consola.error(
+    `"vmsan ${subCommand}" requires root. Run with: sudo env "PATH=$PATH" vmsan ${subCommand}`,
+  );
   process.exit(1);
 }
 
