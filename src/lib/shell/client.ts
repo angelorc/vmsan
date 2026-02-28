@@ -138,7 +138,9 @@ export class ShellSession {
   private buildUrl(): string {
     const proto = "ws";
     if (this._sessionId) {
-      const url = new URL(`${proto}://${this.opts.host}:${this.opts.port}/ws/shell/${encodeURIComponent(this._sessionId)}`);
+      const url = new URL(
+        `${proto}://${this.opts.host}:${this.opts.port}/ws/shell/${encodeURIComponent(this._sessionId)}`,
+      );
       url.searchParams.set("token", this.opts.token);
       return url.toString();
     }

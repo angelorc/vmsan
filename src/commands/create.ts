@@ -7,14 +7,11 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { vmsanPaths } from "../paths.ts";
 import { createCommandLogger, createScopedLogger, initVmsanLogger } from "../lib/logger/index.ts";
-import {
-  mutuallyExclusiveFlagsError,
-  handleCommandError,
-} from "../errors/index.ts";
+import { mutuallyExclusiveFlagsError, handleCommandError } from "../errors/index.ts";
 import { generateVmId } from "../lib/utils.ts";
 import { FileVmStateStore } from "../lib/vm-state.ts";
 import { FirecrackerClient } from "../services/firecracker.ts";
-import { Jailer } from "../lib/jailer.ts";
+import { Jailer, type CgroupConfig } from "../lib/jailer.ts";
 import { NetworkManager } from "../lib/network.ts";
 import { createCommandArgs } from "./create/args.ts";
 import {
@@ -35,7 +32,13 @@ import { buildCreateSummaryLines } from "./create/summary.ts";
 import { buildInitialVmState } from "./create/state.ts";
 import type { CreateLifecycleState } from "./create/types.ts";
 import { resolveImageRootfs } from "./create/image-rootfs.ts";
-import { parseDiskSizeGb, parseDomains, parseImageReference } from "./create/validation.ts";
+import {
+  parseDiskSizeGb,
+  parseDomains,
+  parseImageReference,
+  parseBandwidth,
+} from "./create/validation.ts";
+import { ensureSeccompFilter } from "../lib/seccomp.ts";
 import { waitForAgent } from "./create/connect.ts";
 import { ShellSession } from "../lib/shell/index.ts";
 
@@ -51,6 +54,11 @@ interface CreateCommandArgs extends CreateCommandRuntimeArgs {
   timeout?: string;
   silent?: boolean;
   connect?: boolean;
+  "no-seccomp"?: boolean;
+  "no-pid-ns"?: boolean;
+  "no-cgroup"?: boolean;
+  "no-netns"?: boolean;
+  bandwidth?: string;
 }
 
 function createLifecycleState(): CreateLifecycleState {
@@ -120,10 +128,13 @@ const createCommand = defineCommand({
         );
       }
 
+      const bandwidthMbit = parseBandwidth(commandArgs.bandwidth);
+
       lifecycle.vmId = generateVmId();
       const log = createScopedLogger(lifecycle.vmId);
       const slot = store.allocateNetworkSlot();
       consola.debug(`Network slot allocated: ${slot}`);
+      const netnsName = commandArgs["no-netns"] ? undefined : `vmsan-${lifecycle.vmId}`;
       const net = new NetworkManager(
         slot,
         parsedInput.networkPolicy,
@@ -131,6 +142,8 @@ const createCommand = defineCommand({
         parsedInput.allowedCidrs,
         parsedInput.deniedCidrs,
         parsedInput.ports,
+        bandwidthMbit,
+        netnsName,
       );
       lifecycle.networkConfig = net.config;
 
@@ -162,6 +175,8 @@ const createCommand = defineCommand({
         timeoutMs: parsedInput.timeoutMs,
         agentToken,
         agentPort: paths.agentPort,
+        bandwidthMbit,
+        netnsName,
       });
       store.save(state);
 
@@ -215,10 +230,27 @@ const createCommand = defineCommand({
       const firecrackerBin = join(baseDir, "bin", "firecracker");
       const jailerBin = join(baseDir, "bin", "jailer");
 
+      const seccompFilter = commandArgs["no-seccomp"] ? undefined : ensureSeccompFilter(paths);
+      if (seccompFilter) {
+        consola.debug(`Seccomp filter: ${seccompFilter}`);
+      }
+
+      const cgroup: CgroupConfig | undefined = commandArgs["no-cgroup"]
+        ? undefined
+        : {
+            cpuQuotaUs: parsedInput.vcpus * 100000,
+            cpuPeriodUs: 100000,
+            memoryBytes: parsedInput.memMib * 1024 * 1024,
+          };
+
       jailer.spawn({
         firecrackerBin,
         jailerBin,
         chrootBase: jailerPaths.chrootBase,
+        seccompFilter: seccompFilter ?? undefined,
+        newPidNs: !commandArgs["no-pid-ns"],
+        cgroup,
+        netns: netnsName,
       });
 
       log.start("Waiting for API socket...");
@@ -254,11 +286,22 @@ const createCommand = defineCommand({
       log.success(`VM ${lifecycle.vmId} is running (PID: ${pid || "unknown"})`);
 
       if (parsedInput.timeoutMs && pid) {
+        const stateFile = join(paths.vmsDir, `${lifecycle.vmId}.json`);
         const killer = spawn(
           "bash",
           [
             "-c",
-            `sleep ${Math.ceil(parsedInput.timeoutMs / 1000)} && [ -d /proc/${pid} ] && grep -q "${lifecycle.vmId}" /proc/${pid}/cmdline 2>/dev/null && kill ${pid} 2>/dev/null`,
+            [
+              `sleep ${Math.ceil(parsedInput.timeoutMs / 1000)}`,
+              // Verify VM is still running via state file
+              `STATE=$(cat "${stateFile}" 2>/dev/null) || exit 0`,
+              `echo "$STATE" | grep -q '"status":"running"' || exit 0`,
+              `echo "$STATE" | grep -q '"pid":${pid}' || exit 0`,
+              // Verify PID still exists and belongs to this VM
+              `[ -d /proc/${pid} ] || exit 0`,
+              `grep -q "${lifecycle.vmId}" /proc/${pid}/cmdline 2>/dev/null || exit 0`,
+              `kill ${pid} 2>/dev/null`,
+            ].join(" && "),
           ],
           { detached: true, stdio: "ignore" },
         );
@@ -342,6 +385,6 @@ const createCommand = defineCommand({
   },
 });
 
-export { parseDiskSizeGb, parseDomains };
+export { parseDiskSizeGb, parseDomains, parseBandwidth };
 
 export default createCommand as CommandDef;

@@ -6,15 +6,31 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const maxTarUploadBytes = 1 << 30 // 1GB
 
-func handleFilesWrite(w http.ResponseWriter, r *http.Request) {
+func makeFilesWriteHandler(logger *slog.Logger) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		handleFilesWrite(w, r, logger)
+	}
+}
+
+func makeFilesReadHandler(logger *slog.Logger) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		handleFilesRead(w, r, logger)
+	}
+}
+
+func handleFilesWrite(w http.ResponseWriter, r *http.Request, logger *slog.Logger) {
+	start := time.Now()
+
 	extractDir := r.Header.Get("X-Extract-Dir")
 	if extractDir == "" {
 		extractDir = "/"
@@ -26,6 +42,11 @@ func handleFilesWrite(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"X-Extract-Dir must be absolute"}`, http.StatusBadRequest)
 		return
 	}
+
+	logger.Info("files.write",
+		"extract_dir", extractDir,
+		"content_length", r.ContentLength,
+	)
 
 	lr := &io.LimitedReader{R: r.Body, N: maxTarUploadBytes + 1}
 	gz, err := gzip.NewReader(lr)
@@ -87,6 +108,12 @@ func handleFilesWrite(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	logger.Info("files.write.done",
+		"extract_dir", extractDir,
+		"files_written", filesWritten,
+		"duration_ms", time.Since(start).Milliseconds(),
+	)
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"filesWritten": filesWritten,
@@ -97,7 +124,7 @@ type readRequest struct {
 	Path string `json:"path"`
 }
 
-func handleFilesRead(w http.ResponseWriter, r *http.Request) {
+func handleFilesRead(w http.ResponseWriter, r *http.Request, logger *slog.Logger) {
 	var req readRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
@@ -128,6 +155,11 @@ func handleFilesRead(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"path is a directory"}`, http.StatusBadRequest)
 		return
 	}
+
+	logger.Info("files.read",
+		"path", cleanPath,
+		"size", info.Size(),
+	)
 
 	f, err := os.Open(cleanPath)
 	if err != nil {

@@ -4,7 +4,7 @@ import type { VmState } from "../../lib/vm-state.ts";
 export const VALID_RUNTIMES = ["base", "node22", "node22-demo", "python3.13"] as const;
 export type Runtime = (typeof VALID_RUNTIMES)[number];
 
-export const VALID_NETWORK_POLICIES = ["allow-all", "deny-all"] as const;
+export const VALID_NETWORK_POLICIES = ["allow-all", "deny-all", "custom"] as const;
 export type NetworkPolicy = (typeof VALID_NETWORK_POLICIES)[number];
 
 export interface CreateLifecycleState {
@@ -76,6 +76,8 @@ export interface InitialVmStateInput {
   timeoutMs: number | null;
   agentToken: string | null;
   agentPort: number;
+  bandwidthMbit?: number;
+  netnsName?: string;
 }
 
 export type CreateState = VmState;

@@ -49,6 +49,13 @@ export const networkSlotsExhaustedError = (): VmError =>
     message: "No available network slots (max 255 VMs)",
   });
 
+export const vmNotRunningError = (vmId: string): VmError =>
+  new VmError("ERR_VM_NOT_RUNNING", {
+    vmId,
+    message: `VM ${vmId} is not running`,
+    fix: "The VM must be running to update its network policy. Start it with 'vmsan start <vm-id>'.",
+  });
+
 export const snapshotNotFoundError = (snapshotId: string): VmError =>
   new VmError("ERR_VM_SNAPSHOT_NOT_FOUND", {
     message: `Snapshot not found: ${snapshotId}`,

@@ -45,6 +45,7 @@ const main = defineCommand({
     connect: () => import("../src/commands/connect.ts").then((m) => m.default),
     upload: () => import("../src/commands/upload.ts").then((m) => m.default),
     download: () => import("../src/commands/download.ts").then((m) => m.default),
+    network: () => import("../src/commands/network.ts").then((m) => m.default),
   },
 });
 

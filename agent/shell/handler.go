@@ -78,6 +78,12 @@ func (h *Handler) handleNewSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.logger.Info("shell.session.created",
+		"session_id", session.ID,
+		"shell", shell,
+		"remote_addr", r.RemoteAddr,
+	)
+
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		h.logger.Error("websocket upgrade", "error", err)
@@ -88,6 +94,11 @@ func (h *Handler) handleNewSession(w http.ResponseWriter, r *http.Request) {
 	// Send session metadata as text frame.
 	meta, _ := json.Marshal(map[string]string{"sessionId": session.ID})
 	conn.WriteMessage(websocket.TextMessage, meta)
+
+	h.logger.Info("shell.subscriber.connected",
+		"session_id", session.ID,
+		"remote_addr", r.RemoteAddr,
+	)
 
 	_, doneCh, err := session.AddSubscriber(conn)
 	if err != nil {
@@ -100,6 +111,11 @@ func (h *Handler) handleNewSession(w http.ResponseWriter, r *http.Request) {
 
 	// Block until this subscriber is removed (read/write pump exit).
 	<-doneCh
+
+	h.logger.Info("shell.subscriber.disconnected",
+		"session_id", session.ID,
+		"remote_addr", r.RemoteAddr,
+	)
 }
 
 // handleAttach attaches the caller to an existing session as a new subscriber.
@@ -122,6 +138,12 @@ func (h *Handler) handleAttach(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.logger.Info("shell.subscriber.connected",
+		"session_id", sessionId,
+		"remote_addr", r.RemoteAddr,
+		"attach", true,
+	)
+
 	_, doneCh, err := session.AddSubscriber(conn)
 	if err != nil {
 		conn.WriteMessage(websocket.CloseMessage,
@@ -131,6 +153,11 @@ func (h *Handler) handleAttach(w http.ResponseWriter, r *http.Request) {
 	}
 
 	<-doneCh
+
+	h.logger.Info("shell.subscriber.disconnected",
+		"session_id", sessionId,
+		"remote_addr", r.RemoteAddr,
+	)
 }
 
 // handleListSessions returns JSON info for all active sessions.
@@ -147,6 +174,9 @@ func (h *Handler) handleKillSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"session not found"}`, http.StatusNotFound)
 		return
 	}
+	h.logger.Info("shell.session.killed",
+		"session_id", sessionId,
+	)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(`{"ok":true}`))
 }

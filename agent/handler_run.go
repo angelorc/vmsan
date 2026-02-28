@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os/exec"
 	"sync"
@@ -51,7 +52,13 @@ func writeEvent(w io.Writer, mu *sync.Mutex, evt ndjsonEvent) {
 	}
 }
 
-func handleRun(w http.ResponseWriter, r *http.Request) {
+func makeRunHandler(logger *slog.Logger) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		handleRun(w, r, logger)
+	}
+}
+
+func handleRun(w http.ResponseWriter, r *http.Request, logger *slog.Logger) {
 	var req runRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
@@ -62,11 +69,21 @@ func handleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logger.Info("exec",
+		"cmd", req.Cmd,
+		"args", req.Args,
+		"cwd", req.Cwd,
+		"detached", req.Detached,
+		"timeout_ms", req.TimeoutMs,
+	)
+
 	if int(activeCommands.Load()) >= maxConcurrentCommands {
 		http.Error(w, `{"error":"too many concurrent commands"}`, http.StatusTooManyRequests)
 		return
 	}
 	activeCommands.Add(1)
+
+	start := time.Now()
 
 	cmd := exec.Command(req.Cmd, req.Args...)
 	if req.Cwd != "" {
@@ -119,6 +136,12 @@ func handleRun(w http.ResponseWriter, r *http.Request) {
 			cmd.Wait()
 			activeCommands.Add(-1)
 			cmdstore.Remove(cmdID)
+			logger.Info("exec.done",
+				"cmd_id", cmdID,
+				"exit_code", -1,
+				"duration_ms", time.Since(start).Milliseconds(),
+				"detached", true,
+			)
 		}()
 		return
 	}
@@ -159,6 +182,12 @@ func handleRun(w http.ResponseWriter, r *http.Request) {
 	cmdstore.Remove(cmdID)
 
 	if timedOut.Load() {
+		logger.Info("exec.done",
+			"cmd_id", cmdID,
+			"exit_code", -1,
+			"duration_ms", time.Since(start).Milliseconds(),
+			"timeout", true,
+		)
 		writeEvent(w, &mu, ndjsonEvent{
 			Type:      "timeout",
 			Timestamp: now(),
@@ -169,12 +198,22 @@ func handleRun(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			code := exitErr.ExitCode()
+			logger.Info("exec.done",
+				"cmd_id", cmdID,
+				"exit_code", code,
+				"duration_ms", time.Since(start).Milliseconds(),
+			)
 			writeEvent(w, &mu, ndjsonEvent{
 				Type:      "exit",
 				ExitCode:  &code,
 				Timestamp: now(),
 			})
 		} else {
+			logger.Error("exec.done",
+				"cmd_id", cmdID,
+				"error", err.Error(),
+				"duration_ms", time.Since(start).Milliseconds(),
+			)
 			writeEvent(w, &mu, ndjsonEvent{
 				Type:      "error",
 				Error:     err.Error(),
@@ -185,6 +224,11 @@ func handleRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	code := 0
+	logger.Info("exec.done",
+		"cmd_id", cmdID,
+		"exit_code", code,
+		"duration_ms", time.Since(start).Milliseconds(),
+	)
 	writeEvent(w, &mu, ndjsonEvent{
 		Type:      "exit",
 		ExitCode:  &code,

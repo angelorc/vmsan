@@ -12,6 +12,8 @@ export interface VmsanPaths {
   rootfsDir: string;
   registryDir: string;
   snapshotsDir: string;
+  seccompDir: string;
+  seccompFilter: string;
   agentPort: number;
 }
 
@@ -50,6 +52,8 @@ export function vmsanPaths(baseDir?: string): VmsanPaths {
     rootfsDir: join(base, "rootfs"),
     registryDir: join(base, "registry", "rootfs"),
     snapshotsDir: join(base, "snapshots"),
+    seccompDir: join(base, "seccomp"),
+    seccompFilter: join(base, "seccomp", "default.json"),
     agentPort: 9119,
   };
 }

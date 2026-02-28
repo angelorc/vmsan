@@ -1,13 +1,7 @@
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { vmStateNotFoundError, networkSlotsExhaustedError } from "../errors/index.ts";
+import { mkdirSecure, writeSecure } from "./utils.ts";
 
 export interface VmNetwork {
   tapDevice: string;
@@ -22,6 +16,8 @@ export interface VmNetwork {
   publishedPorts: number[];
   tunnelHostname: string | null;
   tunnelHostnames?: string[];
+  bandwidthMbit?: number;
+  netnsName?: string;
 }
 
 export interface VmState {
@@ -60,12 +56,12 @@ export class FileVmStateStore implements VmStateStore {
   constructor(private readonly dir: string) {}
 
   private ensureDir(): void {
-    mkdirSync(this.dir, { recursive: true });
+    mkdirSecure(this.dir);
   }
 
   save(state: VmState): void {
     this.ensureDir();
-    writeFileSync(join(this.dir, `${state.id}.json`), JSON.stringify(state, null, 2));
+    writeSecure(join(this.dir, `${state.id}.json`), JSON.stringify(state, null, 2));
   }
 
   load(id: string): VmState | null {

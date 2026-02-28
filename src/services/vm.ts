@@ -1,10 +1,16 @@
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { rmSync } from "node:fs";
 import type { VmsanPaths } from "../paths.ts";
 import { FileVmStateStore, type VmState } from "../lib/vm-state.ts";
-import { NetworkManager, type NetworkConfig } from "../lib/network.ts";
+import { NetworkManager } from "../lib/network.ts";
+import { FileLock } from "../lib/file-lock.ts";
 import { getVmJailerPid, getVmPid } from "../commands/create/environment.ts";
-import { VmsanError, vmNotFoundError, vmNotStoppedError } from "../errors/index.ts";
+import {
+  VmsanError,
+  vmNotFoundError,
+  vmNotStoppedError,
+  vmNotRunningError,
+} from "../errors/index.ts";
 import { safeKill } from "../lib/utils.ts";
 
 export interface StopResult {
@@ -12,6 +18,14 @@ export interface StopResult {
   success: boolean;
   error?: VmsanError;
   alreadyStopped?: boolean;
+}
+
+export interface UpdatePolicyResult {
+  vmId: string;
+  success: boolean;
+  previousPolicy: string;
+  newPolicy: string;
+  error?: VmsanError;
 }
 
 export class VMService {
@@ -55,23 +69,10 @@ export class VMService {
         safeKill(orphanJailerPid, "SIGKILL");
       }
 
-      // 2. Teardown networking
+      // 2. Teardown networking (including namespace if present)
       if (state.network) {
-        const networkConfig: NetworkConfig = {
-          slot: Number(state.network.hostIp.split(".")[2]),
-          tapDevice: state.network.tapDevice,
-          hostIp: state.network.hostIp,
-          guestIp: state.network.guestIp,
-          subnetMask: state.network.subnetMask,
-          macAddress: state.network.macAddress,
-          networkPolicy: state.network.networkPolicy,
-          allowedDomains: state.network.allowedDomains,
-          allowedCidrs: state.network.allowedCidrs || [],
-          deniedCidrs: state.network.deniedCidrs || [],
-          publishedPorts: state.network.publishedPorts,
-        };
         try {
-          NetworkManager.fromConfig(networkConfig).teardown();
+          NetworkManager.fromVmNetwork(state.network).teardown();
         } catch {
           // Network may be partially torn down from a prior attempt
         }
@@ -84,6 +85,67 @@ export class VMService {
     } catch (err) {
       return { vmId, success: false, error: err instanceof VmsanError ? err : undefined };
     }
+  }
+
+  async updateNetworkPolicy(
+    vmId: string,
+    policy: string,
+    domains: string[],
+    allowedCidrs: string[],
+    deniedCidrs: string[],
+  ): Promise<UpdatePolicyResult> {
+    const stateFile = join(this.paths.vmsDir, `${vmId}.json`);
+    const fileLock = new FileLock(stateFile, `update-policy-${vmId}`);
+
+    return fileLock.run(() => {
+      const state = this.store.load(vmId);
+      if (!state) {
+        return {
+          vmId,
+          success: false,
+          previousPolicy: "",
+          newPolicy: policy,
+          error: vmNotFoundError(vmId),
+        };
+      }
+
+      if (state.status !== "running") {
+        return {
+          vmId,
+          success: false,
+          previousPolicy: state.network.networkPolicy,
+          newPolicy: policy,
+          error: vmNotRunningError(vmId),
+        };
+      }
+
+      const previousPolicy = state.network.networkPolicy;
+
+      try {
+        const mgr = NetworkManager.fromVmNetwork(state.network);
+        mgr.updatePolicy(policy, domains, allowedCidrs, deniedCidrs);
+
+        this.store.update(vmId, {
+          network: {
+            ...state.network,
+            networkPolicy: policy,
+            allowedDomains: domains,
+            allowedCidrs,
+            deniedCidrs,
+          },
+        });
+
+        return { vmId, success: true, previousPolicy, newPolicy: policy };
+      } catch (err) {
+        return {
+          vmId,
+          success: false,
+          previousPolicy,
+          newPolicy: policy,
+          error: err instanceof VmsanError ? err : undefined,
+        };
+      }
+    });
   }
 
   async remove(vmId: string, opts?: { force?: boolean }): Promise<StopResult> {

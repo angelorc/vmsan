@@ -52,7 +52,8 @@ export const createCommandArgs = {
   "network-policy": {
     type: "string",
     default: "allow-all",
-    description: "Base network mode: allow-all (default) or deny-all",
+    description:
+      "Base network mode: allow-all (default), deny-all, or custom. Auto-promoted to custom when domains or CIDRs are provided.",
   },
   "allowed-domain": {
     type: "string",
@@ -65,6 +66,30 @@ export const createCommandArgs = {
   "denied-cidr": {
     type: "string",
     description: "Address ranges to deny (comma-separated CIDR). Takes precedence over all allows.",
+  },
+  "no-seccomp": {
+    type: "boolean",
+    default: false,
+    description: "Disable seccomp-bpf filter for the Firecracker process.",
+  },
+  "no-pid-ns": {
+    type: "boolean",
+    default: false,
+    description: "Disable PID namespace isolation for the jailer.",
+  },
+  "no-cgroup": {
+    type: "boolean",
+    default: false,
+    description: "Disable cgroup resource limits for CPU and memory.",
+  },
+  "no-netns": {
+    type: "boolean",
+    default: false,
+    description: "Disable per-VM network namespace isolation.",
+  },
+  bandwidth: {
+    type: "string",
+    description: "Max bandwidth per VM (e.g., 50mbit, 100mbit). Default: unlimited.",
   },
   connect: {
     type: "boolean",

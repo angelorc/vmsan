@@ -1,5 +1,13 @@
 import { execFileSync, execSync } from "node:child_process";
-import { copyFileSync, existsSync, linkSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import {
   generateWelcomeHtml,
@@ -41,12 +49,31 @@ export interface PrepareChrootConfig {
   };
 }
 
+export interface CgroupConfig {
+  cpuQuotaUs: number;
+  cpuPeriodUs: number;
+  memoryBytes: number;
+}
+
+export function detectCgroupVersion(): 1 | 2 {
+  try {
+    readFileSync("/sys/fs/cgroup/cgroup.controllers", "utf-8");
+    return 2;
+  } catch {
+    return 1;
+  }
+}
+
 export interface SpawnJailerConfig {
   firecrackerBin: string;
   jailerBin: string;
   chrootBase: string;
   uid?: number;
   gid?: number;
+  seccompFilter?: string;
+  newPidNs?: boolean;
+  cgroup?: CgroupConfig;
+  netns?: string;
 }
 
 export class Jailer {
@@ -217,10 +244,33 @@ export class Jailer {
       "--chroot-base-dir",
       config.chrootBase,
       "--daemonize",
-      "--",
-      "--api-sock",
-      "run/firecracker.socket",
     ];
+
+    if (config.newPidNs !== false) {
+      args.push("--new-pid-ns");
+    }
+
+    if (config.netns) {
+      args.push("--netns", `/var/run/netns/${config.netns}`);
+    }
+
+    if (config.cgroup) {
+      const cgroupVer = detectCgroupVersion();
+      if (cgroupVer === 2) {
+        args.push("--cgroup", `cpu.max=${config.cgroup.cpuQuotaUs} ${config.cgroup.cpuPeriodUs}`);
+        args.push("--cgroup", `memory.max=${config.cgroup.memoryBytes}`);
+      } else {
+        args.push("--cgroup", `cpu.cfs_quota_us=${config.cgroup.cpuQuotaUs}`);
+        args.push("--cgroup", `cpu.cfs_period_us=${config.cgroup.cpuPeriodUs}`);
+        args.push("--cgroup", `memory.limit_in_bytes=${config.cgroup.memoryBytes}`);
+      }
+    }
+
+    if (config.seccompFilter && existsSync(config.seccompFilter)) {
+      args.push("--seccomp-filter", config.seccompFilter);
+    }
+
+    args.push("--", "--api-sock", "run/firecracker.socket");
 
     execFileSync("sudo", args, { stdio: "pipe" });
   }

@@ -16,6 +16,7 @@ export type VmErrorCode =
   | "ERR_VM_NOT_FOUND"
   | "ERR_VM_STATE_NOT_FOUND"
   | "ERR_VM_NOT_STOPPED"
+  | "ERR_VM_NOT_RUNNING"
   | "ERR_VM_CHROOT_NOT_FOUND"
   | "ERR_VM_NETWORK_SLOTS_EXHAUSTED"
   | "ERR_VM_SNAPSHOT_NOT_FOUND";
@@ -24,10 +25,7 @@ export type FirecrackerErrorCode = "ERR_FIRECRACKER_API";
 
 export type NetworkErrorCode = "ERR_NETWORK_DEFAULT_INTERFACE";
 
-export type TimeoutErrorCode =
-  | "ERR_TIMEOUT_SOCKET"
-  | "ERR_TIMEOUT_LOCK"
-  | "ERR_TIMEOUT_AGENT";
+export type TimeoutErrorCode = "ERR_TIMEOUT_SOCKET" | "ERR_TIMEOUT_LOCK" | "ERR_TIMEOUT_AGENT";
 
 export type SetupErrorCode =
   | "ERR_SETUP_MISSING_BINARY"

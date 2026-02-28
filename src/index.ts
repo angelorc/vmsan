@@ -10,14 +10,19 @@ export type {
 export { AgentClient } from "./services/agent.ts";
 export type { RunParams, RunEvent, WriteFileEntry, SessionInfo } from "./services/agent.ts";
 export { VMService } from "./services/vm.ts";
-export type { StopResult } from "./services/vm.ts";
+export type { StopResult, UpdatePolicyResult } from "./services/vm.ts";
 
 export { FileVmStateStore } from "./lib/vm-state.ts";
 export type { VmStateStore, VmState, VmNetwork } from "./lib/vm-state.ts";
 export { NetworkManager } from "./lib/network.ts";
 export type { NetworkConfig } from "./lib/network.ts";
-export { Jailer } from "./lib/jailer.ts";
-export type { JailerPaths, PrepareChrootConfig, SpawnJailerConfig } from "./lib/jailer.ts";
+export { Jailer, detectCgroupVersion } from "./lib/jailer.ts";
+export type {
+  JailerPaths,
+  PrepareChrootConfig,
+  SpawnJailerConfig,
+  CgroupConfig,
+} from "./lib/jailer.ts";
 export { ShellSession, connectShell } from "./lib/shell/index.ts";
 export type { ShellSessionOptions } from "./lib/shell/index.ts";
 export { FileLock } from "./lib/file-lock.ts";
@@ -35,7 +40,15 @@ export {
 } from "./lib/utils.ts";
 
 export { VmsanError } from "./errors/index.ts";
-export type { VmsanErrorCode, ValidationErrorCode, VmErrorCode, FirecrackerErrorCode, NetworkErrorCode, TimeoutErrorCode, SetupErrorCode } from "./errors/index.ts";
+export type {
+  VmsanErrorCode,
+  ValidationErrorCode,
+  VmErrorCode,
+  FirecrackerErrorCode,
+  NetworkErrorCode,
+  TimeoutErrorCode,
+  SetupErrorCode,
+} from "./errors/index.ts";
 export { handleCommandError } from "./errors/index.ts";
 export {
   ValidationError,
@@ -62,14 +75,27 @@ export {
   vmNotFoundError,
   vmStateNotFoundError,
   vmNotStoppedError,
+  vmNotRunningError,
   chrootNotFoundError,
   networkSlotsExhaustedError,
   snapshotNotFoundError,
 } from "./errors/index.ts";
 export { FirecrackerApiError, firecrackerApiError } from "./errors/index.ts";
 export { NetworkError, defaultInterfaceNotFoundError } from "./errors/index.ts";
-export { TimeoutError, socketTimeoutError, lockTimeoutError, agentTimeoutError } from "./errors/index.ts";
-export { SetupError, missingBinaryError, noKernelDirError, noKernelError, noRootfsDirError, noExt4RootfsError } from "./errors/index.ts";
+export {
+  TimeoutError,
+  socketTimeoutError,
+  lockTimeoutError,
+  agentTimeoutError,
+} from "./errors/index.ts";
+export {
+  SetupError,
+  missingBinaryError,
+  noKernelDirError,
+  noKernelError,
+  noRootfsDirError,
+  noExt4RootfsError,
+} from "./errors/index.ts";
 
 export {
   initVmsanLogger,
@@ -121,8 +147,10 @@ export {
   validateCidr,
   validatePublishedPortsAvailable,
   parseImageReference,
+  parseBandwidth,
 } from "./commands/create/validation.ts";
 export type { ImageReference } from "./commands/create/validation.ts";
+export { ensureSeccompFilter, compileSeccompFilter } from "./lib/seccomp.ts";
 export { resolveImageRootfs } from "./commands/create/image-rootfs.ts";
 
 export async function getFirecrackerVersion(dir?: string): Promise<string | undefined> {

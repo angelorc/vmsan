@@ -1,7 +1,7 @@
 import type { VmsanPaths } from "../../paths.ts";
 import { parseDuration } from "../../lib/utils.ts";
 import { assertSnapshotExists } from "./environment.ts";
-import type { ParsedCreateInput } from "./types.ts";
+import type { NetworkPolicy, ParsedCreateInput } from "./types.ts";
 import {
   parseCidrList,
   parseDiskSizeGb,
@@ -30,7 +30,10 @@ export interface CreateCommandRuntimeArgs {
   "denied-cidr"?: string;
 }
 
-export function parseCreateInput(args: CreateCommandRuntimeArgs, paths: VmsanPaths): ParsedCreateInput {
+export function parseCreateInput(
+  args: CreateCommandRuntimeArgs,
+  paths: VmsanPaths,
+): ParsedCreateInput {
   const vcpus = parseVcpuCount(args.vcpus);
   const memMib = parseMemoryMib(args.memory);
   const runtime = parseRuntime(args.runtime);
@@ -59,11 +62,18 @@ export function parseCreateInput(args: CreateCommandRuntimeArgs, paths: VmsanPat
     assertSnapshotExists(snapshotId, paths);
   }
 
+  // Auto-promote "allow-all" → "custom" when filtering rules are present
+  const effectiveNetworkPolicy: NetworkPolicy =
+    networkPolicy === "allow-all" &&
+    (domains.length > 0 || allowedCidrs.length > 0 || deniedCidrs.length > 0)
+      ? "custom"
+      : networkPolicy;
+
   return {
     vcpus,
     memMib,
     runtime,
-    networkPolicy,
+    networkPolicy: effectiveNetworkPolicy,
     ports,
     domains,
     allowedCidrs,

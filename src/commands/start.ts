@@ -12,7 +12,7 @@ import {
   handleCommandError,
 } from "../errors/index.ts";
 import { FileVmStateStore } from "../lib/vm-state.ts";
-import { Jailer } from "../lib/jailer.ts";
+import { Jailer, type CgroupConfig } from "../lib/jailer.ts";
 import { NetworkManager, type NetworkConfig } from "../lib/network.ts";
 import { FirecrackerClient } from "../services/firecracker.ts";
 import {
@@ -21,11 +21,7 @@ import {
   validateEnvironment,
   waitForSocket,
 } from "./create/environment.ts";
-import {
-  cleanupNetwork,
-  killOrphanVmProcess,
-  markVmAsError,
-} from "./create/cleanup.ts";
+import { cleanupNetwork, killOrphanVmProcess, markVmAsError } from "./create/cleanup.ts";
 
 const startCommand = defineCommand({
   meta: {
@@ -73,25 +69,15 @@ const startCommand = defineCommand({
       log.start(`Starting VM ${vmId}...`);
 
       // 2. Reconstruct network config and re-setup networking
-      const slot = Number(state.network.hostIp.split(".")[2]);
-      const networkConfig: NetworkConfig = {
-        slot,
-        tapDevice: state.network.tapDevice,
-        hostIp: state.network.hostIp,
-        guestIp: state.network.guestIp,
-        subnetMask: state.network.subnetMask,
-        macAddress: state.network.macAddress,
-        networkPolicy: state.network.networkPolicy,
-        allowedDomains: state.network.allowedDomains,
-        allowedCidrs: state.network.allowedCidrs || [],
-        deniedCidrs: state.network.deniedCidrs || [],
-        publishedPorts: state.network.publishedPorts,
-      };
+      const mgr = NetworkManager.fromVmNetwork(state.network);
+      const networkConfig = mgr.config;
       lifecycle.networkConfig = networkConfig;
-      consola.debug(`Reconstructed network config: slot=${slot}, tap=${networkConfig.tapDevice}, host=${networkConfig.hostIp}, guest=${networkConfig.guestIp}`);
+      consola.debug(
+        `Reconstructed network config: slot=${networkConfig.slot}, tap=${networkConfig.tapDevice}, host=${networkConfig.hostIp}, guest=${networkConfig.guestIp}`,
+      );
 
       log.start("Setting up networking...");
-      await NetworkManager.fromConfig(networkConfig).setup();
+      await mgr.setup();
       log.success(
         `Network: TAP ${networkConfig.tapDevice}, Host ${networkConfig.hostIp}, Guest ${networkConfig.guestIp}`,
       );
@@ -174,13 +160,24 @@ const startCommand = defineCommand({
         return false;
       };
 
+      const cgroup: CgroupConfig = {
+        cpuQuotaUs: state.vcpuCount * 100000,
+        cpuPeriodUs: 100000,
+        memoryBytes: state.memSizeMib * 1024 * 1024,
+      };
+
       const spawnAndWait = async (timeoutMs: number): Promise<void> => {
         log.start("Spawning Firecracker via jailer...");
-        consola.debug(`Jailer spawn: firecracker=${firecrackerBin}, jailer=${jailerBin}, chrootBase=${jailer.paths.chrootBase}`);
+        consola.debug(
+          `Jailer spawn: firecracker=${firecrackerBin}, jailer=${jailerBin}, chrootBase=${jailer.paths.chrootBase}`,
+        );
         jailer.spawn({
           firecrackerBin,
           jailerBin,
           chrootBase: jailer.paths.chrootBase,
+          newPidNs: true,
+          cgroup,
+          netns: state.network.netnsName,
         });
 
         log.start("Waiting for API socket...");
@@ -234,7 +231,7 @@ const startCommand = defineCommand({
 
       // 5. Boot VM
       const vm = new FirecrackerClient(socketPath);
-      const bootArgs = NetworkManager.bootArgs(slot);
+      const bootArgs = NetworkManager.bootArgs(networkConfig.slot);
       consola.debug(`Boot args: ${bootArgs}`);
       await vm.boot("kernel/vmlinux", bootArgs);
       await vm.addDrive("rootfs", "rootfs/rootfs.ext4", true, false);

@@ -204,6 +204,20 @@ export function parseImageReference(ref: string): ImageReference {
   return { full, name, tag, cacheKey };
 }
 
+export function parseBandwidth(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const raw = value.trim().toLowerCase();
+  const match = raw.match(/^(\d+)(mbit|m)?$/i);
+  if (!match) {
+    throw invalidIntegerFlagError("bandwidth", value, 1, 1000, " mbit");
+  }
+  const mbit = Number(match[1]);
+  if (!Number.isInteger(mbit) || mbit < 1 || mbit > 1000) {
+    throw invalidIntegerFlagError("bandwidth", value, 1, 1000, " mbit");
+  }
+  return mbit;
+}
+
 export function parseDiskSizeGb(value: string | undefined): number {
   const raw = (value || "10gb").trim().toLowerCase();
   const match = raw.match(/^(\d+)(gb|g|gib)?$/i);
