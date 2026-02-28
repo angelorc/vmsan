@@ -4,6 +4,12 @@
 
 ### Patch Changes
 
+- Merge pull request #20 from angelorc/feat/auto-release-on-merge
+
+## 0.1.0
+
+### Patch Changes
+
 - [#17](https://github.com/angelorc/vmsan/pull/17) [`9a60cd6`](https://github.com/angelorc/vmsan/commit/9a60cd68ba8a820664e82a59f5e41b68846ad44d) Thanks [@angelorc](https://github.com/angelorc)! - simplify release workflow: single PR to version and publish
 
 ## 0.1.0
