@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { execSync } from "node:child_process";
 
 export interface VmsanPaths {
   baseDir: string;
@@ -14,8 +15,31 @@ export interface VmsanPaths {
   agentPort: number;
 }
 
+/**
+ * Resolve the real user's home directory, even under sudo.
+ * Priority: $VMSAN_DIR > SUDO_USER home > current HOME.
+ */
+function resolveBaseDir(): string {
+  if (process.env.VMSAN_DIR) return process.env.VMSAN_DIR;
+
+  const sudoUser = process.env.SUDO_USER;
+  if (sudoUser) {
+    try {
+      const home = execSync(`getent passwd ${sudoUser}`, { stdio: "pipe" })
+        .toString()
+        .trim()
+        .split(":")[5];
+      if (home) return join(home, ".vmsan");
+    } catch {
+      // fallback below
+    }
+  }
+
+  return join(homedir(), ".vmsan");
+}
+
 export function vmsanPaths(baseDir?: string): VmsanPaths {
-  const base = baseDir ?? join(homedir(), ".vmsan");
+  const base = baseDir ?? resolveBaseDir();
   return {
     baseDir: base,
     vmsDir: join(base, "vms"),

@@ -39,6 +39,14 @@ echo ""
 [ "$ARCH" = "x86_64" ] || [ "$ARCH" = "aarch64" ] || error "Unsupported architecture: $ARCH"
 need_cmd curl
 need_cmd tar
+need_cmd git
+
+if ! command -v bun >/dev/null 2>&1; then
+  info "Bun not found — installing..."
+  curl -fsSL https://bun.sh/install | bash
+  export BUN_INSTALL="$HOME/.bun"
+  export PATH="$BUN_INSTALL/bin:$PATH"
+fi
 
 if [ ! -e /dev/kvm ]; then
   warn "/dev/kvm not found — Firecracker requires KVM. Make sure you're on a bare-metal host or a VM with nested virtualization."
@@ -155,6 +163,46 @@ else
   fi
 fi
 
+# --- vmsan CLI ---
+
+VMSAN_CLI="$VMSAN_DIR/cli"
+VMSAN_BIN="$VMSAN_DIR/bin/vmsan"
+
+if [ -x "$VMSAN_BIN" ]; then
+  success "vmsan CLI already installed"
+else
+  info "Installing vmsan CLI..."
+  if [ -d "$VMSAN_CLI" ]; then
+    git -C "$VMSAN_CLI" pull --quiet
+  else
+    git clone --depth 1 "https://github.com/$VMSAN_REPO.git" "$VMSAN_CLI"
+  fi
+
+  (cd "$VMSAN_CLI" && bun install --frozen-lockfile 2>/dev/null && bun run build)
+
+  ln -sf "$VMSAN_CLI/dist/bin/cli.mjs" "$VMSAN_BIN"
+  success "vmsan CLI installed"
+fi
+
+# --- PATH ---
+
+SHELL_RC=""
+case "$(basename "${SHELL:-/bin/bash}")" in
+  zsh)  SHELL_RC="$HOME/.zshrc" ;;
+  *)    SHELL_RC="$HOME/.bashrc" ;;
+esac
+
+PATH_LINE='export PATH="$HOME/.vmsan/bin:$PATH"'
+
+if ! grep -qF '.vmsan/bin' "$SHELL_RC" 2>/dev/null; then
+  echo "" >> "$SHELL_RC"
+  echo "# vmsan" >> "$SHELL_RC"
+  echo "$PATH_LINE" >> "$SHELL_RC"
+  info "Added ~/.vmsan/bin to PATH in $SHELL_RC"
+else
+  success "PATH already configured"
+fi
+
 # --- summary ---
 
 echo ""
@@ -165,4 +213,13 @@ echo "  Jailer       $VMSAN_DIR/bin/jailer"
 echo "  Kernel       $VMSAN_DIR/kernels/$KERNEL_FILE"
 echo "  Rootfs       $VMSAN_DIR/rootfs/$ROOTFS_FILE"
 echo "  Agent        $AGENT_PATH"
+echo "  CLI          $VMSAN_BIN"
 echo ""
+
+# Show source hint if vmsan is not in current PATH
+if ! command -v vmsan >/dev/null 2>&1; then
+  warn "To start using vmsan, run:"
+  echo ""
+  echo "  source $SHELL_RC"
+  echo ""
+fi

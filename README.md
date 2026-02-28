@@ -110,6 +110,13 @@ vmsan remove <vm-id>
 
 ## Development
 
+To use your local build instead of the installed one, link it:
+
+```bash
+bun run build
+ln -sf "$(pwd)/dist/bin/cli.mjs" ~/.vmsan/bin/vmsan
+```
+
 ```bash
 # Dev mode (watch)
 bun run dev

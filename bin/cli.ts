@@ -1,7 +1,16 @@
 #!/usr/bin/env node
 
 import { defineCommand, runMain } from "citty";
+import { consola } from "consola";
 import { initVmsanLogger } from "../src/lib/logger/index.ts";
+
+const SUDO_COMMANDS = new Set(["create", "start", "stop", "remove", "rm"]);
+
+const subCommand = process.argv[2];
+if (subCommand && SUDO_COMMANDS.has(subCommand) && process.getuid?.() !== 0) {
+  consola.error(`"vmsan ${subCommand}" requires root. Run with: sudo env "PATH=$PATH" vmsan ${subCommand}`);
+  process.exit(1);
+}
 
 const main = defineCommand({
   meta: {

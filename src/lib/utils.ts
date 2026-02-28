@@ -1,18 +1,30 @@
 import { randomBytes } from "node:crypto";
+import { execSync } from "node:child_process";
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { stripAnsi } from "consola/utils";
 import { invalidDurationError } from "../errors/index.ts";
 
 /**
  * Send a signal to a process. Returns true if delivered, false if
- * the process is already dead (ESRCH). Re-throws unexpected errors.
+ * the process is already dead (ESRCH). Falls back to sudo for
+ * root-owned processes (EPERM). Re-throws unexpected errors.
  */
 export function safeKill(pid: number, signal: NodeJS.Signals | 0 = "SIGTERM"): boolean {
   try {
     process.kill(pid, signal);
     return true;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ESRCH") return false;
+    if (code === "EPERM") {
+      try {
+        const sig = typeof signal === "string" ? signal.replace("SIG", "") : String(signal);
+        execSync(`sudo kill -${sig} ${pid}`, { stdio: "pipe" });
+        return true;
+      } catch {
+        return false;
+      }
+    }
     throw error;
   }
 }
