@@ -4,6 +4,12 @@
 
 ### Patch Changes
 
+- docs: comment out hooks section in nuxt.config.ts to prevent runtime errors
+
+## 0.1.0
+
+### Patch Changes
+
 - Merge pull request #22 from angelorc/fix/networking-cgroup-download
 
 ## 0.1.0
