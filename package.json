@@ -44,20 +44,20 @@
     "consola": "^3.4.2",
     "evlog": "^2.0.0",
     "proper-lockfile": "^4.1.2",
-    "tar-stream": "^3.1.7",
-    "ws": "^8.18.0"
+    "tar-stream": "^3.1.8",
+    "ws": "^8.19.0"
   },
   "devDependencies": {
-    "@changesets/changelog-github": "^0.5.1",
-    "@changesets/cli": "^2.29.4",
+    "@changesets/changelog-github": "^0.5.2",
+    "@changesets/cli": "^2.29.8",
     "@types/node": "^25.3.2",
     "@types/proper-lockfile": "^4.1.4",
     "@types/tar-stream": "^3.1.4",
-    "@types/ws": "^8.18.0",
+    "@types/ws": "^8.18.1",
     "automd": "^0.4.3",
     "jiti": "^2.6.1",
     "obuild": "^0.4.31",
-    "oxfmt": "^0.31.0",
+    "oxfmt": "^0.35.0",
     "oxlint": "^1.50.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
@@ -65,5 +65,5 @@
   "engines": {
     "bun": ">=1.2"
   },
-  "packageManager": "bun@1.2.17"
+  "packageManager": "bun@1.3.10"
 }
