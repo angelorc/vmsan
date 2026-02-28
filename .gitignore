@@ -38,3 +38,5 @@ coverage/
 .env
 .env.*
 !.env.example
+
+TEST_REPORT.md

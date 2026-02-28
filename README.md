@@ -1,5 +1,15 @@
 # vmsan
 
+<!-- automd:badges color="yellow" license licenseSrc bundlephobia packagephobia -->
+
+[![npm version](https://img.shields.io/npm/v/vmsan?color=yellow)](https://npmjs.com/package/vmsan)
+[![npm downloads](https://img.shields.io/npm/dm/vmsan?color=yellow)](https://npm.chart.dev/vmsan)
+[![bundle size](https://img.shields.io/bundlephobia/minzip/vmsan?color=yellow)](https://bundlephobia.com/package/vmsan)
+[![install size](https://badgen.net/packagephobia/install/vmsan?color=yellow)](https://packagephobia.com/result?p=vmsan)
+[![license](https://img.shields.io/github/license/angelorc/vmsan?color=yellow)](https://github.com/angelorc/vmsan/blob/main/LICENSE)
+
+<!-- /automd -->
+
 Firecracker microVM sandbox toolkit. Create, manage, and connect to isolated Firecracker microVMs from the command line.
 
 ## Features
@@ -31,18 +41,36 @@ curl -fsSL https://raw.githubusercontent.com/angelorc/vmsan/main/install.sh | ba
 ```
 
 This downloads and installs into `~/.vmsan/`:
+
 - Firecracker + Jailer (latest release)
 - Linux kernel (vmlinux 6.1)
 - Ubuntu 24.04 rootfs (converted from squashfs to ext4)
 
 ### 2. Install vmsan CLI
 
-```bash
-git clone https://github.com/angelorc/vmsan.git
-cd vmsan
-bun install
-bun run build
+<!-- automd:pm-install -->
+
+```sh
+# ✨ Auto-detect
+npx nypm install vmsan
+
+# npm
+npm install vmsan
+
+# yarn
+yarn add vmsan
+
+# pnpm
+pnpm add vmsan
+
+# bun
+bun install vmsan
+
+# deno
+deno install npm:vmsan
 ```
+
+<!-- /automd -->
 
 ### 3. Build the in-VM agent
 
@@ -97,16 +125,16 @@ vmsan remove <vm-id>
 
 ### Commands
 
-| Command | Alias | Description |
-|---------|-------|-------------|
-| `create` | | Create and start a new microVM |
-| `list` | `ls` | List all VMs |
-| `start` | | Start a stopped VM |
-| `stop` | | Stop a running VM |
-| `remove` | `rm` | Remove a VM |
-| `connect` | | Open an interactive shell to a VM |
-| `upload` | | Upload files to a VM |
-| `download` | | Download files from a VM |
+| Command    | Alias | Description                       |
+| ---------- | ----- | --------------------------------- |
+| `create`   |       | Create and start a new microVM    |
+| `list`     | `ls`  | List all VMs                      |
+| `start`    |       | Start a stopped VM                |
+| `stop`     |       | Stop a running VM                 |
+| `remove`   | `rm`  | Remove a VM                       |
+| `connect`  |       | Open an interactive shell to a VM |
+| `upload`   |       | Upload files to a VM              |
+| `download` |       | Download files from a VM          |
 
 ## Development
 
@@ -170,3 +198,22 @@ State is persisted in `~/.vmsan/`:
 ## License
 
 [MIT](./LICENSE)
+
+<!-- automd:contributors author="angelorc" license="MIT" -->
+
+Published under the [MIT](https://github.com/angelorc/vmsan/blob/main/LICENSE) license.
+Made by [@angelorc](https://github.com/angelorc) and [community](https://github.com/angelorc/vmsan/graphs/contributors) 💛
+<br><br>
+<a href="https://github.com/angelorc/vmsan/graphs/contributors">
+<img src="https://contrib.rocks/image?repo=angelorc/vmsan" />
+</a>
+
+<!-- /automd -->
+
+<!-- automd:with-automd -->
+
+---
+
+_🤖 auto updated with [automd](https://automd.unjs.io)_
+
+<!-- /automd -->
