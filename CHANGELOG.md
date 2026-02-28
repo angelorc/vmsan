@@ -4,6 +4,12 @@
 
 ### Patch Changes
 
+- Merge pull request #22 from angelorc/fix/networking-cgroup-download
+
+## 0.1.0
+
+### Patch Changes
+
 - docs: remove unnecessary installation command from index
 
 ## 0.1.0
