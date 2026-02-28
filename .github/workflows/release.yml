@@ -43,12 +43,17 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: true
         run: |
-          # Check for pending changesets (ignore README.md)
+          # Auto-create changeset if none exists
           CHANGESETS=$(find .changeset -name '*.md' ! -name 'README.md' 2>/dev/null || true)
           if [ -z "$CHANGESETS" ]; then
-            echo "No changesets found, skipping"
-            echo "published=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            SUMMARY=$(git log -1 --pretty=%s)
+            cat > .changeset/auto-release.md << EOF
+          ---
+          "vmsan": patch
+          ---
+
+          ${SUMMARY}
+          EOF
           fi
 
           # Version (consumes changesets, updates CHANGELOG, bumps version)
