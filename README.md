@@ -1,5 +1,13 @@
 # vmsan
 
+<!-- automd:badges color="yellow" license licenseSrc bundlephobia packagephobia -->
+
+[![npm version](https://img.shields.io/npm/v/vmsan?color=yellow)](https://npmjs.com/package/vmsan)
+[![npm downloads](https://img.shields.io/npm/dm/vmsan?color=yellow)](https://npm.chart.dev/vmsan)
+[![license](https://img.shields.io/github/license/angelorc/vmsan?color=yellow)](https://github.com/angelorc/vmsan/blob/main/LICENSE)
+
+<!-- /automd -->
+
 Firecracker microVM sandbox toolkit. Create, manage, and connect to isolated Firecracker microVMs from the command line.
 
 ## Features
@@ -37,12 +45,26 @@ This downloads and installs into `~/.vmsan/`:
 
 ### 2. Install vmsan CLI
 
-```bash
-git clone https://github.com/angelorc/vmsan.git
-cd vmsan
-bun install
-bun run build
+<!-- automd:pm-install -->
+
+```sh
+# ✨ Auto-detect
+npx nypm install vmsan
+
+# npm
+npm install vmsan
+
+# yarn
+yarn add vmsan
+
+# pnpm
+pnpm install vmsan
+
+# bun
+bun install vmsan
 ```
+
+<!-- /automd -->
 
 ### 3. Build the in-VM agent
 
@@ -170,3 +192,15 @@ State is persisted in `~/.vmsan/`:
 ## License
 
 [MIT](./LICENSE)
+
+<!-- automd:contributors author="angelorc" license="MIT" -->
+
+<!-- /automd -->
+
+<!-- automd:with-automd -->
+
+---
+
+_🤖 auto updated with [automd](https://automd.unjs.io)_
+
+<!-- /automd -->
