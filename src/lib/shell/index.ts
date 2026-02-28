@@ -1,5 +1,5 @@
 export { ShellSession, connectShell } from "./client.ts";
-export type { ShellSessionOptions } from "./client.ts";
+export type { ShellSessionOptions, ShellCloseInfo } from "./client.ts";
 export {
   MsgData,
   MsgResize,

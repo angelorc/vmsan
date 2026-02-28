@@ -70,26 +70,23 @@ const connectCommand = defineCommand({
         sessionId: args.session,
       });
 
-      // Start connection; session ID arrives via text frame before shell I/O.
-      const connectPromise = shell.connect();
-
-      // Poll briefly for session ID so we can log it before interactive use.
-      const deadline = Date.now() + 2000;
-      while (!shell.sessionId && Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 50));
-      }
-      if (shell.sessionId) {
-        consola.debug(`Shell session established: ${shell.sessionId}`);
-        log.info(`Session ID: ${shell.sessionId} (use --session to reattach)`);
-      }
-
-      await connectPromise;
+      const closeInfo = await shell.connect();
 
       cmdLog.set({ vmId: args.vmId, method: "pty" });
       cmdLog.emit();
+
+      if (!closeInfo.sessionDestroyed && shell.sessionId) {
+        const dim = "\x1b[2m";
+        const reset = "\x1b[0m";
+        process.stderr.write(
+          `\n${dim}Resume this session with:\n  vmsan connect ${args.vmId} --session ${shell.sessionId}${reset}\n`,
+        );
+      }
+
+      process.exit(0);
     } catch (error) {
       handleCommandError(error, cmdLog);
-      process.exitCode = 1;
+      process.exit(1);
     }
   },
 });

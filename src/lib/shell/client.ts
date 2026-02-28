@@ -16,6 +16,11 @@ export interface ShellSessionOptions {
   sessionId?: string;
 }
 
+export interface ShellCloseInfo {
+  /** true when the shell process exited (e.g. user typed `exit`) */
+  sessionDestroyed: boolean;
+}
+
 export class ShellSession {
   private _sessionId: string | null;
   private ws: WebSocket | null = null;
@@ -30,7 +35,7 @@ export class ShellSession {
   }
 
   /** Connect to the shell. Resolves when WebSocket closes. */
-  connect(): Promise<void> {
+  connect(): Promise<ShellCloseInfo> {
     return new Promise((resolve, reject) => {
       const url = this.buildUrl();
       this.ws = new WebSocket(url);
@@ -69,6 +74,9 @@ export class ShellSession {
         process.removeListener("exit", exitHandler);
         process.stdin.pause();
         process.stdin.unref();
+        if (this.ws) {
+          this.ws.terminate();
+        }
       };
 
       this.ws.on("open", () => {
@@ -106,9 +114,11 @@ export class ShellSession {
         }
       });
 
-      this.ws.on("close", () => {
+      this.ws.on("close", (_code: number, reason: Buffer) => {
         cleanup();
-        resolve();
+        resolve({
+          sessionDestroyed: reason.toString() === "session destroyed",
+        });
       });
 
       this.ws.on("error", (err) => {
@@ -146,7 +156,7 @@ export function connectShell(opts: {
   wsUrl: string;
   token: string;
   shell?: string;
-}): Promise<void> {
+}): Promise<ShellCloseInfo> {
   const parsed = new URL(opts.wsUrl);
   const session = new ShellSession({
     host: parsed.hostname,

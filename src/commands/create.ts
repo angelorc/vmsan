@@ -317,7 +317,15 @@ const createCommand = defineCommand({
           token: agentToken,
         });
 
-        await shell.connect();
+        const closeInfo = await shell.connect();
+
+        if (!closeInfo.sessionDestroyed && shell.sessionId) {
+          const dim = "\x1b[2m";
+          const reset = "\x1b[0m";
+          process.stderr.write(
+            `\n${dim}Resume this session with:\n  vmsan connect ${lifecycle.vmId} --session ${shell.sessionId}${reset}\n`,
+          );
+        }
       }
     } catch (error) {
       if (lifecycle.vmId) {

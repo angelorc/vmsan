@@ -263,11 +263,9 @@ func (s *Session) destroy() {
 		s.logger.Info("destroying session")
 
 		s.cancelInactivityTimer()
-		s.cancel()
 
-		s.cmd.Process.Kill()
-		s.ptmx.Close()
-
+		// Snapshot subscribers BEFORE cancelling the context so the
+		// write-pump goroutines haven't exited and removed themselves yet.
 		s.subscribersMu.RLock()
 		subs := make([]*subscriber, 0, len(s.subscribers))
 		for _, sub := range s.subscribers {
@@ -275,9 +273,19 @@ func (s *Session) destroy() {
 		}
 		s.subscribersMu.RUnlock()
 
+		// Send close frames while connections are still live.
 		for _, sub := range subs {
+			sub.writer.conn.SetWriteDeadline(time.Now().Add(200 * time.Millisecond))
 			sub.writer.WriteClose(websocket.CloseNormalClosure, "session destroyed")
 		}
+		for _, sub := range subs {
+			sub.writer.conn.Close()
+		}
+
+		// Now cancel the context and tear down the PTY.
+		s.cancel()
+		s.cmd.Process.Kill()
+		s.ptmx.Close()
 
 		if s.onDestroy != nil {
 			s.onDestroy(s.ID)
