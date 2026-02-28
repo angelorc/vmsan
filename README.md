@@ -4,6 +4,8 @@
 
 [![npm version](https://img.shields.io/npm/v/vmsan?color=yellow)](https://npmjs.com/package/vmsan)
 [![npm downloads](https://img.shields.io/npm/dm/vmsan?color=yellow)](https://npm.chart.dev/vmsan)
+[![bundle size](https://img.shields.io/bundlephobia/minzip/vmsan?color=yellow)](https://bundlephobia.com/package/vmsan)
+[![install size](https://badgen.net/packagephobia/install/vmsan?color=yellow)](https://packagephobia.com/result?p=vmsan)
 [![license](https://img.shields.io/github/license/angelorc/vmsan?color=yellow)](https://github.com/angelorc/vmsan/blob/main/LICENSE)
 
 <!-- /automd -->
@@ -59,10 +61,13 @@ npm install vmsan
 yarn add vmsan
 
 # pnpm
-pnpm install vmsan
+pnpm add vmsan
 
 # bun
 bun install vmsan
+
+# deno
+deno install npm:vmsan
 ```
 
 <!-- /automd -->
@@ -195,6 +200,13 @@ State is persisted in `~/.vmsan/`:
 [MIT](./LICENSE)
 
 <!-- automd:contributors author="angelorc" license="MIT" -->
+
+Published under the [MIT](https://github.com/angelorc/vmsan/blob/main/LICENSE) license.
+Made by [@angelorc](https://github.com/angelorc) and [community](https://github.com/angelorc/vmsan/graphs/contributors) 💛
+<br><br>
+<a href="https://github.com/angelorc/vmsan/graphs/contributors">
+<img src="https://contrib.rocks/image?repo=angelorc/vmsan" />
+</a>
 
 <!-- /automd -->
 
