@@ -265,12 +265,16 @@ description: Download vmsan today. Spin up your first Firecracker microVM in und
 
 #links
 ::::u-button
+
 ---
+
 color: primary
 size: xl
 to: /getting-started/introduction
 trailing-icon: i-lucide-arrow-right
+
 ---
+
 Read the documentation
 ::::
 
