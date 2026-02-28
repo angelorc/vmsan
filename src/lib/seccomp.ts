@@ -1,8 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, copyFileSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { consola } from "consola";
 import type { VmsanPaths } from "../paths.ts";
+
+const _dirname = dirname(fileURLToPath(import.meta.url));
 
 const VALID_ARCHES = ["x86_64", "aarch64"] as const;
 const MAX_FILTER_SIZE = 1_048_576; // 1 MB
@@ -50,8 +53,7 @@ export function ensureSeccompFilter(paths: VmsanPaths): string | null {
     return bpfPath;
   }
 
-  // __dirname works in bun (see welcome-page.ts:111 for precedent)
-  const bundledJson = join(dirname(dirname(__dirname)), "seccomp", "default.json");
+  const bundledJson = join(dirname(dirname(_dirname)), "seccomp", "default.json");
   const userJson = paths.seccompFilter;
 
   let sourceJson: string | null = null;

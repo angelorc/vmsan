@@ -1,8 +1,25 @@
 #!/usr/bin/env node
 
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineCommand, runMain } from "citty";
 import { consola } from "consola";
 import { initVmsanLogger } from "../src/lib/logger/index.ts";
+
+function findPackageVersion(): string {
+  let dir = dirname(fileURLToPath(import.meta.url));
+  while (dir !== dirname(dir)) {
+    const pkgPath = join(dir, "package.json");
+    if (existsSync(pkgPath)) {
+      return JSON.parse(readFileSync(pkgPath, "utf8")).version;
+    }
+    dir = dirname(dir);
+  }
+  return "0.0.0";
+}
+
+const version = findPackageVersion();
 
 const SUDO_COMMANDS = new Set(["create", "start", "stop", "remove", "rm"]);
 
@@ -17,7 +34,7 @@ if (subCommand && SUDO_COMMANDS.has(subCommand) && process.getuid?.() !== 0) {
 const main = defineCommand({
   meta: {
     name: "vmsan",
-    version: "0.1.0",
+    version,
     description: "Firecracker microVM sandbox toolkit",
   },
   args: {

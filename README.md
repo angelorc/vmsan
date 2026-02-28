@@ -40,6 +40,12 @@ Firecracker microVM sandbox toolkit. Create, manage, and connect to isolated Fir
 curl -fsSL https://raw.githubusercontent.com/angelorc/vmsan/main/install.sh | bash
 ```
 
+To uninstall:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/angelorc/vmsan/main/install.sh | bash -s -- --uninstall
+```
+
 This downloads and installs into `~/.vmsan/`:
 
 - Firecracker + Jailer (latest release)
