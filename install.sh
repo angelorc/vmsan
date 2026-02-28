@@ -198,7 +198,7 @@ fi
 # --- latest release tag ---
 
 info "Fetching latest release tag..."
-LATEST_TAG=$(curl -fsSL "https://api.github.com/repos/$VMSAN_REPO/releases/latest" | grep -oP '"tag_name":\s*"\K[^"]+')
+LATEST_TAG=$(curl -fsSL "https://api.github.com/repos/$VMSAN_REPO/releases" | grep -oP '"tag_name":\s*"\K[^"]+' | head -1)
 [ -n "$LATEST_TAG" ] || error "Could not determine latest release tag"
 success "Latest release: $LATEST_TAG"
 
