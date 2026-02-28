@@ -48,5 +48,10 @@ jobs:
         if: steps.changesets.outputs.published == 'true'
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          git tag "v${VERSION}"
-          git push origin "v${VERSION}"
+          TAG="v${VERSION}"
+          if git ls-remote --tags origin "$TAG" | grep -q "$TAG"; then
+            echo "Tag $TAG already exists, skipping"
+          else
+            git tag "$TAG"
+            git push origin "$TAG"
+          fi
