@@ -2,7 +2,9 @@
 set -euo pipefail
 
 # vmsan installer — downloads Firecracker, kernel, rootfs, and vmsan-agent.
-# Usage: curl -fsSL https://raw.githubusercontent.com/angelorc/vmsan/main/install.sh | bash
+# Usage:
+#   Install: curl -fsSL https://raw.githubusercontent.com/angelorc/vmsan/main/install.sh | bash
+#   Uninstall: curl -fsSL https://raw.githubusercontent.com/angelorc/vmsan/main/install.sh | bash -s -- --uninstall
 
 VMSAN_DIR="${VMSAN_DIR:-$HOME/.vmsan}"
 VMSAN_REPO="angelorc/vmsan"
@@ -25,6 +27,35 @@ download() {
   curl -fsSL -o "$dest" "$url"
 }
 
+# --- uninstall ---
+
+if [ "${1:-}" = "--uninstall" ]; then
+  echo ""
+  echo "  vmsan uninstaller"
+  echo ""
+
+  if command -v vmsan >/dev/null 2>&1; then
+    info "Removing vmsan CLI (npm global)..."
+    npm uninstall -g vmsan
+    success "vmsan CLI removed"
+  else
+    success "vmsan CLI not installed"
+  fi
+
+  if [ -d "$VMSAN_DIR" ]; then
+    info "Removing $VMSAN_DIR..."
+    rm -rf "$VMSAN_DIR"
+    success "$VMSAN_DIR removed"
+  else
+    success "$VMSAN_DIR not found"
+  fi
+
+  echo ""
+  success "vmsan has been uninstalled"
+  echo ""
+  exit 0
+fi
+
 # --- banner ---
 
 echo ""
@@ -39,7 +70,6 @@ echo ""
 [ "$ARCH" = "x86_64" ] || [ "$ARCH" = "aarch64" ] || error "Unsupported architecture: $ARCH"
 need_cmd curl
 need_cmd tar
-need_cmd git
 
 # --- prerequisites ---
 
@@ -66,11 +96,11 @@ if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
   success "Prerequisites installed"
 fi
 
-if ! command -v bun >/dev/null 2>&1; then
-  info "Bun not found — installing..."
-  curl -fsSL https://bun.sh/install | bash
-  export BUN_INSTALL="$HOME/.bun"
-  export PATH="$BUN_INSTALL/bin:$PATH"
+if ! command -v node >/dev/null 2>&1; then
+  info "Node.js not found — installing Node.js 22 via NodeSource..."
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+  apt-get install -y -qq nodejs >/dev/null 2>&1
+  success "Node.js $(node --version) installed"
 fi
 
 if [ ! -e /dev/kvm ]; then
@@ -165,6 +195,18 @@ else
   success "Rootfs installed ($ROOTFS_FILE, ${IMAGE_MB} MB)"
 fi
 
+# --- vmsan CLI ---
+
+if command -v vmsan >/dev/null 2>&1; then
+  VMSAN_VER=$(vmsan --version 2>/dev/null || echo "unknown")
+  success "vmsan CLI already installed ($VMSAN_VER)"
+else
+  info "Installing vmsan CLI via npm..."
+  npm install -g vmsan@latest
+  VMSAN_VER=$(vmsan --version 2>/dev/null || echo "unknown")
+  success "vmsan CLI installed ($VMSAN_VER)"
+fi
+
 # --- vmsan-agent ---
 
 AGENT_PATH="$VMSAN_DIR/bin/vmsan-agent"
@@ -172,60 +214,10 @@ AGENT_PATH="$VMSAN_DIR/bin/vmsan-agent"
 if [ -x "$AGENT_PATH" ]; then
   success "vmsan-agent already installed"
 else
-  # Download prebuilt binary from GitHub releases
-  info "Fetching latest vmsan release..."
-  VMSAN_VER=$(curl -fsSI "https://github.com/$VMSAN_REPO/releases/latest" 2>&1 \
-    | sed -n 's/.*tag\/\(v[0-9.]*\).*/\1/p')
-
-  if [ -n "$VMSAN_VER" ]; then
-    AGENT_URL="https://github.com/$VMSAN_REPO/releases/download/${VMSAN_VER}/vmsan-agent-${ARCH}"
-    download "$AGENT_URL" "$AGENT_PATH"
-    chmod +x "$AGENT_PATH"
-    success "vmsan-agent $VMSAN_VER installed"
-  else
-    warn "vmsan-agent not installed — no release found."
-    warn "Create a release with: git tag v0.1.0 && git push --tags"
-  fi
-fi
-
-# --- vmsan CLI ---
-
-VMSAN_CLI="$VMSAN_DIR/cli"
-VMSAN_BIN="$VMSAN_DIR/bin/vmsan"
-
-if [ -x "$VMSAN_BIN" ]; then
-  success "vmsan CLI already installed"
-else
-  info "Installing vmsan CLI..."
-  if [ -d "$VMSAN_CLI" ]; then
-    git -C "$VMSAN_CLI" pull --quiet
-  else
-    git clone --depth 1 "https://github.com/$VMSAN_REPO.git" "$VMSAN_CLI"
-  fi
-
-  (cd "$VMSAN_CLI" && bun install --frozen-lockfile 2>/dev/null && bun run build)
-
-  ln -sf "$VMSAN_CLI/dist/bin/cli.mjs" "$VMSAN_BIN"
-  success "vmsan CLI installed"
-fi
-
-# --- PATH ---
-
-SHELL_RC=""
-case "$(basename "${SHELL:-/bin/bash}")" in
-  zsh)  SHELL_RC="$HOME/.zshrc" ;;
-  *)    SHELL_RC="$HOME/.bashrc" ;;
-esac
-
-PATH_LINE='export PATH="$HOME/.vmsan/bin:$PATH"'
-
-if ! grep -qF '.vmsan/bin' "$SHELL_RC" 2>/dev/null; then
-  echo "" >> "$SHELL_RC"
-  echo "# vmsan" >> "$SHELL_RC"
-  echo "$PATH_LINE" >> "$SHELL_RC"
-  info "Added ~/.vmsan/bin to PATH in $SHELL_RC"
-else
-  success "PATH already configured"
+  AGENT_URL="https://github.com/$VMSAN_REPO/releases/download/v${VMSAN_VER}/vmsan-agent-${ARCH}"
+  download "$AGENT_URL" "$AGENT_PATH"
+  chmod +x "$AGENT_PATH"
+  success "vmsan-agent v${VMSAN_VER} installed"
 fi
 
 # --- summary ---
@@ -238,13 +230,5 @@ echo "  Jailer       $VMSAN_DIR/bin/jailer"
 echo "  Kernel       $VMSAN_DIR/kernels/$KERNEL_FILE"
 echo "  Rootfs       $VMSAN_DIR/rootfs/$ROOTFS_FILE"
 echo "  Agent        $AGENT_PATH"
-echo "  CLI          $VMSAN_BIN"
+echo "  CLI          $(command -v vmsan 2>/dev/null || echo 'vmsan (npm global)')"
 echo ""
-
-# Show source hint if vmsan is not in current PATH
-if ! command -v vmsan >/dev/null 2>&1; then
-  warn "To start using vmsan, run:"
-  echo ""
-  echo "  source $SHELL_RC"
-  echo ""
-fi

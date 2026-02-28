@@ -14,7 +14,7 @@ import (
 	"github.com/angelorc/vmsan/agent/shell"
 )
 
-const version = "0.1.0"
+var version = "dev"
 
 func auditMiddleware(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
