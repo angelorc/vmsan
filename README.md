@@ -39,6 +39,7 @@ curl -fsSL https://raw.githubusercontent.com/angelorc/vmsan/main/install.sh | ba
 ```
 
 This downloads and installs into `~/.vmsan/`:
+
 - Firecracker + Jailer (latest release)
 - Linux kernel (vmlinux 6.1)
 - Ubuntu 24.04 rootfs (converted from squashfs to ext4)
@@ -119,16 +120,16 @@ vmsan remove <vm-id>
 
 ### Commands
 
-| Command | Alias | Description |
-|---------|-------|-------------|
-| `create` | | Create and start a new microVM |
-| `list` | `ls` | List all VMs |
-| `start` | | Start a stopped VM |
-| `stop` | | Stop a running VM |
-| `remove` | `rm` | Remove a VM |
-| `connect` | | Open an interactive shell to a VM |
-| `upload` | | Upload files to a VM |
-| `download` | | Download files from a VM |
+| Command    | Alias | Description                       |
+| ---------- | ----- | --------------------------------- |
+| `create`   |       | Create and start a new microVM    |
+| `list`     | `ls`  | List all VMs                      |
+| `start`    |       | Start a stopped VM                |
+| `stop`     |       | Stop a running VM                 |
+| `remove`   | `rm`  | Remove a VM                       |
+| `connect`  |       | Open an interactive shell to a VM |
+| `upload`   |       | Upload files to a VM              |
+| `download` |       | Download files from a VM          |
 
 ## Development
 
