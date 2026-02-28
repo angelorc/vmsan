@@ -1,0 +1,45 @@
+export type ValidationErrorCode =
+  | "ERR_VALIDATION_INTEGER"
+  | "ERR_VALIDATION_RUNTIME"
+  | "ERR_VALIDATION_NETWORK_POLICY"
+  | "ERR_VALIDATION_PORT"
+  | "ERR_VALIDATION_PORT_CONFLICT"
+  | "ERR_VALIDATION_DOMAIN"
+  | "ERR_VALIDATION_CIDR"
+  | "ERR_VALIDATION_IMAGE_REF"
+  | "ERR_VALIDATION_DISK_SIZE"
+  | "ERR_VALIDATION_DURATION"
+  | "ERR_VALIDATION_FLAGS"
+  | "ERR_VALIDATION_POLICY_CONFLICT";
+
+export type VmErrorCode =
+  | "ERR_VM_NOT_FOUND"
+  | "ERR_VM_STATE_NOT_FOUND"
+  | "ERR_VM_NOT_STOPPED"
+  | "ERR_VM_CHROOT_NOT_FOUND"
+  | "ERR_VM_NETWORK_SLOTS_EXHAUSTED"
+  | "ERR_VM_SNAPSHOT_NOT_FOUND";
+
+export type FirecrackerErrorCode = "ERR_FIRECRACKER_API";
+
+export type NetworkErrorCode = "ERR_NETWORK_DEFAULT_INTERFACE";
+
+export type TimeoutErrorCode =
+  | "ERR_TIMEOUT_SOCKET"
+  | "ERR_TIMEOUT_LOCK"
+  | "ERR_TIMEOUT_AGENT";
+
+export type SetupErrorCode =
+  | "ERR_SETUP_MISSING_BINARY"
+  | "ERR_SETUP_NO_KERNEL_DIR"
+  | "ERR_SETUP_NO_KERNEL"
+  | "ERR_SETUP_NO_ROOTFS_DIR"
+  | "ERR_SETUP_NO_EXT4_ROOTFS";
+
+export type VmsanErrorCode =
+  | ValidationErrorCode
+  | VmErrorCode
+  | FirecrackerErrorCode
+  | NetworkErrorCode
+  | TimeoutErrorCode
+  | SetupErrorCode;

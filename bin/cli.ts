@@ -1,0 +1,42 @@
+#!/usr/bin/env node
+
+import { defineCommand, runMain } from "citty";
+import { initVmsanLogger } from "../src/lib/logger/index.ts";
+
+const main = defineCommand({
+  meta: {
+    name: "vmsan",
+    version: "0.1.0",
+    description: "Firecracker microVM sandbox toolkit",
+  },
+  args: {
+    json: {
+      type: "boolean",
+      default: false,
+      description: "Output structured JSON (one event per command)",
+    },
+    verbose: {
+      type: "boolean",
+      default: false,
+      description: "Show detailed debug output with wide event tree",
+    },
+  },
+  setup({ args }) {
+    const mode = args.json ? "json" : args.verbose ? "verbose" : "normal";
+    initVmsanLogger(mode);
+  },
+  subCommands: {
+    create: () => import("../src/commands/create.ts").then((m) => m.default),
+    list: () => import("../src/commands/list.ts").then((m) => m.default),
+    ls: () => import("../src/commands/list.ts").then((m) => m.default),
+    start: () => import("../src/commands/start.ts").then((m) => m.default),
+    stop: () => import("../src/commands/stop.ts").then((m) => m.default),
+    remove: () => import("../src/commands/remove.ts").then((m) => m.default),
+    rm: () => import("../src/commands/remove.ts").then((m) => m.default),
+    connect: () => import("../src/commands/connect.ts").then((m) => m.default),
+    upload: () => import("../src/commands/upload.ts").then((m) => m.default),
+    download: () => import("../src/commands/download.ts").then((m) => m.default),
+  },
+});
+
+runMain(main);
