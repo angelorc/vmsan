@@ -87,8 +87,7 @@ const downloadCommand = defineCommand({
       if (args.dest) {
         const resolved = resolve(args.dest);
         const isDir =
-          args.dest.endsWith("/") ||
-          (existsSync(resolved) && statSync(resolved).isDirectory());
+          args.dest.endsWith("/") || (existsSync(resolved) && statSync(resolved).isDirectory());
         if (isDir) {
           mkdirSync(resolved, { recursive: true });
           localPath = join(resolved, basename(remotePath));

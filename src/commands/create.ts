@@ -279,11 +279,7 @@ const createCommand = defineCommand({
         await vm.boot("kernel/vmlinux", bootArgs);
         await vm.addDrive("rootfs", "rootfs/rootfs.ext4", true, false);
         await vm.configure(parsedInput.vcpus, parsedInput.memMib);
-        await vm.addNetwork(
-          "eth0",
-          networkConfig.tapDevice,
-          networkConfig.macAddress,
-        );
+        await vm.addNetwork("eth0", networkConfig.tapDevice, networkConfig.macAddress);
 
         log.start("Starting VM...");
         await vm.start();
