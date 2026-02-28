@@ -4,6 +4,12 @@
 
 ### Patch Changes
 
+- docs: remove unnecessary installation command from index
+
+## 0.1.0
+
+### Patch Changes
+
 - Merge pull request #21 from angelorc/docs/add-documentation-site
 
 ## 0.1.0
