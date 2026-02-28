@@ -8,8 +8,8 @@
     "preview": "nuxt preview --extends docus"
   },
   "dependencies": {
-    "docus": "5.6.1",
     "better-sqlite3": "^12.5.0",
+    "docus": "5.6.1",
     "nuxt": "^4.2.2"
   }
 }
