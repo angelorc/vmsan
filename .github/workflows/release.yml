@@ -35,6 +35,7 @@ jobs:
       - run: bun run build
 
       - uses: changesets/action@v1
+        id: changesets
         with:
           version: bash scripts/version.sh
           publish: bunx changeset publish
@@ -42,3 +43,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: true
+
+      - name: Tag release for agent build
+        if: steps.changesets.outputs.published == 'true'
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          git tag "v${VERSION}"
+          git push origin "v${VERSION}"
