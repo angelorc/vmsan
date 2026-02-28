@@ -113,7 +113,10 @@ export class FileVmStateStore implements VmStateStore {
     const slots = new Set<number>();
     try {
       for (const iface of readdirSync("/sys/class/net")) {
-        const match = /^fhvm(\d+)$/.exec(iface);
+        // Match TAP devices (fhvmN) and veth host ends (veth-h-N)
+        const tapMatch = /^fhvm(\d+)$/.exec(iface);
+        const vethMatch = /^veth-h-(\d+)$/.exec(iface);
+        const match = tapMatch || vethMatch;
         if (!match) continue;
         const slot = Number(match[1]);
         if (Number.isInteger(slot) && slot >= 0 && slot <= 254) {

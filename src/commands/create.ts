@@ -11,8 +11,9 @@ import { mutuallyExclusiveFlagsError, handleCommandError } from "../errors/index
 import { generateVmId } from "../lib/utils.ts";
 import { FileVmStateStore } from "../lib/vm-state.ts";
 import { FirecrackerClient } from "../services/firecracker.ts";
-import { Jailer, type CgroupConfig } from "../lib/jailer.ts";
+import { Jailer, type CgroupConfig, CGROUP_VMM_OVERHEAD_MIB } from "../lib/jailer.ts";
 import { NetworkManager } from "../lib/network.ts";
+import { FileLock } from "../lib/file-lock.ts";
 import { createCommandArgs } from "./create/args.ts";
 import {
   cleanupChroot,
@@ -132,58 +133,66 @@ const createCommand = defineCommand({
 
       lifecycle.vmId = generateVmId();
       const log = createScopedLogger(lifecycle.vmId);
-      const slot = store.allocateNetworkSlot();
-      consola.debug(`Network slot allocated: ${slot}`);
-      const netnsName = commandArgs["no-netns"] ? undefined : `vmsan-${lifecycle.vmId}`;
-      const net = new NetworkManager(
-        slot,
-        parsedInput.networkPolicy,
-        parsedInput.domains,
-        parsedInput.allowedCidrs,
-        parsedInput.deniedCidrs,
-        parsedInput.ports,
-        bandwidthMbit,
-        netnsName,
-      );
-      lifecycle.networkConfig = net.config;
-
       log.start(`Creating VM ${lifecycle.vmId}...`);
 
-      // Generate agent token if binary is available.
+      // Lock slot allocation + state save to prevent concurrent creates from
+      // claiming the same network slot (veth pair race condition).
+      const vmId = lifecycle.vmId;
+      const netnsName = commandArgs["no-netns"] ? undefined : `vmsan-${vmId}`;
       const agentToken = existsSync(paths.agentBin) ? randomBytes(32).toString("hex") : null;
 
-      const state = buildInitialVmState({
-        vmId: lifecycle.vmId,
-        project: commandArgs.project || "",
-        runtime: parsedInput.runtime,
-        diskSizeGb: parsedInput.diskSizeGb,
-        kernelPath,
-        rootfsPath,
-        vcpus: parsedInput.vcpus,
-        memMib: parsedInput.memMib,
-        networkPolicy: parsedInput.networkPolicy,
-        domains: parsedInput.domains,
-        allowedCidrs: parsedInput.allowedCidrs,
-        deniedCidrs: parsedInput.deniedCidrs,
-        ports: parsedInput.ports,
-        tapDevice: lifecycle.networkConfig.tapDevice,
-        hostIp: lifecycle.networkConfig.hostIp,
-        guestIp: lifecycle.networkConfig.guestIp,
-        subnetMask: lifecycle.networkConfig.subnetMask,
-        macAddress: lifecycle.networkConfig.macAddress,
-        snapshotId: parsedInput.snapshotId,
-        timeoutMs: parsedInput.timeoutMs,
-        agentToken,
-        agentPort: paths.agentPort,
-        bandwidthMbit,
-        netnsName,
+      const slotLock = new FileLock(join(paths.vmsDir, ".slot-lock"), "slot-alloc");
+      const { net } = slotLock.run(() => {
+        const slot = store.allocateNetworkSlot();
+        consola.debug(`Network slot allocated: ${slot}`);
+        const net = new NetworkManager(
+          slot,
+          parsedInput.networkPolicy,
+          parsedInput.domains,
+          parsedInput.allowedCidrs,
+          parsedInput.deniedCidrs,
+          parsedInput.ports,
+          bandwidthMbit,
+          netnsName,
+        );
+        lifecycle.networkConfig = net.config;
+
+        const state = buildInitialVmState({
+          vmId,
+          project: commandArgs.project || "",
+          runtime: parsedInput.runtime,
+          diskSizeGb: parsedInput.diskSizeGb,
+          kernelPath,
+          rootfsPath,
+          vcpus: parsedInput.vcpus,
+          memMib: parsedInput.memMib,
+          networkPolicy: parsedInput.networkPolicy,
+          domains: parsedInput.domains,
+          allowedCidrs: parsedInput.allowedCidrs,
+          deniedCidrs: parsedInput.deniedCidrs,
+          ports: parsedInput.ports,
+          tapDevice: net.config.tapDevice,
+          hostIp: net.config.hostIp,
+          guestIp: net.config.guestIp,
+          subnetMask: net.config.subnetMask,
+          macAddress: net.config.macAddress,
+          snapshotId: parsedInput.snapshotId,
+          timeoutMs: parsedInput.timeoutMs,
+          agentToken,
+          agentPort: paths.agentPort,
+          bandwidthMbit,
+          netnsName,
+        });
+        store.save(state);
+
+        return { net };
       });
-      store.save(state);
+      const networkConfig = lifecycle.networkConfig!;
 
       log.start("Setting up networking...");
       await net.setup();
       log.success(
-        `Network: TAP ${lifecycle.networkConfig.tapDevice}, Host ${lifecycle.networkConfig.hostIp}, Guest ${lifecycle.networkConfig.guestIp}`,
+        `Network: TAP ${networkConfig.tapDevice}, Host ${networkConfig.hostIp}, Guest ${networkConfig.guestIp}`,
       );
 
       log.start("Preparing chroot...");
@@ -240,7 +249,7 @@ const createCommand = defineCommand({
         : {
             cpuQuotaUs: parsedInput.vcpus * 100000,
             cpuPeriodUs: 100000,
-            memoryBytes: parsedInput.memMib * 1024 * 1024,
+            memoryBytes: (parsedInput.memMib + CGROUP_VMM_OVERHEAD_MIB) * 1024 * 1024,
           };
 
       jailer.spawn({
@@ -265,15 +274,15 @@ const createCommand = defineCommand({
         await vm.resume();
         log.success("Snapshot restored and VM resumed");
       } else {
-        const bootArgs = NetworkManager.bootArgs(slot);
+        const bootArgs = NetworkManager.bootArgs(networkConfig.slot);
         consola.debug(`Boot args: ${bootArgs}`);
         await vm.boot("kernel/vmlinux", bootArgs);
         await vm.addDrive("rootfs", "rootfs/rootfs.ext4", true, false);
         await vm.configure(parsedInput.vcpus, parsedInput.memMib);
         await vm.addNetwork(
           "eth0",
-          lifecycle.networkConfig.tapDevice,
-          lifecycle.networkConfig.macAddress,
+          networkConfig.tapDevice,
+          networkConfig.macAddress,
         );
 
         log.start("Starting VM...");
@@ -327,10 +336,10 @@ const createCommand = defineCommand({
         timeout: commandArgs.timeout,
         socketPath: jailerPaths.socketPath,
         chrootDir: jailerPaths.chrootDir,
-        tapDevice: lifecycle.networkConfig.tapDevice,
-        hostIp: lifecycle.networkConfig.hostIp,
-        guestIp: lifecycle.networkConfig.guestIp,
-        macAddress: lifecycle.networkConfig.macAddress,
+        tapDevice: networkConfig.tapDevice,
+        hostIp: networkConfig.hostIp,
+        guestIp: networkConfig.guestIp,
+        macAddress: networkConfig.macAddress,
         stateFilePath: join(paths.vmsDir, `${lifecycle.vmId}.json`),
       });
       log.box(summaryLines.join("\n"));
@@ -341,7 +350,7 @@ const createCommand = defineCommand({
         memMib: parsedInput.memMib,
         runtime: parsedInput.runtime,
         networkPolicy: parsedInput.networkPolicy,
-        guestIp: lifecycle.networkConfig.guestIp,
+        guestIp: networkConfig.guestIp,
         pid,
         kernel: kernelPath,
         rootfs: rootfsPath,
@@ -351,11 +360,11 @@ const createCommand = defineCommand({
 
       if (commandArgs.connect && lifecycle.networkConfig && agentToken) {
         log.start("Waiting for agent to become ready...");
-        await waitForAgent(lifecycle.networkConfig.guestIp, paths.agentPort);
+        await waitForAgent(networkConfig.guestIp, paths.agentPort);
         log.success("Agent is ready. Connecting via PTY shell...");
 
         const shell = new ShellSession({
-          host: lifecycle.networkConfig.guestIp,
+          host: networkConfig.guestIp,
           port: paths.agentPort,
           token: agentToken,
         });

@@ -1,7 +1,7 @@
 import type { CommandDef } from "citty";
 import { defineCommand } from "citty";
-import { writeFileSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 import { consola } from "consola";
 import { vmsanPaths } from "../paths.ts";
 import { createCommandLogger } from "../lib/logger/index.ts";
@@ -83,7 +83,21 @@ const downloadCommand = defineCommand({
         return;
       }
 
-      const localPath = args.dest ? resolve(args.dest) : resolve(basename(remotePath));
+      let localPath: string;
+      if (args.dest) {
+        const resolved = resolve(args.dest);
+        const isDir =
+          args.dest.endsWith("/") ||
+          (existsSync(resolved) && statSync(resolved).isDirectory());
+        if (isDir) {
+          mkdirSync(resolved, { recursive: true });
+          localPath = join(resolved, basename(remotePath));
+        } else {
+          localPath = resolved;
+        }
+      } else {
+        localPath = resolve(basename(remotePath));
+      }
       writeFileSync(localPath, data);
 
       log.success(`Downloaded to ${localPath} (${data.length} bytes)`);

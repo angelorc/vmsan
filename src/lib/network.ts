@@ -19,6 +19,9 @@ export interface NetworkConfig {
   netnsName?: string;
 }
 
+// DNS resolvers the VM uses (Google Public DNS)
+const DNS_RESOLVERS = ["8.8.8.8", "8.8.4.4"];
+
 // Well-known DoH/DoQ resolver IPs (Google, Cloudflare, Quad9, OpenDNS, CleanBrowsing)
 const DOH_RESOLVER_IPS = [
   "8.8.8.8",
@@ -107,7 +110,7 @@ export class NetworkManager {
 
   static bootArgs(slot: number): string {
     const hostIp = `172.16.${slot}.1`;
-    return `console=ttyS0 reboot=k panic=1 pci=off ip=172.16.${slot}.2::${hostIp}:255.255.255.252::eth0:off:${hostIp}`;
+    return `console=ttyS0 reboot=k panic=1 pci=off ip=172.16.${slot}.2::${hostIp}:255.255.255.252::eth0:off:${DNS_RESOLVERS[0]}`;
   }
 
   static fromConfig(config: NetworkConfig): NetworkManager {
@@ -155,6 +158,15 @@ export class NetworkManager {
     const vethGuest = `veth-g-${slot}`;
     const transitHostIp = `10.200.${slot}.1`;
     const transitGuestIp = `10.200.${slot}.2`;
+
+    // Clean up stale veth pair if it exists (e.g. from a previous crashed VM)
+    if (existsSync(`/sys/class/net/${vethHost}`)) {
+      try {
+        sudo(["ip", "link", "delete", vethHost]);
+      } catch {
+        // Best-effort — may already be gone
+      }
+    }
 
     // Create namespace
     sudo(["ip", "netns", "add", netnsName]);
@@ -260,43 +272,80 @@ export class NetworkManager {
       "MASQUERADE",
     ]);
 
+    // When netns is enabled, traffic exits via veth pair — host needs FORWARD rules
+    if (this.config.netnsName) {
+      const vethHost = `veth-h-${this.config.slot}`;
+      sudo([
+        "iptables",
+        "-A",
+        "FORWARD",
+        "-i",
+        vethHost,
+        "-o",
+        defaultIface,
+        "-s",
+        `${guestIp}/30`,
+        "-j",
+        "ACCEPT",
+      ]);
+      sudo([
+        "iptables",
+        "-A",
+        "FORWARD",
+        "-i",
+        defaultIface,
+        "-o",
+        vethHost,
+        "-d",
+        `${guestIp}/30`,
+        "-m",
+        "state",
+        "--state",
+        "RELATED,ESTABLISHED",
+        "-j",
+        "ACCEPT",
+      ]);
+    }
+
     if (policy === "custom") {
       // 1. Denied CIDRs
       for (const cidr of this.config.deniedCidrs) {
         fwd(["iptables", "-A", "FORWARD", "-i", tapDevice, "-d", cidr, "-j", "DROP"]);
       }
 
-      // 2. Allow DNS to host CoreDNS only
-      fwd([
-        "iptables",
-        "-A",
-        "FORWARD",
-        "-i",
-        tapDevice,
-        "-d",
-        hostIp,
-        "-p",
-        "udp",
-        "--dport",
-        "53",
-        "-j",
-        "ACCEPT",
-      ]);
-      fwd([
-        "iptables",
-        "-A",
-        "FORWARD",
-        "-i",
-        tapDevice,
-        "-d",
-        hostIp,
-        "-p",
-        "tcp",
-        "--dport",
-        "53",
-        "-j",
-        "ACCEPT",
-      ]);
+      // 2. Allow DNS to configured resolvers only
+      for (const dnsIp of DNS_RESOLVERS) {
+        fwd([
+          "iptables",
+          "-A",
+          "FORWARD",
+          "-i",
+          tapDevice,
+          "-d",
+          dnsIp,
+          "-p",
+          "udp",
+          "--dport",
+          "53",
+          "-j",
+          "ACCEPT",
+        ]);
+        fwd([
+          "iptables",
+          "-A",
+          "FORWARD",
+          "-i",
+          tapDevice,
+          "-d",
+          dnsIp,
+          "-p",
+          "tcp",
+          "--dport",
+          "53",
+          "-j",
+          "ACCEPT",
+        ]);
+      }
 
       // 3. Block external DNS
       fwd([
@@ -398,36 +447,38 @@ export class NetworkManager {
       fwd(["iptables", "-A", "FORWARD", "-i", tapDevice, "-j", "ACCEPT"]);
     } else {
       // allow-all mode
-      fwd([
-        "iptables",
-        "-A",
-        "FORWARD",
-        "-i",
-        tapDevice,
-        "-d",
-        hostIp,
-        "-p",
-        "udp",
-        "--dport",
-        "53",
-        "-j",
-        "ACCEPT",
-      ]);
-      fwd([
-        "iptables",
-        "-A",
-        "FORWARD",
-        "-i",
-        tapDevice,
-        "-d",
-        hostIp,
-        "-p",
-        "tcp",
-        "--dport",
-        "53",
-        "-j",
-        "ACCEPT",
-      ]);
+      for (const dnsIp of DNS_RESOLVERS) {
+        fwd([
+          "iptables",
+          "-A",
+          "FORWARD",
+          "-i",
+          tapDevice,
+          "-d",
+          dnsIp,
+          "-p",
+          "udp",
+          "--dport",
+          "53",
+          "-j",
+          "ACCEPT",
+        ]);
+        fwd([
+          "iptables",
+          "-A",
+          "FORWARD",
+          "-i",
+          tapDevice,
+          "-d",
+          dnsIp,
+          "-p",
+          "tcp",
+          "--dport",
+          "53",
+          "-j",
+          "ACCEPT",
+        ]);
+      }
       fwd([
         "iptables",
         "-A",
@@ -673,36 +724,38 @@ export class NetworkManager {
         tryFwd(["iptables", "-D", "FORWARD", "-i", tapDevice, "-d", cidr, "-j", "ACCEPT"]);
       }
 
-      tryFwd([
-        "iptables",
-        "-D",
-        "FORWARD",
-        "-i",
-        tapDevice,
-        "-d",
-        hostIp,
-        "-p",
-        "udp",
-        "--dport",
-        "53",
-        "-j",
-        "ACCEPT",
-      ]);
-      tryFwd([
-        "iptables",
-        "-D",
-        "FORWARD",
-        "-i",
-        tapDevice,
-        "-d",
-        hostIp,
-        "-p",
-        "tcp",
-        "--dport",
-        "53",
-        "-j",
-        "ACCEPT",
-      ]);
+      for (const dnsIp of DNS_RESOLVERS) {
+        tryFwd([
+          "iptables",
+          "-D",
+          "FORWARD",
+          "-i",
+          tapDevice,
+          "-d",
+          dnsIp,
+          "-p",
+          "udp",
+          "--dport",
+          "53",
+          "-j",
+          "ACCEPT",
+        ]);
+        tryFwd([
+          "iptables",
+          "-D",
+          "FORWARD",
+          "-i",
+          tapDevice,
+          "-d",
+          dnsIp,
+          "-p",
+          "tcp",
+          "--dport",
+          "53",
+          "-j",
+          "ACCEPT",
+        ]);
+      }
       tryFwd([
         "iptables",
         "-D",
@@ -806,6 +859,41 @@ export class NetworkManager {
       ]);
       tryFwd(["iptables", "-D", "FORWARD", "-i", tapDevice, "-j", "DROP"]);
       tryFwd(["iptables", "-D", "FORWARD", "-o", tapDevice, "-j", "DROP"]);
+    }
+
+    // Remove host-side veth FORWARD rules (netns mode)
+    if (netnsName && defaultIface) {
+      const vethHost = `veth-h-${this.config.slot}`;
+      tryRun([
+        "iptables",
+        "-D",
+        "FORWARD",
+        "-i",
+        vethHost,
+        "-o",
+        defaultIface,
+        "-s",
+        `${guestIp}/30`,
+        "-j",
+        "ACCEPT",
+      ]);
+      tryRun([
+        "iptables",
+        "-D",
+        "FORWARD",
+        "-i",
+        defaultIface,
+        "-o",
+        vethHost,
+        "-d",
+        `${guestIp}/30`,
+        "-m",
+        "state",
+        "--state",
+        "RELATED,ESTABLISHED",
+        "-j",
+        "ACCEPT",
+      ]);
     }
 
     // Remove MASQUERADE (always on host)
