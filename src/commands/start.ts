@@ -12,7 +12,7 @@ import {
   handleCommandError,
 } from "../errors/index.ts";
 import { FileVmStateStore } from "../lib/vm-state.ts";
-import { Jailer, type CgroupConfig } from "../lib/jailer.ts";
+import { Jailer, type CgroupConfig, CGROUP_VMM_OVERHEAD_MIB } from "../lib/jailer.ts";
 import { NetworkManager, type NetworkConfig } from "../lib/network.ts";
 import { FirecrackerClient } from "../services/firecracker.ts";
 import {
@@ -163,7 +163,7 @@ const startCommand = defineCommand({
       const cgroup: CgroupConfig = {
         cpuQuotaUs: state.vcpuCount * 100000,
         cpuPeriodUs: 100000,
-        memoryBytes: state.memSizeMib * 1024 * 1024,
+        memoryBytes: (state.memSizeMib + CGROUP_VMM_OVERHEAD_MIB) * 1024 * 1024,
       };
 
       const spawnAndWait = async (timeoutMs: number): Promise<void> => {

@@ -55,6 +55,13 @@ export interface CgroupConfig {
   memoryBytes: number;
 }
 
+/**
+ * Extra memory (in MiB) added to the cgroup limit beyond guest memory.
+ * Covers Firecracker VMM process overhead, page tables, and kernel slab.
+ * Without this, the OOM killer can terminate the VM under memory pressure.
+ */
+export const CGROUP_VMM_OVERHEAD_MIB = 64;
+
 export function detectCgroupVersion(): 1 | 2 {
   try {
     readFileSync("/sys/fs/cgroup/cgroup.controllers", "utf-8");
