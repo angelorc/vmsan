@@ -42,7 +42,6 @@ Get Started
 
 ```bash [Terminal]
 $ curl -fsSL https://raw.githubusercontent.com/angelorc/vmsan/main/install.sh | bash
-$ bun add -g vmsan
 ```
 
 ::
