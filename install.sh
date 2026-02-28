@@ -195,6 +195,13 @@ else
   success "Rootfs installed ($ROOTFS_FILE, ${IMAGE_MB} MB)"
 fi
 
+# --- latest release tag ---
+
+info "Fetching latest release tag..."
+LATEST_TAG=$(curl -fsSL "https://api.github.com/repos/$VMSAN_REPO/releases/latest" | grep -oP '"tag_name":\s*"\K[^"]+')
+[ -n "$LATEST_TAG" ] || error "Could not determine latest release tag"
+success "Latest release: $LATEST_TAG"
+
 # --- vmsan CLI ---
 
 if command -v vmsan >/dev/null 2>&1; then
@@ -214,10 +221,10 @@ AGENT_PATH="$VMSAN_DIR/bin/vmsan-agent"
 if [ -x "$AGENT_PATH" ]; then
   success "vmsan-agent already installed"
 else
-  AGENT_URL="https://github.com/$VMSAN_REPO/releases/download/v${VMSAN_VER}/vmsan-agent-${ARCH}"
+  AGENT_URL="https://github.com/$VMSAN_REPO/releases/download/${LATEST_TAG}/vmsan-agent-${ARCH}"
   download "$AGENT_URL" "$AGENT_PATH"
   chmod +x "$AGENT_PATH"
-  success "vmsan-agent v${VMSAN_VER} installed"
+  success "vmsan-agent ${LATEST_TAG} installed"
 fi
 
 # --- summary ---
