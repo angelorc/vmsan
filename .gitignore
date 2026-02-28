@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Go agent binary
+agent/vmsan-agent
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude / AI
+.claude/
+.docs-to-agent/
+AGENTS.md
+CLAUDE.md
+
+# External source repos
+opensrc/
+
+# Coverage
+coverage/
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.*
+!.env.example

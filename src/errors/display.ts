@@ -14,11 +14,10 @@ export function handleCommandError(error: unknown, cmdLog: CommandLogger): void 
   }
 
   if (error instanceof EvlogError) {
-    const parts = [error.message];
-    if (error.why) parts.push(`  Why: ${error.why}`);
-    if (error.fix) parts.push(`  Fix: ${error.fix}`);
-    if (error.link) parts.push(`  More: ${error.link}`);
-    consola.error(parts.join("\n"));
+    consola.error(error.message);
+    if (error.why) consola.log(`  Why: ${error.why}`);
+    if (error.fix) consola.log(`\n  Fix:\n\n${error.fix}\n`);
+    if (error.link) consola.log(`  More: ${error.link}`);
   } else {
     consola.error(error instanceof Error ? error.message : String(error));
   }

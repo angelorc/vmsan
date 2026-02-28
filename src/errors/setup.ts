@@ -8,32 +8,34 @@ export class SetupError extends VmsanError {
   }
 }
 
+const INSTALL_FIX = `Run the install script to set up all dependencies:\n\ncurl -fsSL https://raw.githubusercontent.com/angelorc/vmsan/main/install.sh | bash`;
+
 export const missingBinaryError = (binary: string, path: string): SetupError =>
   new SetupError("ERR_SETUP_MISSING_BINARY", {
     message: `${binary} not found at ${path}`,
-    fix: "Ensure Firecracker and Jailer are installed in the bin directory.",
+    fix: INSTALL_FIX,
   });
 
 export const noKernelDirError = (): SetupError =>
   new SetupError("ERR_SETUP_NO_KERNEL_DIR", {
     message: "No kernels directory found.",
-    fix: "Place vmlinux kernel images in the kernels directory.",
+    fix: INSTALL_FIX,
   });
 
 export const noKernelError = (): SetupError =>
   new SetupError("ERR_SETUP_NO_KERNEL", {
-    message: "No kernel found.",
-    fix: "Place vmlinux kernel images in the kernels directory.",
+    message: "No kernel found in ~/.vmsan/kernels/.",
+    fix: INSTALL_FIX,
   });
 
 export const noRootfsDirError = (): SetupError =>
   new SetupError("ERR_SETUP_NO_ROOTFS_DIR", {
     message: "No rootfs directory found.",
-    fix: "Place ext4 rootfs images in the rootfs directory.",
+    fix: INSTALL_FIX,
   });
 
 export const noExt4RootfsError = (): SetupError =>
   new SetupError("ERR_SETUP_NO_EXT4_ROOTFS", {
-    message: "No ext4 rootfs found.",
-    fix: "Place ext4 rootfs images in the rootfs directory.",
+    message: "No ext4 rootfs found in ~/.vmsan/rootfs/.",
+    fix: INSTALL_FIX,
   });

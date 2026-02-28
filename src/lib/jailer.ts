@@ -100,8 +100,9 @@ export class Jailer {
       const currentBytes = statSync(paths.rootfsPath).size;
       if (targetBytes > currentBytes) {
         execSync(`truncate -s ${targetBytes} "${paths.rootfsPath}"`, { stdio: "pipe" });
-        // If filesystem needs minor corrections, e2fsck may return non-zero.
-        execSync(`sudo e2fsck -pf "${paths.rootfsPath}" || true`, { stdio: "pipe" });
+        // e2fsck -fy: force check + auto-fix all issues. resize2fs requires a clean filesystem.
+        // Exit code 1 means corrections were made (safe to continue), only fail on code >= 4.
+        execSync(`sudo e2fsck -fy "${paths.rootfsPath}"; [ $? -lt 4 ]`, { stdio: "pipe" });
         execSync(`sudo resize2fs "${paths.rootfsPath}"`, { stdio: "pipe" });
         execSync(`sudo tune2fs -m 0 "${paths.rootfsPath}"`, { stdio: "pipe" });
       }

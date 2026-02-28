@@ -16,12 +16,12 @@
     "dist"
   ],
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts"
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
     }
   },
   "scripts": {
@@ -48,6 +48,7 @@
     "@types/proper-lockfile": "^4.1.4",
     "@types/tar-stream": "^3.1.4",
     "@types/ws": "^8.18.0",
+    "jiti": "^2.6.1",
     "obuild": "^0.4.31",
     "oxfmt": "^0.31.0",
     "oxlint": "^1.50.0",
@@ -56,5 +57,6 @@
   },
   "engines": {
     "bun": ">=1.2"
-  }
+  },
+  "packageManager": "yarn@1.22.22+sha1.ac34549e6aa8e7ead463a7407e1c7390f61a6610"
 }
