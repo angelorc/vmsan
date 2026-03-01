@@ -1,4 +1,14 @@
 // Package entry point — re-exports public API.
+
+// Building blocks
+export { createVmsan } from "./context.ts";
+export type { VmsanContext, VmsanOptions } from "./context.ts";
+export type { VmsanHooks, VmPhase } from "./hooks.ts";
+export { definePlugin } from "./plugin.ts";
+export type { VmsanPlugin } from "./plugin.ts";
+export type { VmsanLogger } from "./vmsan-logger.ts";
+export { createDefaultLogger, createSilentLogger } from "./vmsan-logger.ts";
+
 export { vmsanPaths } from "./paths.ts";
 export type { VmsanPaths } from "./paths.ts";
 
@@ -10,10 +20,17 @@ export type {
 export { AgentClient } from "./services/agent.ts";
 export type { RunParams, RunEvent, WriteFileEntry, SessionInfo } from "./services/agent.ts";
 export { VMService } from "./services/vm.ts";
-export type { StopResult, UpdatePolicyResult } from "./services/vm.ts";
+export type {
+  StopResult,
+  UpdatePolicyResult,
+  CreateVmOptions,
+  CreateVmResult,
+  StartVmResult,
+} from "./services/vm.ts";
 
-export { FileVmStateStore } from "./lib/vm-state.ts";
+export { FileVmStateStore, getActiveTapSlots, findFreeNetworkSlot } from "./lib/vm-state.ts";
 export type { VmStateStore, VmState, VmNetwork } from "./lib/vm-state.ts";
+export { MemoryVmStateStore } from "./stores/memory.ts";
 export { NetworkManager } from "./lib/network.ts";
 export type { NetworkConfig } from "./lib/network.ts";
 export { Jailer, detectCgroupVersion } from "./lib/jailer.ts";
@@ -37,6 +54,7 @@ export {
   mkdirSecure,
   writeSecure,
   table,
+  toError,
 } from "./lib/utils.ts";
 
 export { VmsanError } from "./errors/index.ts";
