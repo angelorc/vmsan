@@ -4,6 +4,12 @@
 
 ### Patch Changes
 
+- docs: use vmsan.dev/install URL and update landing page
+
+## 0.1.0
+
+### Patch Changes
+
 - fix: pin unimport to 5.6.0 to work around mlly export misparse
 
 ## 0.1.0
