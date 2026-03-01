@@ -27,10 +27,10 @@
   "scripts": {
     "build": "obuild",
     "dev": "obuild --stub",
-    "lint": "oxlint . && oxfmt --check .",
-    "lint:fix": "oxlint . --fix && oxfmt .",
-    "fmt": "oxfmt .",
-    "fmt:check": "oxfmt --check .",
+    "lint": "oxlint . && oxfmt --check '!**/*.md' .",
+    "lint:fix": "oxlint . --fix && oxfmt '!**/*.md' .",
+    "fmt": "oxfmt '!**/*.md' .",
+    "fmt:check": "oxfmt --check '!**/*.md' .",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "prepack": "bun run build",
@@ -43,6 +43,7 @@
     "citty": "^0.2.1",
     "consola": "^3.4.2",
     "evlog": "^2.0.0",
+    "hookable": "^6.0.1",
     "proper-lockfile": "^4.1.2",
     "tar-stream": "^3.1.8",
     "ws": "^8.19.0"
