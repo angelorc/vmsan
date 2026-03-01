@@ -98,7 +98,7 @@ export class FileVmStateStore implements VmStateStore {
           return Number(parts[2]);
         }),
     );
-    for (const slot of FileVmStateStore.getActiveTapSlots()) {
+    for (const slot of getActiveTapSlots()) {
       usedSlots.add(slot);
     }
 
@@ -108,24 +108,24 @@ export class FileVmStateStore implements VmStateStore {
 
     throw networkSlotsExhaustedError();
   }
+}
 
-  private static getActiveTapSlots(): Set<number> {
-    const slots = new Set<number>();
-    try {
-      for (const iface of readdirSync("/sys/class/net")) {
-        // Match TAP devices (fhvmN) and veth host ends (veth-h-N)
-        const tapMatch = /^fhvm(\d+)$/.exec(iface);
-        const vethMatch = /^veth-h-(\d+)$/.exec(iface);
-        const match = tapMatch || vethMatch;
-        if (!match) continue;
-        const slot = Number(match[1]);
-        if (Number.isInteger(slot) && slot >= 0 && slot <= 254) {
-          slots.add(slot);
-        }
+export function getActiveTapSlots(): Set<number> {
+  const slots = new Set<number>();
+  try {
+    for (const iface of readdirSync("/sys/class/net")) {
+      // Match TAP devices (fhvmN) and veth host ends (veth-h-N)
+      const tapMatch = /^fhvm(\d+)$/.exec(iface);
+      const vethMatch = /^veth-h-(\d+)$/.exec(iface);
+      const match = tapMatch || vethMatch;
+      if (!match) continue;
+      const slot = Number(match[1]);
+      if (Number.isInteger(slot) && slot >= 0 && slot <= 254) {
+        slots.add(slot);
       }
-    } catch {
-      // /sys/class/net may not be readable on some systems
     }
-    return slots;
+  } catch {
+    // /sys/class/net may not be readable on some systems
   }
+  return slots;
 }
