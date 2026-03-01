@@ -75,25 +75,28 @@ export default defineNuxtConfig({
     provider: 'iconify',
   },
 
-  vite: {
-    plugins: [{
-      name: 'fix-useResizable-options-import',
-      enforce: 'post' as const,
-      transform(code: string, _id: string) {
-        // Strip the incorrectly injected `import { options }` from useResizable
-        if (code.includes('useResizable') && /import\s*\{[^}]*\boptions\b[^}]*\}\s*from\s*["'][^"']*useResizable[^"']*["']/.test(code)) {
-          return code.replace(
-            /import\s*\{(\s*options\s*)\}\s*from\s*["'][^"']*useResizable[^"']*["'];?\s*/g,
-            '',
-          ).replace(
-            /import\s*\{([^}]*),\s*options\s*\}\s*from\s*["']([^"']*useResizable[^"']*)"[;]?\s*/g,
-            'import {$1} from "$2";',
-          ).replace(
-            /import\s*\{\s*options\s*,([^}]*)\}\s*from\s*["']([^"']*useResizable[^"']*)"[;]?\s*/g,
-            'import {$1} from "$2";',
-          )
-        }
-      },
-    }],
-  },
+  // WORKAROUND: unjs/unimport#273 + unjs/mlly#303
+  // Now solved by pinning unimport to 5.6.0 in package.json overrides.
+  // Keeping this commented out as a fallback in case the pin is removed.
+  // vite: {
+  //   plugins: [{
+  //     name: 'fix-useResizable-options-import',
+  //     enforce: 'post' as const,
+  //     transform(code: string, _id: string) {
+  //       // Strip the incorrectly injected `import { options }` from useResizable
+  //       if (code.includes('useResizable') && /import\s*\{[^}]*\boptions\b[^}]*\}\s*from\s*["'][^"']*useResizable[^"']*["']/.test(code)) {
+  //         return code.replace(
+  //           /import\s*\{(\s*options\s*)\}\s*from\s*["'][^"']*useResizable[^"']*["'];?\s*/g,
+  //           '',
+  //         ).replace(
+  //           /import\s*\{([^}]*),\s*options\s*\}\s*from\s*["']([^"']*useResizable[^"']*)"[;]?\s*/g,
+  //           'import {$1} from "$2";',
+  //         ).replace(
+  //           /import\s*\{\s*options\s*,([^}]*)\}\s*from\s*["']([^"']*useResizable[^"']*)"[;]?\s*/g,
+  //           'import {$1} from "$2";',
+  //         )
+  //       }
+  //     },
+  //   }],
+  // },
 })
