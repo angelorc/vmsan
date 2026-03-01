@@ -1,8 +1,7 @@
 import type { CommandDef } from "citty";
 import { defineCommand } from "citty";
 import { consola } from "consola";
-import { vmsanPaths } from "../paths.ts";
-import { VMService } from "../services/vm.ts";
+import { createVmsan } from "../context.ts";
 import { createCommandLogger, getOutputMode } from "../lib/logger/index.ts";
 import { table, timeAgo, timeRemaining } from "../lib/utils.ts";
 import type { VmState } from "../lib/vm-state.ts";
@@ -25,11 +24,11 @@ const listCommand = defineCommand({
     name: "list",
     description: "List all VMs",
   },
-  run() {
+  async run() {
     const cmdLog = createCommandLogger("list");
     const log = consola.withTag("list");
-    const service = new VMService(vmsanPaths());
-    const vms = service.list();
+    const vmsan = await createVmsan();
+    const vms = vmsan.list();
 
     if (vms.length === 0) {
       if (getOutputMode() === "json") {
