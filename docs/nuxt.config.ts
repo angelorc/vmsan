@@ -75,17 +75,6 @@ export default defineNuxtConfig({
     provider: 'iconify',
   },
 
-  hooks: {
-    'imports:extend': function (imports: any[]) {
-      // Fix mlly misparse: 'options' is a function parameter in useResizable, not an export
-      for (let i = imports.length - 1; i >= 0; i--) {
-        if (imports[i].name === 'options' && String(imports[i].from).includes('useResizable')) {
-          imports.splice(i, 1)
-        }
-      }
-    },
-  },
-
   vite: {
     plugins: [{
       name: 'fix-useResizable-options-import',

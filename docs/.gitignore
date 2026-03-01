@@ -3,3 +3,6 @@ node_modules
 .output
 .data
 dist
+
+# opensrc - source code for packages
+opensrc/
