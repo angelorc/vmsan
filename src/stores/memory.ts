@@ -1,5 +1,5 @@
-import { getActiveTapSlots, type VmState, type VmStateStore } from "../lib/vm-state.ts";
-import { vmStateNotFoundError, networkSlotsExhaustedError } from "../errors/index.ts";
+import { findFreeNetworkSlot, type VmState, type VmStateStore } from "../lib/vm-state.ts";
+import { vmStateNotFoundError } from "../errors/index.ts";
 
 export class MemoryVmStateStore implements VmStateStore {
   private states = new Map<string, VmState>();
@@ -28,22 +28,6 @@ export class MemoryVmStateStore implements VmStateStore {
   }
 
   allocateNetworkSlot(): number {
-    const usedSlots = new Set(
-      [...this.states.values()]
-        .filter((s) => s.status === "running" || s.status === "creating")
-        .map((s) => {
-          const parts = s.network.hostIp.split(".");
-          return Number(parts[2]);
-        }),
-    );
-    for (const slot of getActiveTapSlots()) {
-      usedSlots.add(slot);
-    }
-
-    for (let slot = 0; slot <= 254; slot++) {
-      if (!usedSlots.has(slot)) return slot;
-    }
-
-    throw networkSlotsExhaustedError();
+    return findFreeNetworkSlot([...this.states.values()]);
   }
 }

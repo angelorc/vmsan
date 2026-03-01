@@ -52,6 +52,26 @@ export interface VmStateStore {
   allocateNetworkSlot(): number;
 }
 
+export function findFreeNetworkSlot(states: VmState[]): number {
+  const usedSlots = new Set(
+    states
+      .filter((s) => s.status === "running" || s.status === "creating")
+      .map((s) => {
+        const parts = s.network.hostIp.split(".");
+        return Number(parts[2]);
+      }),
+  );
+  for (const slot of getActiveTapSlots()) {
+    usedSlots.add(slot);
+  }
+
+  for (let slot = 0; slot <= 254; slot++) {
+    if (!usedSlots.has(slot)) return slot;
+  }
+
+  throw networkSlotsExhaustedError();
+}
+
 export class FileVmStateStore implements VmStateStore {
   constructor(private readonly dir: string) {}
 
@@ -89,24 +109,7 @@ export class FileVmStateStore implements VmStateStore {
   }
 
   allocateNetworkSlot(): number {
-    const states = this.list();
-    const usedSlots = new Set(
-      states
-        .filter((s) => s.status === "running" || s.status === "creating")
-        .map((s) => {
-          const parts = s.network.hostIp.split(".");
-          return Number(parts[2]);
-        }),
-    );
-    for (const slot of getActiveTapSlots()) {
-      usedSlots.add(slot);
-    }
-
-    for (let slot = 0; slot <= 254; slot++) {
-      if (!usedSlots.has(slot)) return slot;
-    }
-
-    throw networkSlotsExhaustedError();
+    return findFreeNetworkSlot(this.list());
   }
 }
 

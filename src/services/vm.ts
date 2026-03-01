@@ -1,5 +1,5 @@
 import { dirname, join } from "node:path";
-import { existsSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import type { VmsanContext } from "../context.ts";
@@ -16,12 +16,7 @@ import {
   findRootfs,
   waitForSocket,
 } from "../commands/create/environment.ts";
-import {
-  killOrphanVmProcess,
-  markVmAsError,
-  cleanupNetwork,
-  cleanupChroot,
-} from "../commands/create/cleanup.ts";
+import { killOrphanVmProcess, cleanupNetwork, cleanupChroot } from "../commands/create/cleanup.ts";
 import { buildInitialVmState } from "../commands/create/state.ts";
 import { resolveImageRootfs } from "../commands/create/image-rootfs.ts";
 import type { ImageReference } from "../commands/create/validation.ts";
@@ -35,7 +30,7 @@ import {
   chrootNotFoundError,
   mutuallyExclusiveFlagsError,
 } from "../errors/index.ts";
-import { generateVmId, safeKill } from "../lib/utils.ts";
+import { generateVmId, safeKill, toError } from "../lib/utils.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -73,6 +68,7 @@ export interface CreateVmResult {
 export interface StartVmResult {
   vmId: string;
   pid: number | null;
+  state: VmState | null;
   success: boolean;
   error?: VmsanError;
 }
@@ -87,8 +83,8 @@ export interface StopResult {
 export interface UpdatePolicyResult {
   vmId: string;
   success: boolean;
-  previousPolicy: string;
-  newPolicy: string;
+  previousPolicy: NetworkPolicy;
+  newPolicy: NetworkPolicy;
   error?: VmsanError;
 }
 
@@ -158,10 +154,7 @@ export class VMService {
       const timeoutMs = opts.timeoutMs ?? null;
 
       // Hook: beforeCreate
-      await hooks.callHook("vm:beforeCreate", {
-        vmId,
-        options: opts as unknown as Record<string, unknown>,
-      });
+      await hooks.callHook("vm:beforeCreate", { vmId, options: opts });
 
       // Resolve kernel
       const kernelPath = opts.kernelPath ?? findKernel(paths.baseDir);
@@ -287,21 +280,15 @@ export class VMService {
 
       // Spawn Firecracker
       log.start("Spawning Firecracker via jailer...");
-      const firecrackerBin = join(paths.baseDir, "bin", "firecracker");
-      const jailerBin = join(paths.baseDir, "bin", "jailer");
+      const firecrackerBin = join(paths.binDir, "firecracker");
+      const jailerBin = join(paths.binDir, "jailer");
 
       const seccompFilter = opts.disableSeccomp ? undefined : ensureSeccompFilter(paths);
       if (seccompFilter) {
         logger.debug(`Seccomp filter: ${seccompFilter}`);
       }
 
-      const cgroup: CgroupConfig | undefined = opts.disableCgroup
-        ? undefined
-        : {
-            cpuQuotaUs: vcpus * 100000,
-            cpuPeriodUs: 100000,
-            memoryBytes: (memMib + CGROUP_VMM_OVERHEAD_MIB) * 1024 * 1024,
-          };
+      const cgroup = opts.disableCgroup ? undefined : this.buildCgroupConfig(vcpus, memMib);
 
       jailer.spawn({
         firecrackerBin,
@@ -318,22 +305,16 @@ export class VMService {
       log.success("API socket ready");
 
       // Boot VM
-      const vm = new FirecrackerClient(jailerPaths.socketPath);
-
       if (snapshotId) {
         log.start("Restoring from snapshot...");
+        const vm = new FirecrackerClient(jailerPaths.socketPath);
         await vm.loadSnapshot("snapshot/snapshot_file", "snapshot/mem_file");
         await vm.resume();
         log.success("Snapshot restored and VM resumed");
       } else {
-        const bootArgs = NetworkManager.bootArgs(netCfg.slot);
-        logger.debug(`Boot args: ${bootArgs}`);
-        await vm.boot("kernel/vmlinux", bootArgs);
-        await vm.addDrive("rootfs", "rootfs/rootfs.ext4", true, false);
-        await vm.configure(vcpus, memMib);
-        await vm.addNetwork("eth0", netCfg.tapDevice, netCfg.macAddress);
-
+        await this.bootVm(jailerPaths.socketPath, netCfg, vcpus, memMib);
         log.start("Starting VM...");
+        const vm = new FirecrackerClient(jailerPaths.socketPath);
         await vm.start();
       }
 
@@ -375,14 +356,14 @@ export class VMService {
       if (vmId) {
         await hooks.callHook("vm:error", {
           vmId,
-          error: error instanceof Error ? error : new Error(String(error)),
+          error: toError(error),
           phase: "create",
         });
       }
 
       // Cleanup
       killOrphanVmProcess(vmId);
-      markVmAsError(vmId, error, paths);
+      this.markAsError(vmId, error);
       cleanupNetwork(networkConfig);
       cleanupChroot(chrootDir);
 
@@ -439,7 +420,7 @@ export class VMService {
         slot: networkConfig.slot,
         networkConfig,
         domains: state.network.allowedDomains,
-        networkPolicy: state.network.networkPolicy,
+        networkPolicy: state.network.networkPolicy as NetworkPolicy,
       });
 
       // 3. Clean stale files from previous run
@@ -450,51 +431,41 @@ export class VMService {
           dirname(dirname(state.apiSocket)),
         ]),
       );
-      for (const rootDir of vmRootCandidates) {
-        const staleFirecrackerBin = join(rootDir, "firecracker");
-        if (existsSync(staleFirecrackerBin)) {
-          unlinkSync(staleFirecrackerBin);
+      const removeStaleFirecrackerFiles = (): void => {
+        for (const rootDir of vmRootCandidates) {
+          rmSync(join(rootDir, "firecracker"), { force: true });
+          rmSync(join(rootDir, "firecracker.pid"), { force: true });
         }
-        rmSync(join(rootDir, "firecracker.pid"), { force: true });
-      }
+      };
+
+      removeStaleFirecrackerFiles();
 
       const socketPath = state.apiSocket;
-      if (existsSync(socketPath)) {
-        unlinkSync(socketPath);
-      }
+      rmSync(socketPath, { force: true });
 
       const removeStaleDevTrees = (): void => {
         for (const rootDir of vmRootCandidates) {
-          const devDir = join(rootDir, "dev");
-          if (existsSync(devDir)) {
-            rmSync(devDir, { recursive: true, force: true });
-          }
+          rmSync(join(rootDir, "dev"), { recursive: true, force: true });
         }
       };
       const removeStaleDeviceNodes = (): void => {
         const staleNodes = ["dev/net/tun", "dev/kvm", "dev/userfaultfd", "dev/urandom"];
         for (const rootDir of vmRootCandidates) {
           for (const rel of staleNodes) {
-            const nodePath = join(rootDir, rel);
-            if (existsSync(nodePath)) {
-              rmSync(nodePath, { recursive: true, force: true });
-            }
+            rmSync(join(rootDir, rel), { recursive: true, force: true });
           }
         }
       };
 
       // 4. Spawn Firecracker via Jailer (reuse existing chroot)
-      const firecrackerBin = join(paths.baseDir, "bin", "firecracker");
-      const jailerBin = join(paths.baseDir, "bin", "jailer");
+      const firecrackerBin = join(paths.binDir, "firecracker");
+      const jailerBin = join(paths.binDir, "jailer");
 
       const jailer = new Jailer(vmId, paths.jailerBaseDir);
       let socketReady = false;
       const startTag = `[start:${vmId}]`;
-      const errorMessage = (error: unknown): string =>
-        error instanceof Error ? error.message : String(error);
       const logAttemptError = (attempt: string, error: unknown): void => {
-        const message = errorMessage(error);
-        logger.error(`${startTag} ${attempt} failed: ${message}`);
+        logger.error(`${startTag} ${attempt} failed: ${toError(error).message}`);
       };
       logger.debug(`Stale file cleanup: checked ${vmRootCandidates.length} root candidates`);
 
@@ -521,11 +492,7 @@ export class VMService {
         return false;
       };
 
-      const cgroup: CgroupConfig = {
-        cpuQuotaUs: state.vcpuCount * 100000,
-        cpuPeriodUs: 100000,
-        memoryBytes: (state.memSizeMib + CGROUP_VMM_OVERHEAD_MIB) * 1024 * 1024,
-      };
+      const cgroup = this.buildCgroupConfig(state.vcpuCount, state.memSizeMib);
 
       const spawnAndWait = async (timeoutMs: number): Promise<void> => {
         log.start("Spawning Firecracker via jailer...");
@@ -550,7 +517,7 @@ export class VMService {
         await spawnAndWait(10000);
         socketReady = true;
       } catch (firstStartError) {
-        const message = errorMessage(firstStartError);
+        const message = toError(firstStartError).message;
         if (!isRecoverableStartError(message)) {
           logAttemptError("initial attempt", firstStartError);
           logDiagnostics();
@@ -559,18 +526,10 @@ export class VMService {
 
         logAttemptError("initial attempt", firstStartError);
         killOrphanVmProcess(vmId);
-        if (existsSync(socketPath)) {
-          unlinkSync(socketPath);
-        }
+        rmSync(socketPath, { force: true });
         removeStaleDeviceNodes();
         removeStaleDevTrees();
-        for (const rootDir of vmRootCandidates) {
-          const staleFirecrackerBin = join(rootDir, "firecracker");
-          if (existsSync(staleFirecrackerBin)) {
-            unlinkSync(staleFirecrackerBin);
-          }
-          rmSync(join(rootDir, "firecracker.pid"), { force: true });
-        }
+        removeStaleFirecrackerFiles();
 
         try {
           await spawnAndWait(15000);
@@ -579,7 +538,7 @@ export class VMService {
           logAttemptError("retry attempt", retryError);
           logDiagnostics();
           throw new Error(
-            `${startTag} retry failed after cleanup. First error: ${message}. Retry error: ${errorMessage(retryError)}`,
+            `${startTag} retry failed after cleanup. First error: ${message}. Retry error: ${toError(retryError).message}`,
           );
         }
       }
@@ -591,15 +550,10 @@ export class VMService {
       log.success("API socket ready");
 
       // 5. Boot VM
-      const vm = new FirecrackerClient(socketPath);
-      const bootArgs = NetworkManager.bootArgs(networkConfig.slot);
-      logger.debug(`Boot args: ${bootArgs}`);
-      await vm.boot("kernel/vmlinux", bootArgs);
-      await vm.addDrive("rootfs", "rootfs/rootfs.ext4", true, false);
-      await vm.configure(state.vcpuCount, state.memSizeMib);
-      await vm.addNetwork("eth0", networkConfig.tapDevice, networkConfig.macAddress);
+      await this.bootVm(socketPath, networkConfig, state.vcpuCount, state.memSizeMib);
 
       log.start("Starting VM...");
+      const vm = new FirecrackerClient(socketPath);
       await vm.start();
 
       // 6. Update state
@@ -612,22 +566,23 @@ export class VMService {
       // Hook: afterStart
       await hooks.callHook("vm:afterStart", finalState);
 
-      return { vmId, pid, success: true };
+      return { vmId, pid, state: finalState, success: true };
     } catch (error) {
       // Error hooks
       await hooks.callHook("vm:error", {
         vmId,
-        error: error instanceof Error ? error : new Error(String(error)),
+        error: toError(error),
         phase: "start",
       });
 
       killOrphanVmProcess(vmId);
-      markVmAsError(vmId, error, paths);
+      this.markAsError(vmId, error);
       cleanupNetwork(networkConfig);
 
       return {
         vmId,
         pid: null,
+        state: null,
         success: false,
         error: error instanceof VmsanError ? error : undefined,
       };
@@ -693,7 +648,7 @@ export class VMService {
     } catch (err) {
       await this.hooks.callHook("vm:error", {
         vmId,
-        error: err instanceof Error ? err : new Error(String(err)),
+        error: toError(err),
         phase: "stop",
       });
       return { vmId, success: false, error: err instanceof VmsanError ? err : undefined };
@@ -720,23 +675,23 @@ export class VMService {
         return {
           vmId,
           success: false,
-          previousPolicy: "",
+          previousPolicy: policy,
           newPolicy: policy,
           error: vmNotFoundError(vmId),
         };
       }
 
+      const previousPolicy = state.network.networkPolicy as NetworkPolicy;
+
       if (state.status !== "running") {
         return {
           vmId,
           success: false,
-          previousPolicy: state.network.networkPolicy,
+          previousPolicy,
           newPolicy: policy,
           error: vmNotRunningError(vmId),
         };
       }
-
-      const previousPolicy = state.network.networkPolicy;
 
       try {
         const mgr = NetworkManager.fromVmNetwork(state.network);
@@ -804,19 +759,7 @@ export class VMService {
       }
 
       // 2. Remove chroot dir + parent jailer dir
-      if (state.chrootDir) {
-        const vmJailerDir = dirname(state.chrootDir);
-        try {
-          rmSync(state.chrootDir, { recursive: true, force: true });
-        } catch {
-          // Directory may be busy or mounted
-        }
-        try {
-          rmSync(vmJailerDir, { recursive: true, force: true });
-        } catch {
-          // Parent directory may be busy or already removed
-        }
-      }
+      cleanupChroot(state.chrootDir);
 
       // 3. Delete state file — VM disappears from list
       this.store.delete(vmId);
@@ -828,10 +771,48 @@ export class VMService {
     } catch (err) {
       await this.hooks.callHook("vm:error", {
         vmId,
-        error: err instanceof Error ? err : new Error(String(err)),
+        error: toError(err),
         phase: "remove",
       });
       return { vmId, success: false, error: err instanceof VmsanError ? err : undefined };
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Private helpers
+  // -----------------------------------------------------------------------
+
+  private buildCgroupConfig(vcpus: number, memMib: number): CgroupConfig {
+    return {
+      cpuQuotaUs: vcpus * 100000,
+      cpuPeriodUs: 100000,
+      memoryBytes: (memMib + CGROUP_VMM_OVERHEAD_MIB) * 1024 * 1024,
+    };
+  }
+
+  private async bootVm(
+    socketPath: string,
+    netCfg: NetworkConfig,
+    vcpus: number,
+    memMib: number,
+  ): Promise<void> {
+    const vm = new FirecrackerClient(socketPath);
+    const bootArgs = NetworkManager.bootArgs(netCfg.slot);
+    this.logger.debug(`Boot args: ${bootArgs}`);
+    await vm.boot("kernel/vmlinux", bootArgs);
+    await vm.addDrive("rootfs", "rootfs/rootfs.ext4", true, false);
+    await vm.configure(vcpus, memMib);
+    await vm.addNetwork("eth0", netCfg.tapDevice, netCfg.macAddress);
+  }
+
+  private markAsError(vmId: string, error: unknown): void {
+    try {
+      this.store.update(vmId, {
+        status: "error",
+        error: toError(error).message,
+      });
+    } catch {
+      // State store may be corrupt during error recovery
     }
   }
 }

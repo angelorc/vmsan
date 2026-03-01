@@ -32,12 +32,11 @@ const startCommand = defineCommand({
         return;
       }
 
-      const state = vmsan.get(vmId);
       cmdLog.set({
         vmId,
         pid: result.pid,
-        guestIp: state?.network.guestIp,
-        networking: state?.network.networkPolicy,
+        guestIp: result.state?.network.guestIp,
+        networking: result.state?.network.networkPolicy,
       });
       cmdLog.emit();
     } catch (error) {
