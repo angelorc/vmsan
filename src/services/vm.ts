@@ -37,15 +37,6 @@ import {
 } from "../errors/index.ts";
 import { generateVmId, safeKill } from "../lib/utils.ts";
 
-/** Safely await a hookable callHook result (may return void or Promise) */
-async function safeHook(result: void | Promise<unknown>): Promise<void> {
-  try {
-    await result;
-  } catch {
-    // Safety-net: never let a plugin crash the core operation
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -247,15 +238,13 @@ export class VMService {
       );
 
       // Hook: network:afterSetup
-      await safeHook(
-        hooks.callHook("network:afterSetup", {
-          vmId,
-          slot: netCfg.slot,
-          networkConfig: netCfg,
-          domains,
-          networkPolicy,
-        }),
-      );
+      await hooks.callHook("network:afterSetup", {
+        vmId,
+        slot: netCfg.slot,
+        networkConfig: netCfg,
+        domains,
+        networkPolicy,
+      });
 
       // Prepare chroot
       log.start("Preparing chroot...");
@@ -377,20 +366,18 @@ export class VMService {
 
       const finalState = this.store.load(vmId)!;
 
-      // Hook: afterCreate (safety-net catch)
-      await safeHook(hooks.callHook("vm:afterCreate", finalState));
+      // Hook: afterCreate
+      await hooks.callHook("vm:afterCreate", finalState);
 
       return { vmId, pid, state: finalState };
     } catch (error) {
       // Error hooks
       if (vmId) {
-        await safeHook(
-          hooks.callHook("vm:error", {
-            vmId,
-            error: error instanceof Error ? error : new Error(String(error)),
-            phase: "create",
-          }),
-        );
+        await hooks.callHook("vm:error", {
+          vmId,
+          error: error instanceof Error ? error : new Error(String(error)),
+          phase: "create",
+        });
       }
 
       // Cleanup
@@ -447,15 +434,13 @@ export class VMService {
       );
 
       // Hook: network:afterSetup
-      await safeHook(
-        hooks.callHook("network:afterSetup", {
-          vmId,
-          slot: networkConfig.slot,
-          networkConfig,
-          domains: state.network.allowedDomains,
-          networkPolicy: state.network.networkPolicy,
-        }),
-      );
+      await hooks.callHook("network:afterSetup", {
+        vmId,
+        slot: networkConfig.slot,
+        networkConfig,
+        domains: state.network.allowedDomains,
+        networkPolicy: state.network.networkPolicy,
+      });
 
       // 3. Clean stale files from previous run
       const vmRootCandidates = Array.from(
@@ -624,19 +609,17 @@ export class VMService {
 
       const finalState = this.store.load(vmId)!;
 
-      // Hook: afterStart (safety-net catch)
-      await safeHook(hooks.callHook("vm:afterStart", finalState));
+      // Hook: afterStart
+      await hooks.callHook("vm:afterStart", finalState);
 
       return { vmId, pid, success: true };
     } catch (error) {
       // Error hooks
-      await safeHook(
-        hooks.callHook("vm:error", {
-          vmId,
-          error: error instanceof Error ? error : new Error(String(error)),
-          phase: "start",
-        }),
-      );
+      await hooks.callHook("vm:error", {
+        vmId,
+        error: error instanceof Error ? error : new Error(String(error)),
+        phase: "start",
+      });
 
       killOrphanVmProcess(vmId);
       markVmAsError(vmId, error, paths);
@@ -694,22 +677,25 @@ export class VMService {
         }
 
         // Hook: network:afterTeardown
-        await safeHook(
-          this.hooks.callHook("network:afterTeardown", {
-            vmId,
-            networkConfig: netCfg.config,
-          }),
-        );
+        await this.hooks.callHook("network:afterTeardown", {
+          vmId,
+          networkConfig: netCfg.config,
+        });
       }
 
       // 3. Update state
       this.store.update(vmId, { status: "stopped", pid: null });
 
-      // Hook: afterStop (safety-net catch)
-      await safeHook(this.hooks.callHook("vm:afterStop", { vmId, previousStatus }));
+      // Hook: afterStop
+      await this.hooks.callHook("vm:afterStop", { vmId, previousStatus });
 
       return { vmId, success: true };
     } catch (err) {
+      await this.hooks.callHook("vm:error", {
+        vmId,
+        error: err instanceof Error ? err : new Error(String(err)),
+        phase: "stop",
+      });
       return { vmId, success: false, error: err instanceof VmsanError ? err : undefined };
     }
   }
@@ -720,7 +706,7 @@ export class VMService {
 
   async updateNetworkPolicy(
     vmId: string,
-    policy: string,
+    policy: NetworkPolicy,
     domains: string[],
     allowedCidrs: string[],
     deniedCidrs: string[],
@@ -728,7 +714,7 @@ export class VMService {
     const stateFile = join(this.paths.vmsDir, `${vmId}.json`);
     const fileLock = new FileLock(stateFile, `update-policy-${vmId}`);
 
-    return fileLock.run(async () => {
+    return fileLock.runAsync(async () => {
       const state = this.store.load(vmId);
       if (!state) {
         return {
@@ -767,13 +753,11 @@ export class VMService {
         });
 
         // Hook: network:policyChange
-        await safeHook(
-          this.hooks.callHook("network:policyChange", {
-            vmId,
-            previousPolicy,
-            newPolicy: policy,
-          }),
-        );
+        await this.hooks.callHook("network:policyChange", {
+          vmId,
+          previousPolicy,
+          newPolicy: policy,
+        });
 
         return { vmId, success: true, previousPolicy, newPolicy: policy };
       } catch (err) {
@@ -837,11 +821,16 @@ export class VMService {
       // 3. Delete state file — VM disappears from list
       this.store.delete(vmId);
 
-      // Hook: afterRemove (safety-net catch)
-      await safeHook(this.hooks.callHook("vm:afterRemove", { vmId }));
+      // Hook: afterRemove
+      await this.hooks.callHook("vm:afterRemove", { vmId });
 
       return { vmId, success: true };
     } catch (err) {
+      await this.hooks.callHook("vm:error", {
+        vmId,
+        error: err instanceof Error ? err : new Error(String(err)),
+        phase: "remove",
+      });
       return { vmId, success: false, error: err instanceof VmsanError ? err : undefined };
     }
   }
