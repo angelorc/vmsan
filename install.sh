@@ -3,8 +3,8 @@ set -euo pipefail
 
 # vmsan installer — downloads Firecracker, kernel, rootfs, and vmsan-agent.
 # Usage:
-#   Install: curl -fsSL https://raw.githubusercontent.com/angelorc/vmsan/main/install.sh | bash
-#   Uninstall: curl -fsSL https://raw.githubusercontent.com/angelorc/vmsan/main/install.sh | bash -s -- --uninstall
+#   Install: curl -fsSL https://vmsan.dev/install | bash
+#   Uninstall: curl -fsSL https://vmsan.dev/install | bash -s -- --uninstall
 
 VMSAN_DIR="${VMSAN_DIR:-$HOME/.vmsan}"
 VMSAN_REPO="angelorc/vmsan"

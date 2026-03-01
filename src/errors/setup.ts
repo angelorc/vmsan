@@ -8,7 +8,7 @@ export class SetupError extends VmsanError {
   }
 }
 
-const INSTALL_FIX = `Run the install script to set up all dependencies:\n\ncurl -fsSL https://raw.githubusercontent.com/angelorc/vmsan/main/install.sh | bash`;
+const INSTALL_FIX = `Run the install script to set up all dependencies:\n\ncurl -fsSL https://vmsan.dev/install | bash`;
 
 export const missingBinaryError = (binary: string, path: string): SetupError =>
   new SetupError("ERR_SETUP_MISSING_BINARY", {

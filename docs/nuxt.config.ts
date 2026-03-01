@@ -50,6 +50,10 @@ export default defineNuxtConfig({
     },
   },
 
+  routeRules: {
+    '/install': { redirect: 'https://raw.githubusercontent.com/angelorc/vmsan/main/install.sh' },
+  },
+
   llms: {
     domain: 'https://vmsan.dev',
     title: 'vmsan',

@@ -37,13 +37,13 @@ Firecracker microVM sandbox toolkit. Create, manage, and connect to isolated Fir
 ### 1. Install Firecracker, kernel, and rootfs
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/angelorc/vmsan/main/install.sh | bash
+curl -fsSL https://vmsan.dev/install | bash
 ```
 
 To uninstall:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/angelorc/vmsan/main/install.sh | bash -s -- --uninstall
+curl -fsSL https://vmsan.dev/install | bash -s -- --uninstall
 ```
 
 This downloads and installs into `~/.vmsan/`:

@@ -19,7 +19,18 @@ orientation: horizontal
 vmsan
 
 #description
-Firecracker made simple, spin up secure microVMs in milliseconds
+Firecracker made simple. Spin up secure microVMs in milliseconds, from install to interactive shell in one command 
+`vmsan create --connect`
+
+#headline
+  :::u-button
+  ---
+  size: sm
+  to: /api/cli-reference
+  variant: outline
+  ---
+  Browse CLI reference →
+  :::
 
 #links
   :::u-button
@@ -32,9 +43,21 @@ Firecracker made simple, spin up secure microVMs in milliseconds
   Get Started
   :::
 
+  :::u-button
+  ---
+  color: neutral
+  size: xl
+  to: https://github.com/angelorc/vmsan
+  target: _blank
+  variant: outline
+  icon: i-simple-icons-github
+  ---
+  Star on GitHub
+  :::
+
 #default
   ```bash [Terminal]
-  $ curl -fsSL https://raw.githubusercontent.com/angelorc/vmsan/main/install.sh | bash
+  $ curl -fsSL https://vmsan.dev/install | bash
   ```
 ::
 
@@ -49,13 +72,14 @@ title: One command is all it takes
     ::::u-page-card
     ---
     spotlight: true
-    title: Create a VM
-    description: Spin up an isolated microVM with sensible defaults.
+    title: Install vmsan
+    description: Install the CLI in seconds with a single command.
     ---
     ```bash [Terminal]
-    $ vmsan create
-    ✔ VM created: vm-a3f7b2c
-    ✔ Runtime: base | Memory: 128 MiB | vCPUs: 1
+    $ curl -fsSL https://vmsan.dev/install | bash
+    ✔ vmsan installed successfully
+    $ vmsan --version
+    vmsan 0.1.0
     ```
     ::::
 
@@ -86,6 +110,7 @@ description: vmsan wraps Firecracker with a batteries-included CLI. No boilerpla
   icon: i-lucide-zap
   title: Millisecond boot times
   description: Firecracker microVMs boot in a fraction of a second. Minimal memory overhead for maximum efficiency.
+  to: /guide/vm-lifecycle
   ---
   :::
 
@@ -94,6 +119,7 @@ description: vmsan wraps Firecracker with a batteries-included CLI. No boilerpla
   icon: i-lucide-shield-check
   title: Hardened by default
   description: Jailer chroot, seccomp-bpf filters, PID namespaces, and cgroups. Enterprise-grade security out of the box.
+  to: /guide/networking
   ---
   :::
 
@@ -102,6 +128,7 @@ description: vmsan wraps Firecracker with a batteries-included CLI. No boilerpla
   icon: i-lucide-terminal
   title: Native interactive shell
   description: Connect directly to running VMs via a seamless WebSocket PTY terminal. Leave SSH behind.
+  to: /guide/vm-lifecycle#connect-to-a-running-vm
   ---
   :::
 
@@ -110,6 +137,7 @@ description: vmsan wraps Firecracker with a batteries-included CLI. No boilerpla
   icon: i-lucide-file-up
   title: Instant file sync
   description: Push and pull files securely over the agent API. No SCP or complex folder mounting required.
+  to: /guide/file-operations
   ---
   :::
 
@@ -118,6 +146,7 @@ description: vmsan wraps Firecracker with a batteries-included CLI. No boilerpla
   icon: i-lucide-layers
   title: Multi-runtime ready
   description: Start instantly with optimized Node or Python runtimes, or bring your own custom Docker image.
+  to: /guide/docker-images
   ---
   :::
 
@@ -126,6 +155,7 @@ description: vmsan wraps Firecracker with a batteries-included CLI. No boilerpla
   icon: i-lucide-cpu
   title: API-first design
   description: Parse data cleanly with built-in --json flags. Designed specifically for CI/CD, scripting, and automation.
+  to: /api/cli-reference
   ---
   :::
 ::
