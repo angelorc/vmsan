@@ -4,6 +4,12 @@
 
 ### Patch Changes
 
+- fix: pin unimport to 5.6.0 to work around mlly export misparse
+
+## 0.1.0
+
+### Patch Changes
+
 - docs: update dependencies, config and assets
 
 ## 0.1.0
