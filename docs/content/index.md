@@ -5,18 +5,16 @@ seo:
   description: Spin up isolated Firecracker microVMs in seconds. Full lifecycle management, network isolation, Docker image support, and interactive shell access.
 ---
 
-## ::u-page-hero
-
-badge:
-label: Open source on GitHub
-to: https://github.com/angelorc/vmsan
-icon: i-simple-icons-github
-color: gray
-variant: subtle
-orientation: horizontal
-
+::u-page-hero
 ---
-
+badge:
+  label: Open source on GitHub
+  to: https://github.com/angelorc/vmsan
+  icon: i-simple-icons-github
+  color: neutral
+  variant: subtle
+orientation: horizontal
+---
 #title
 vmsan
 
@@ -24,40 +22,30 @@ vmsan
 Firecracker made simple, spin up secure microVMs in milliseconds
 
 #links
-:::u-button
-
----
-
-color: primary
-size: xl
-to: /getting-started/introduction
-trailing-icon: i-lucide-arrow-right
-
----
-
-Get Started
-:::
+  :::u-button
+  ---
+  color: primary
+  size: xl
+  to: /getting-started/introduction
+  trailing-icon: i-lucide-arrow-right
+  ---
+  Get Started
+  :::
 
 #default
-
-```bash [Terminal]
-$ curl -fsSL https://raw.githubusercontent.com/angelorc/vmsan/main/install.sh | bash
-```
-
+  ```bash [Terminal]
+  $ curl -fsSL https://raw.githubusercontent.com/angelorc/vmsan/main/install.sh | bash
+  ```
 ::
 
-## ::u-page-section
-
-## title: One command is all it takes
-
-:::u-page-grid
-
+::u-page-section
 ---
-
-class: lg:grid-cols-2
-
+title: One command is all it takes
 ---
-
+  :::u-page-grid
+  ---
+  class: lg:grid-cols-2
+  ---
     ::::u-page-card
     ---
     spotlight: true
@@ -84,106 +72,73 @@ class: lg:grid-cols-2
     root@vm-f91c4e0:~#
     ```
     ::::
-
-:::
+  :::
 ::
 
-## ::u-page-section
-
+::u-page-section
+---
 title: Everything you need for secure workloads.
 description: vmsan wraps Firecracker with a batteries-included CLI. No boilerplate. No complex infrastructure. Just fast, secure VMs.
-
 ---
-
 #features
-:::u-page-feature
+  :::u-page-feature
+  ---
+  icon: i-lucide-zap
+  title: Millisecond boot times
+  description: Firecracker microVMs boot in a fraction of a second. Minimal memory overhead for maximum efficiency.
+  ---
+  :::
 
----
+  :::u-page-feature
+  ---
+  icon: i-lucide-shield-check
+  title: Hardened by default
+  description: Jailer chroot, seccomp-bpf filters, PID namespaces, and cgroups. Enterprise-grade security out of the box.
+  ---
+  :::
 
-icon: i-lucide-zap
-title: Millisecond boot times
-description: Firecracker microVMs boot in a fraction of a second. Minimal memory overhead for maximum efficiency.
+  :::u-page-feature
+  ---
+  icon: i-lucide-terminal
+  title: Native interactive shell
+  description: Connect directly to running VMs via a seamless WebSocket PTY terminal. Leave SSH behind.
+  ---
+  :::
 
----
+  :::u-page-feature
+  ---
+  icon: i-lucide-file-up
+  title: Instant file sync
+  description: Push and pull files securely over the agent API. No SCP or complex folder mounting required.
+  ---
+  :::
 
-:::
+  :::u-page-feature
+  ---
+  icon: i-lucide-layers
+  title: Multi-runtime ready
+  description: Start instantly with optimized Node or Python runtimes, or bring your own custom Docker image.
+  ---
+  :::
 
-:::u-page-feature
-
----
-
-icon: i-lucide-shield-check
-title: Hardened by default
-description: Jailer chroot, seccomp-bpf filters, PID namespaces, and cgroups. Enterprise-grade security out of the box.
-
----
-
-:::
-
-:::u-page-feature
-
----
-
-icon: i-lucide-terminal
-title: Native interactive shell
-description: Connect directly to running VMs via a seamless WebSocket PTY terminal. Leave SSH behind.
-
----
-
-:::
-
-:::u-page-feature
-
----
-
-icon: i-lucide-file-up
-title: Instant file sync
-description: Push and pull files securely over the agent API. No SCP or complex folder mounting required.
-
----
-
-:::
-
-:::u-page-feature
-
----
-
-icon: i-lucide-layers
-title: Multi-runtime ready
-description: Start instantly with optimized Node or Python runtimes, or bring your own custom Docker image.
-
----
-
-:::
-
-:::u-page-feature
-
----
-
-icon: i-lucide-cpu
-title: API-first design
-description: Parse data cleanly with built-in --json flags. Designed specifically for CI/CD, scripting, and automation.
-
----
-
-:::
+  :::u-page-feature
+  ---
+  icon: i-lucide-cpu
+  title: API-first design
+  description: Parse data cleanly with built-in --json flags. Designed specifically for CI/CD, scripting, and automation.
+  ---
+  :::
 ::
 
-## ::u-page-section
-
+::u-page-section
+---
 title: See it in action
 description: Powerful isolation primitives wrapped in an intuitive developer experience.
-
 ---
-
-:::u-page-grid
-
----
-
-class: lg:grid-cols-2
-
----
-
+  :::u-page-grid
+  ---
+  class: lg:grid-cols-2
+  ---
     ::::u-page-card
     ---
     spotlight: true
@@ -247,39 +202,30 @@ class: lg:grid-cols-2
       "networkPolicy":"allow-all"}]
     ```
     ::::
-
-:::
+  :::
 ::
 
 ::u-page-section
-:::u-page-c-t-a
-
----
-
-variant: subtle
-title: Ready to build secure workloads?
-description: Download vmsan today. Spin up your first Firecracker microVM in under a second.
-
----
-
-#links
-::::u-button
-
----
-
-color: primary
-size: xl
-to: /getting-started/introduction
-trailing-icon: i-lucide-arrow-right
-
----
-
-Read the documentation
-::::
+  :::u-page-c-t-a
+  ---
+  variant: subtle
+  title: Ready to build secure workloads?
+  description: Download vmsan today. Spin up your first Firecracker microVM in under a second.
+  ---
+  #links
+    ::::u-button
+    ---
+    color: primary
+    size: xl
+    to: /getting-started/introduction
+    trailing-icon: i-lucide-arrow-right
+    ---
+    Read the documentation
+    ::::
 
     ::::u-button
     ---
-    color: gray
+    color: neutral
     size: xl
     to: https://github.com/angelorc/vmsan
     target: _blank
@@ -288,6 +234,5 @@ Read the documentation
     ---
     Star on GitHub
     ::::
-
-:::
+  :::
 ::
