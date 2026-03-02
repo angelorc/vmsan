@@ -4,6 +4,12 @@
 
 ### Patch Changes
 
+- Merge pull request #23 from angelorc/feat/vmsan-context
+
+## 0.1.0
+
+### Patch Changes
+
 - docs: use vmsan.dev/install URL and update landing page
 
 ## 0.1.0
