@@ -1,29 +1,29 @@
 export default defineNuxtConfig({
-  extends: ['docus'],
+  extends: ["docus"],
 
-  css: ['~/assets/css/main.css'],
+  css: ["~/assets/css/main.css"],
 
   devtools: { enabled: true },
 
   site: {
-    name: 'vmsan',
-    url: 'https://vmsan.dev',
+    name: "vmsan",
+    url: "https://vmsan.dev",
   },
 
   $development: {
     site: {
-      url: 'http://localhost:3000',
+      url: "http://localhost:3000",
     },
   },
 
   content: {
     experimental: {
-      sqliteConnector: 'native',
+      sqliteConnector: "native",
     },
     build: {
       markdown: {
         highlight: {
-          langs: ['bash', 'json', 'js', 'ts', 'shell', 'yaml', 'docker', 'diff'],
+          langs: ["bash", "json", "js", "ts", "shell", "yaml", "docker", "diff"],
         },
       },
     },
@@ -31,7 +31,7 @@ export default defineNuxtConfig({
 
   mdc: {
     highlight: {
-      shikiEngine: 'javascript',
+      shikiEngine: "javascript",
     },
   },
 
@@ -39,44 +39,47 @@ export default defineNuxtConfig({
     asyncContext: true,
   },
 
-  compatibilityDate: '2025-07-22',
+  compatibilityDate: "2025-07-22",
 
   nitro: {
     prerender: {
       crawlLinks: true,
       failOnError: false,
       autoSubfolderIndex: false,
-      routes: ['/'],
+      routes: ["/"],
     },
   },
 
   routeRules: {
-    '/install': { redirect: 'https://raw.githubusercontent.com/angelorc/vmsan/main/install.sh' },
+    "/install": { redirect: "https://raw.githubusercontent.com/angelorc/vmsan/main/install.sh" },
   },
 
   llms: {
-    domain: 'https://vmsan.dev',
-    title: 'vmsan',
-    description: 'Firecracker microVM sandbox toolkit. Spin up isolated microVMs in milliseconds with full lifecycle management, network isolation, Docker image support, and interactive shell access.',
+    domain: "https://vmsan.dev",
+    title: "vmsan",
+    description:
+      "Firecracker microVM sandbox toolkit. Spin up isolated microVMs in milliseconds with full lifecycle management, network isolation, Docker image support, and interactive shell access.",
     notes: [
-      'vmsan is a CLI tool and TypeScript library for managing Firecracker microVMs.',
-      'It provides VM lifecycle management, network isolation policies, file operations, and Docker image support.',
+      "vmsan is a CLI tool and TypeScript library for managing Firecracker microVMs.",
+      "It provides VM lifecycle management, network isolation policies, file operations, and Docker image support.",
     ],
   },
 
   robots: {
-    groups: [{
-      userAgent: '*',
-      allow: '/',
-    }],
-    sitemap: '/sitemap.xml',
+    groups: [
+      {
+        userAgent: "*",
+        allow: "/",
+      },
+    ],
+    sitemap: "/sitemap.xml",
   },
 
   icon: {
     clientBundle: {
       scan: true,
     },
-    provider: 'iconify',
+    provider: "iconify",
   },
 
   // WORKAROUND: unjs/unimport#273 + unjs/mlly#303
@@ -103,4 +106,4 @@ export default defineNuxtConfig({
   //     },
   //   }],
   // },
-})
+});

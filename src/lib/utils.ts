@@ -4,6 +4,10 @@ import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { stripAnsi } from "consola/utils";
 import { invalidDurationError } from "../errors/index.ts";
 
+export function toError(err: unknown): Error {
+  return err instanceof Error ? err : new Error(String(err));
+}
+
 /**
  * Send a signal to a process. Returns true if delivered, false if
  * the process is already dead (ESRCH). Falls back to sudo for

@@ -1,8 +1,7 @@
 import type { CommandDef } from "citty";
 import { defineCommand } from "citty";
 import { consola } from "consola";
-import { vmsanPaths } from "../paths.ts";
-import { VMService } from "../services/vm.ts";
+import { createVmsan } from "../context.ts";
 import { createCommandLogger, getOutputMode } from "../lib/logger/index.ts";
 import { handleCommandError } from "../errors/index.ts";
 import {
@@ -58,8 +57,8 @@ const networkCommand = defineCommand({
         throw policyConflictError();
       }
 
-      const service = new VMService(vmsanPaths());
-      const result = await service.updateNetworkPolicy(
+      const vmsan = await createVmsan();
+      const result = await vmsan.updateNetworkPolicy(
         args.vmId,
         policy,
         domains,

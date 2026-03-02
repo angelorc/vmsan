@@ -52,6 +52,26 @@ export interface VmStateStore {
   allocateNetworkSlot(): number;
 }
 
+export function findFreeNetworkSlot(states: VmState[]): number {
+  const usedSlots = new Set(
+    states
+      .filter((s) => s.status === "running" || s.status === "creating")
+      .map((s) => {
+        const parts = s.network.hostIp.split(".");
+        return Number(parts[2]);
+      }),
+  );
+  for (const slot of getActiveTapSlots()) {
+    usedSlots.add(slot);
+  }
+
+  for (let slot = 0; slot <= 254; slot++) {
+    if (!usedSlots.has(slot)) return slot;
+  }
+
+  throw networkSlotsExhaustedError();
+}
+
 export class FileVmStateStore implements VmStateStore {
   constructor(private readonly dir: string) {}
 
@@ -89,43 +109,26 @@ export class FileVmStateStore implements VmStateStore {
   }
 
   allocateNetworkSlot(): number {
-    const states = this.list();
-    const usedSlots = new Set(
-      states
-        .filter((s) => s.status === "running" || s.status === "creating")
-        .map((s) => {
-          const parts = s.network.hostIp.split(".");
-          return Number(parts[2]);
-        }),
-    );
-    for (const slot of FileVmStateStore.getActiveTapSlots()) {
-      usedSlots.add(slot);
-    }
-
-    for (let slot = 0; slot <= 254; slot++) {
-      if (!usedSlots.has(slot)) return slot;
-    }
-
-    throw networkSlotsExhaustedError();
+    return findFreeNetworkSlot(this.list());
   }
+}
 
-  private static getActiveTapSlots(): Set<number> {
-    const slots = new Set<number>();
-    try {
-      for (const iface of readdirSync("/sys/class/net")) {
-        // Match TAP devices (fhvmN) and veth host ends (veth-h-N)
-        const tapMatch = /^fhvm(\d+)$/.exec(iface);
-        const vethMatch = /^veth-h-(\d+)$/.exec(iface);
-        const match = tapMatch || vethMatch;
-        if (!match) continue;
-        const slot = Number(match[1]);
-        if (Number.isInteger(slot) && slot >= 0 && slot <= 254) {
-          slots.add(slot);
-        }
+export function getActiveTapSlots(): Set<number> {
+  const slots = new Set<number>();
+  try {
+    for (const iface of readdirSync("/sys/class/net")) {
+      // Match TAP devices (fhvmN) and veth host ends (veth-h-N)
+      const tapMatch = /^fhvm(\d+)$/.exec(iface);
+      const vethMatch = /^veth-h-(\d+)$/.exec(iface);
+      const match = tapMatch || vethMatch;
+      if (!match) continue;
+      const slot = Number(match[1]);
+      if (Number.isInteger(slot) && slot >= 0 && slot <= 254) {
+        slots.add(slot);
       }
-    } catch {
-      // /sys/class/net may not be readable on some systems
     }
-    return slots;
+  } catch {
+    // /sys/class/net may not be readable on some systems
   }
+  return slots;
 }

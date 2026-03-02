@@ -1,9 +1,8 @@
 import type { CommandDef } from "citty";
 import { defineCommand } from "citty";
 import { consola } from "consola";
-import { vmsanPaths } from "../paths.ts";
-import { VMService } from "../services/vm.ts";
 import { createCommandLogger } from "../lib/logger/index.ts";
+import { createVmsan } from "../context.ts";
 
 const removeCommand = defineCommand({
   meta: {
@@ -35,12 +34,12 @@ const removeCommand = defineCommand({
       return;
     }
 
-    const service = new VMService(vmsanPaths());
+    const vmsan = await createVmsan();
 
     // Validate all IDs exist upfront
     const missing: string[] = [];
     for (const id of vmIds) {
-      if (!service.get(id)) missing.push(id);
+      if (!vmsan.get(id)) missing.push(id);
     }
     if (missing.length > 0) {
       consola.error(`VM(s) not found: ${missing.join(", ")}`);
@@ -53,7 +52,7 @@ const removeCommand = defineCommand({
     if (!args.force) {
       const running: string[] = [];
       for (const id of vmIds) {
-        const vm = service.get(id)!;
+        const vm = vmsan.get(id)!;
         if (vm.status !== "stopped") running.push(id);
       }
       if (running.length > 0) {
@@ -71,11 +70,11 @@ const removeCommand = defineCommand({
     let hasErrors = false;
     for (const id of vmIds) {
       const log = consola.withTag(id);
-      const vm = service.get(id)!;
+      const vm = vmsan.get(id)!;
       consola.debug(`VM ${id} status=${vm.status}, force=${args.force}`);
 
       log.start(`Removing ${id}...`);
-      const result = await service.remove(id, { force: args.force });
+      const result = await vmsan.remove(id, { force: args.force });
 
       if (result.success) {
         log.success(`Removed ${id}`);
