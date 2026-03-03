@@ -137,8 +137,7 @@ const execCommand = defineCommand({
       const { state, guestIp, port, store } = resolveVmState(args.vmId, paths);
       consola.debug(`Agent endpoint: ${guestIp}:${port}`);
 
-      const log = consola.withTag(args.vmId);
-      log.start("Waiting for agent...");
+      consola.debug(`Waiting for agent on ${guestIp}:${port}...`);
       await waitForAgent(guestIp, port);
 
       if (args.interactive) {
@@ -157,7 +156,7 @@ const execCommand = defineCommand({
         }
 
         if (args.sudo) {
-          parts.push("sudo");
+          parts.push("/usr/bin/sudo");
         }
 
         parts.push(shellEscape(command));
@@ -165,9 +164,7 @@ const execCommand = defineCommand({
           parts.push(shellEscape(a));
         }
 
-        const injectedCmd = parts.join(" ") + "; exit $?\n";
-
-        log.success("Agent is ready. Connecting interactive shell...");
+        const injectedCmd = "clear; " + parts.join(" ") + "; exit $?\n";
 
         // Wire timeout extension
         let extender: TimeoutExtender | null = null;
@@ -207,7 +204,7 @@ const execCommand = defineCommand({
 
         const agent = new AgentClient(`http://${guestIp}:${port}`, state.agentToken);
 
-        const cmd = args.sudo ? "sudo" : command;
+        const cmd = args.sudo ? "/usr/bin/sudo" : command;
         const runArgs = args.sudo ? [command, ...commandArgs] : commandArgs;
 
         const params: RunParams = {
