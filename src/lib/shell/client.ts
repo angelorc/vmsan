@@ -15,6 +15,7 @@ export interface ShellSessionOptions {
   shell?: string;
   sessionId?: string;
   initialCommand?: string;
+  user?: string;
 }
 
 export interface ShellCloseInfo {
@@ -153,6 +154,9 @@ export class ShellSession {
     url.searchParams.set("token", this.opts.token);
     if (this.opts.shell) {
       url.searchParams.set("shell", this.opts.shell);
+    }
+    if (this.opts.user) {
+      url.searchParams.set("user", this.opts.user);
     }
     return url.toString();
   }

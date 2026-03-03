@@ -23,19 +23,22 @@ var allowedShells = map[string]bool{
 
 // Handler provides HTTP/WebSocket endpoints for the shell subsystem.
 type Handler struct {
-	manager    *SessionManager
-	tokenBytes []byte
-	upgrader   websocket.Upgrader
-	logger     *slog.Logger
+	manager     *SessionManager
+	tokenBytes  []byte
+	defaultUser string
+	upgrader    websocket.Upgrader
+	logger      *slog.Logger
 }
 
-// NewHandler creates a new shell Handler with the given auth token and logger.
-func NewHandler(token string, logger *slog.Logger) *Handler {
+// NewHandler creates a new shell Handler with the given auth token,
+// default user, and logger.
+func NewHandler(token, defaultUser string, logger *slog.Logger) *Handler {
 	return &Handler{
-		manager:    NewSessionManager(logger),
-		tokenBytes: []byte(token),
-		upgrader:   websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
-		logger:     logger,
+		manager:     NewSessionManager(logger),
+		tokenBytes:  []byte(token),
+		defaultUser: defaultUser,
+		upgrader:    websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
+		logger:      logger,
 	}
 }
 
@@ -68,7 +71,12 @@ func (h *Handler) handleNewSession(w http.ResponseWriter, r *http.Request) {
 	}
 	shell = cleaned
 
-	session, err := h.manager.CreateSession(shell)
+	runAs := r.URL.Query().Get("user")
+	if runAs == "" {
+		runAs = h.defaultUser
+	}
+
+	session, err := h.manager.CreateSession(shell, runAs)
 	if err != nil {
 		if err.Error() == "max sessions reached" {
 			http.Error(w, `{"error":"too many concurrent sessions"}`, http.StatusTooManyRequests)
@@ -81,6 +89,7 @@ func (h *Handler) handleNewSession(w http.ResponseWriter, r *http.Request) {
 	h.logger.Info("shell.session.created",
 		"session_id", session.ID,
 		"shell", shell,
+		"user", runAs,
 		"remote_addr", r.RemoteAddr,
 	)
 

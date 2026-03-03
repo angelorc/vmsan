@@ -155,10 +155,6 @@ const execCommand = defineCommand({
           parts.push(`${key}=${shellEscape(val)}`);
         }
 
-        if (args.sudo) {
-          parts.push("/usr/bin/sudo");
-        }
-
         parts.push(shellEscape(command));
         for (const a of commandArgs) {
           parts.push(shellEscape(a));
@@ -183,6 +179,7 @@ const execCommand = defineCommand({
             port,
             token: state.agentToken,
             initialCommand: injectedCmd,
+            user: args.sudo ? "root" : undefined,
           });
 
           await shell.connect();
@@ -204,14 +201,12 @@ const execCommand = defineCommand({
 
         const agent = new AgentClient(`http://${guestIp}:${port}`, state.agentToken);
 
-        const cmd = args.sudo ? "/usr/bin/sudo" : command;
-        const runArgs = args.sudo ? [command, ...commandArgs] : commandArgs;
-
         const params: RunParams = {
-          cmd,
-          args: runArgs.length > 0 ? runArgs : undefined,
+          cmd: command,
+          args: commandArgs.length > 0 ? commandArgs : undefined,
           cwd: args.workdir || undefined,
           env: Object.keys(envVars).length > 0 ? envVars : undefined,
+          user: args.sudo ? "root" : undefined,
         };
 
         const ac = new AbortController();

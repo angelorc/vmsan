@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/angelorc/vmsan/agent/internal/sysuser"
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
 )
@@ -67,10 +68,19 @@ type Session struct {
 }
 
 // NewSession creates a PTY session, starts the producer and wait loops,
-// and arms the inactivity timer.
-func NewSession(id, shell string, onDestroy func(string), logger *slog.Logger) (*Session, error) {
+// and arms the inactivity timer. When runAs is non-empty the shell runs
+// as that system user.
+func NewSession(id, shell, runAs string, onDestroy func(string), logger *slog.Logger) (*Session, error) {
 	cmd := exec.Command(shell)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+
+	if runAs != "" {
+		creds, err := sysuser.Resolve(runAs)
+		if err != nil {
+			return nil, err
+		}
+		creds.Apply(cmd)
+	}
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
@@ -351,8 +361,9 @@ func NewSessionManager(logger *slog.Logger) *SessionManager {
 }
 
 // CreateSession creates a new PTY session with the given shell.
-// Enforces DefaultMaxSessions limit.
-func (m *SessionManager) CreateSession(shell string) (*Session, error) {
+// Enforces DefaultMaxSessions limit. When runAs is non-empty the shell
+// process runs as that system user.
+func (m *SessionManager) CreateSession(shell, runAs string) (*Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -372,13 +383,13 @@ func (m *SessionManager) CreateSession(shell string) (*Session, error) {
 		m.logger.Info("session removed from manager", "sessionId", sid)
 	}
 
-	s, err := NewSession(id, shell, onDestroy, m.logger)
+	s, err := NewSession(id, shell, runAs, onDestroy, m.logger)
 	if err != nil {
 		return nil, err
 	}
 
 	m.sessions[id] = s
-	m.logger.Info("session created", "sessionId", id, "shell", shell)
+	m.logger.Info("session created", "sessionId", id, "shell", shell, "user", runAs)
 	return s, nil
 }
 

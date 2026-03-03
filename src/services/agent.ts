@@ -10,6 +10,7 @@ export interface RunParams {
   env?: Record<string, string>;
   timeoutMs?: number;
   detached?: boolean;
+  user?: string;
 }
 
 export type RunEventType = "started" | "stdout" | "stderr" | "exit" | "timeout" | "error";
