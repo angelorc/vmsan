@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/angelorc/vmsan/agent/internal/cmdstore"
+	"github.com/angelorc/vmsan/agent/internal/sysuser"
 )
 
 const maxConcurrentCommands = 16
@@ -26,6 +27,7 @@ type runRequest struct {
 	Env       map[string]string `json:"env,omitempty"`
 	TimeoutMs int               `json:"timeoutMs,omitempty"`
 	Detached  bool              `json:"detached,omitempty"`
+	User      string            `json:"user,omitempty"`
 }
 
 type ndjsonEvent struct {
@@ -52,13 +54,13 @@ func writeEvent(w io.Writer, mu *sync.Mutex, evt ndjsonEvent) {
 	}
 }
 
-func makeRunHandler(logger *slog.Logger) func(http.ResponseWriter, *http.Request) {
+func makeRunHandler(logger *slog.Logger, defaultUser string) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		handleRun(w, r, logger)
+		handleRun(w, r, logger, defaultUser)
 	}
 }
 
-func handleRun(w http.ResponseWriter, r *http.Request, logger *slog.Logger) {
+func handleRun(w http.ResponseWriter, r *http.Request, logger *slog.Logger, defaultUser string) {
 	var req runRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
@@ -69,12 +71,18 @@ func handleRun(w http.ResponseWriter, r *http.Request, logger *slog.Logger) {
 		return
 	}
 
+	// Apply default user when none specified in request.
+	if req.User == "" {
+		req.User = defaultUser
+	}
+
 	logger.Info("exec",
 		"cmd", req.Cmd,
 		"args", req.Args,
 		"cwd", req.Cwd,
 		"detached", req.Detached,
 		"timeout_ms", req.TimeoutMs,
+		"user", req.User,
 	)
 
 	if int(activeCommands.Load()) >= maxConcurrentCommands {
@@ -89,12 +97,25 @@ func handleRun(w http.ResponseWriter, r *http.Request, logger *slog.Logger) {
 	if req.Cwd != "" {
 		cmd.Dir = req.Cwd
 	}
-	if len(req.Env) > 0 {
-		env := cmd.Environ()
-		for k, v := range req.Env {
-			env = append(env, k+"="+v)
+
+	// Resolve user credentials and apply to the command.
+	if req.User != "" {
+		creds, err := sysuser.Resolve(req.User)
+		if err != nil {
+			activeCommands.Add(-1)
+			http.Error(w, fmt.Sprintf(`{"error":"resolve user: %s"}`, err), http.StatusBadRequest)
+			return
 		}
-		cmd.Env = env
+		creds.Apply(cmd)
+	}
+
+	if len(req.Env) > 0 {
+		if cmd.Env == nil {
+			cmd.Env = cmd.Environ()
+		}
+		for k, v := range req.Env {
+			cmd.Env = append(cmd.Env, k+"="+v)
+		}
 	}
 
 	stdout, err := cmd.StdoutPipe()

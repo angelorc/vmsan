@@ -17,14 +17,14 @@ func TestSessionManager_MaxSessions(t *testing.T) {
 
 	created := make([]*Session, 0, DefaultMaxSessions)
 	for i := 0; i < DefaultMaxSessions; i++ {
-		s, err := m.CreateSession("/bin/sh")
+		s, err := m.CreateSession("/bin/sh", "")
 		if err != nil {
 			t.Fatalf("failed to create session %d: %v", i, err)
 		}
 		created = append(created, s)
 	}
 
-	_, err := m.CreateSession("/bin/sh")
+	_, err := m.CreateSession("/bin/sh", "")
 	if err == nil {
 		t.Fatal("expected error when exceeding max sessions")
 	}
@@ -39,7 +39,7 @@ func TestSessionManager_CreateAndGet(t *testing.T) {
 	logger := testLogger()
 	m := NewSessionManager(logger)
 
-	s, err := m.CreateSession("/bin/sh")
+	s, err := m.CreateSession("/bin/sh", "")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -61,13 +61,13 @@ func TestSessionManager_ListSessions(t *testing.T) {
 	logger := testLogger()
 	m := NewSessionManager(logger)
 
-	s1, err := m.CreateSession("/bin/sh")
+	s1, err := m.CreateSession("/bin/sh", "")
 	if err != nil {
 		t.Fatalf("create session 1: %v", err)
 	}
 	defer s1.destroy()
 
-	s2, err := m.CreateSession("/bin/sh")
+	s2, err := m.CreateSession("/bin/sh", "")
 	if err != nil {
 		t.Fatalf("create session 2: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestSessionManager_KillSession(t *testing.T) {
 	logger := testLogger()
 	m := NewSessionManager(logger)
 
-	s, err := m.CreateSession("/bin/sh")
+	s, err := m.CreateSession("/bin/sh", "")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestSession_MaxSubscribers(t *testing.T) {
 	logger := testLogger()
 	m := NewSessionManager(logger)
 
-	s, err := m.CreateSession("/bin/sh")
+	s, err := m.CreateSession("/bin/sh", "")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestSession_InactivityTimeout(t *testing.T) {
 		t.Fatalf("generate id: %v", err)
 	}
 
-	s, err := NewSession(id, "/bin/sh", onDestroy, logger)
+	s, err := NewSession(id, "/bin/sh", "", onDestroy, logger)
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestSession_Info(t *testing.T) {
 	logger := testLogger()
 	m := NewSessionManager(logger)
 
-	s, err := m.CreateSession("/bin/sh")
+	s, err := m.CreateSession("/bin/sh", "")
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}

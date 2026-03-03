@@ -24,5 +24,6 @@ export function generateAgentEnv(token: string, port: number, vmId: string): str
   return `VMSAN_AGENT_TOKEN=${token}
 VMSAN_AGENT_PORT=${port}
 VMSAN_VM_ID=${vmId}
+VMSAN_DEFAULT_USER=ubuntu
 `;
 }

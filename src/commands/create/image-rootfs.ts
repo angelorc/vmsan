@@ -20,6 +20,7 @@ const APT_PACKAGES = [
   "openssh-server",
   "openssl",
   "procps",
+  "sudo",
   "tar",
   "unzip",
   "debianutils",
@@ -42,6 +43,7 @@ const DNF_PACKAGES = [
   "openssl",
   "openssl-libs",
   "procps",
+  "sudo",
   "tar",
   "unzip",
   "which",
@@ -50,6 +52,7 @@ const DNF_PACKAGES = [
 ];
 
 const APK_PACKAGES = [
+  "bash",
   "bind-tools",
   "bzip2",
   "findutils",
@@ -64,6 +67,7 @@ const APK_PACKAGES = [
   "openssh",
   "openssl",
   "procps",
+  "sudo",
   "tar",
   "unzip",
   "whois",
@@ -82,6 +86,14 @@ RUN if command -v apt-get >/dev/null 2>&1; then ${aptInstall}; \\
     elif command -v yum >/dev/null 2>&1; then ${yumInstall}; \\
     elif command -v apk >/dev/null 2>&1; then ${apkInstall}; \\
     fi
+RUN if command -v apk >/dev/null 2>&1; then \\
+      adduser -D -s /bin/bash ubuntu 2>/dev/null || true; \\
+    else \\
+      id -u ubuntu >/dev/null 2>&1 || useradd -m -s /bin/bash ubuntu; \\
+    fi; \\
+    echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/ubuntu; \\
+    chmod 440 /etc/sudoers.d/ubuntu; \\
+    mkdir -p /home/ubuntu/.ssh && chown -R ubuntu:ubuntu /home/ubuntu
 RUN ssh-keygen -A 2>/dev/null || true; \\
     mkdir -p /root/.ssh && chmod 700 /root/.ssh; \\
     if [ -f /etc/ssh/sshd_config ]; then \\

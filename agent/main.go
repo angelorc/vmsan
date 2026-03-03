@@ -73,6 +73,11 @@ func main() {
 		log.Fatal("auth token required: use --token or VMSAN_AGENT_TOKEN env")
 	}
 
+	defaultUser := os.Getenv("VMSAN_DEFAULT_USER")
+	if defaultUser == "" {
+		defaultUser = "ubuntu"
+	}
+
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
 	mux := http.NewServeMux()
@@ -84,13 +89,13 @@ func main() {
 	// Note: audit middleware is inside authMiddleware intentionally — only
 	// authenticated requests are logged. Auth failures are rejected before
 	// reaching the audit layer.
-	mux.Handle("POST /exec", authMiddleware(*token, auditMiddleware(logger, http.HandlerFunc(makeRunHandler(logger)))))
+	mux.Handle("POST /exec", authMiddleware(*token, auditMiddleware(logger, http.HandlerFunc(makeRunHandler(logger, defaultUser)))))
 	mux.Handle("POST /exec/{id}/kill", authMiddleware(*token, auditMiddleware(logger, http.HandlerFunc(handleKill))))
 	mux.Handle("POST /files/write", authMiddleware(*token, auditMiddleware(logger, http.HandlerFunc(makeFilesWriteHandler(logger)))))
 	mux.Handle("POST /files/read", authMiddleware(*token, auditMiddleware(logger, http.HandlerFunc(makeFilesReadHandler(logger)))))
 
 	// Shell subsystem (WebSocket + REST)
-	shellHandler := shell.NewHandler(*token, logger)
+	shellHandler := shell.NewHandler(*token, defaultUser, logger)
 	shellHandler.Register(mux)
 
 	addr := fmt.Sprintf("0.0.0.0:%d", *port)
