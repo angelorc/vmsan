@@ -4,6 +4,12 @@
 
 ### Patch Changes
 
+- Merge pull request #28 from angelorc/refactor/sysuser-credentials
+
+## 0.1.0
+
+### Patch Changes
+
 - Merge pull request #27 from angelorc/fix/exec-command-ux
 
 ## 0.1.0
