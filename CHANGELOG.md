@@ -4,6 +4,12 @@
 
 ### Patch Changes
 
+- Merge pull request #25 from angelorc/refactor/vm-validation-timeout-killer
+
+## 0.1.0
+
+### Patch Changes
+
 - Merge pull request #23 from angelorc/feat/vmsan-context
 
 ## 0.1.0
