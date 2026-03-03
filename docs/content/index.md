@@ -62,6 +62,12 @@ Firecracker made simple. Spin up secure microVMs in milliseconds, from install t
 ::
 
 ::u-page-section
+<div style="text-align: center; margin-bottom: 2rem;">
+  <img src="https://raw.githubusercontent.com/angelorc/vmsan/main/assets/demo.gif" alt="vmsan demo" style="max-width: 720px; width: 100%; border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,0.15);" />
+</div>
+::
+
+::u-page-section
 ---
 title: One command is all it takes
 ---
