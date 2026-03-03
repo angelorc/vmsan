@@ -33,6 +33,7 @@ export class TimeoutExtender {
 
   start(): void {
     if (this._timer) return;
+    if (this._signal?.aborted) return;
 
     // Perform an immediate extension
     this._extend();
