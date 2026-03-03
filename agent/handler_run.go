@@ -98,7 +98,16 @@ func handleRun(w http.ResponseWriter, r *http.Request, logger *slog.Logger, defa
 		cmd.Dir = req.Cwd
 	}
 
-	// Resolve user credentials and apply to the command.
+	if len(req.Env) > 0 {
+		if cmd.Env == nil {
+			cmd.Env = cmd.Environ()
+		}
+		for k, v := range req.Env {
+			cmd.Env = append(cmd.Env, k+"="+v)
+		}
+	}
+
+	// Apply credentials after env merge so HOME/USER/LOGNAME are canonical.
 	if req.User != "" {
 		creds, err := sysuser.Resolve(req.User)
 		if err != nil {
@@ -107,15 +116,6 @@ func handleRun(w http.ResponseWriter, r *http.Request, logger *slog.Logger, defa
 			return
 		}
 		creds.Apply(cmd)
-	}
-
-	if len(req.Env) > 0 {
-		if cmd.Env == nil {
-			cmd.Env = cmd.Environ()
-		}
-		for k, v := range req.Env {
-			cmd.Env = append(cmd.Env, k+"="+v)
-		}
 	}
 
 	stdout, err := cmd.StdoutPipe()

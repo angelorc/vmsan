@@ -87,7 +87,7 @@ RUN if command -v apt-get >/dev/null 2>&1; then ${aptInstall}; \\
     elif command -v apk >/dev/null 2>&1; then ${apkInstall}; \\
     fi
 RUN if command -v apk >/dev/null 2>&1; then \\
-      adduser -D -s /bin/bash ubuntu 2>/dev/null || true; \\
+      id -u ubuntu >/dev/null 2>&1 || adduser -D -s /bin/bash ubuntu; \\
     else \\
       id -u ubuntu >/dev/null 2>&1 || useradd -m -s /bin/bash ubuntu; \\
     fi; \\
