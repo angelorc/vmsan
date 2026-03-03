@@ -4,6 +4,12 @@
 
 ### Patch Changes
 
+- docs: make demo gif full-width section
+
+## 0.1.0
+
+### Patch Changes
+
 - docs: add demo gif to homepage
 
 ## 0.1.0
