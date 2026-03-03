@@ -1,6 +1,7 @@
 import { createGzip } from "node:zlib";
 import { Readable } from "node:stream";
 import { pack, type Pack } from "tar-stream";
+import { Command, CommandFinished } from "../lib/command.ts";
 
 export interface RunParams {
   cmd: string;
@@ -35,6 +36,12 @@ export interface SessionInfo {
   subscriberCount: number;
 }
 
+export interface RunCommandParams extends RunParams {
+  signal?: AbortSignal;
+  onStdout?: (line: string) => void;
+  onStderr?: (line: string) => void;
+}
+
 export class AgentClient {
   constructor(
     private baseUrl: string,
@@ -49,7 +56,7 @@ export class AgentClient {
     return res.json() as Promise<{ status: string; version: string }>;
   }
 
-  async *run(params: RunParams): AsyncGenerator<RunEvent> {
+  async *run(params: RunParams, signal?: AbortSignal): AsyncGenerator<RunEvent> {
     const res = await fetch(`${this.baseUrl}/exec`, {
       method: "POST",
       headers: {
@@ -57,6 +64,7 @@ export class AgentClient {
         Authorization: `Bearer ${this.token}`,
       },
       body: JSON.stringify(params),
+      signal,
     });
 
     if (!res.ok) {
@@ -95,7 +103,7 @@ export class AgentClient {
     }
   }
 
-  async killCommand(cmdId: string, signal?: string): Promise<void> {
+  async killCommand(cmdId: string, signal?: string, abortSignal?: AbortSignal): Promise<void> {
     const url = `${this.baseUrl}/exec/${cmdId}/kill`;
     const res = await fetch(url, {
       method: "POST",
@@ -104,6 +112,7 @@ export class AgentClient {
         Authorization: `Bearer ${this.token}`,
       },
       body: signal ? JSON.stringify({ signal }) : undefined,
+      signal: abortSignal,
     });
     if (!res.ok) {
       const text = await res.text();
@@ -160,6 +169,71 @@ export class AgentClient {
       const text = await res.text();
       throw new Error(`Agent killShellSession failed (${res.status}): ${text}`);
     }
+  }
+
+  async exec(
+    params: RunParams,
+    opts?: {
+      signal?: AbortSignal;
+      onStdout?: (line: string) => void;
+      onStderr?: (line: string) => void;
+    },
+  ): Promise<Command> {
+    const stream = this.run(params, opts?.signal);
+
+    const first = await stream.next();
+    if (first.done) {
+      throw new Error("Stream ended without 'started' event");
+    }
+    if (first.value.type !== "started") {
+      throw new Error(`Expected 'started' event, got '${first.value.type}'`);
+    }
+
+    const cmdId = first.value.id;
+    if (!cmdId) {
+      throw new Error("'started' event missing 'id' field");
+    }
+    const startedAt = first.value.ts ? new Date(first.value.ts) : new Date();
+
+    return new Command({
+      agent: this,
+      cmdId,
+      startedAt,
+      stream,
+      signal: opts?.signal,
+      onStdout: opts?.onStdout,
+      onStderr: opts?.onStderr,
+    });
+  }
+
+  async runCommand(
+    cmd: string,
+    args?: string[],
+    opts?: { signal?: AbortSignal },
+  ): Promise<CommandFinished>;
+  async runCommand(params: RunCommandParams & { detached: true }): Promise<Command>;
+  async runCommand(params: RunCommandParams): Promise<CommandFinished>;
+  async runCommand(
+    cmdOrParams: string | RunCommandParams,
+    args?: string[],
+    opts?: { signal?: AbortSignal },
+  ): Promise<Command | CommandFinished> {
+    let params: RunCommandParams;
+    if (typeof cmdOrParams === "string") {
+      params = { cmd: cmdOrParams, args, signal: opts?.signal };
+    } else {
+      params = cmdOrParams;
+    }
+
+    const { signal, onStdout, onStderr, ...runParams } = params;
+
+    const command = await this.exec(runParams, { signal, onStdout, onStderr });
+
+    if (params.detached) {
+      return command;
+    }
+
+    return command.wait({ signal });
   }
 
   async readFile(path: string): Promise<Buffer | null> {

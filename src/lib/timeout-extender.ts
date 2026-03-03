@@ -43,9 +43,9 @@ export class TimeoutExtender {
     }
 
     // Perform an immediate extension
-    this._extend();
+    this._extendSafe();
 
-    this._timer = setInterval(() => this._extend(), this._intervalMs);
+    this._timer = setInterval(() => this._extendSafe(), this._intervalMs);
   }
 
   stop(): void {
@@ -58,6 +58,14 @@ export class TimeoutExtender {
     if (this._previousKillerPid !== null) {
       safeKill(this._previousKillerPid);
       this._previousKillerPid = null;
+    }
+  }
+
+  private _extendSafe(): void {
+    try {
+      this._extend();
+    } catch {
+      this.stop();
     }
   }
 

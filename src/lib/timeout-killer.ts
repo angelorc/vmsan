@@ -23,7 +23,7 @@ export function spawnTimeoutKiller(opts: SpawnTimeoutKillerOpts): ChildProcess {
         'sleep "$1"',
         'STATE=$(cat -- "$2" 2>/dev/null) || exit 0',
         'echo "$STATE" | grep -q \'"status":"running"\' || exit 0',
-        'echo "$STATE" | grep -q ""pid":$3" || exit 0',
+        'echo "$STATE" | grep -q \'"pid":\'"$3" || exit 0',
         '[ -d "/proc/$3" ] || exit 0',
         'grep -aq -- "$4" "/proc/$3/cmdline" 2>/dev/null || exit 0',
         'kill -- "$3" 2>/dev/null',
