@@ -189,8 +189,11 @@ export class AgentClient {
       throw new Error(`Expected 'started' event, got '${first.value.type}'`);
     }
 
-    const cmdId = first.value.id!;
-    const startedAt = new Date(first.value.ts);
+    const cmdId = first.value.id;
+    if (!cmdId) {
+      throw new Error("'started' event missing 'id' field");
+    }
+    const startedAt = first.value.ts ? new Date(first.value.ts) : new Date();
 
     return new Command({
       agent: this,

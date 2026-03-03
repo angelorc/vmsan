@@ -168,15 +168,18 @@ const execCommand = defineCommand({
           extender.start();
         }
 
-        const shell = new ShellSession({
-          host: guestIp,
-          port,
-          token: state.agentToken,
-          initialCommand: injectedCmd,
-        });
+        try {
+          const shell = new ShellSession({
+            host: guestIp,
+            port,
+            token: state.agentToken,
+            initialCommand: injectedCmd,
+          });
 
-        const closeInfo = await shell.connect();
-        extender?.stop();
+          await shell.connect();
+        } finally {
+          extender?.stop();
+        }
 
         cmdLog.set({
           vmId: args.vmId,
@@ -186,8 +189,6 @@ const execCommand = defineCommand({
           ...(args["no-extend-timeout"] && { noExtendTimeout: true }),
         });
         cmdLog.emit();
-
-        process.exit(0);
       } else {
         // Non-interactive mode: use Command class
         consola.debug(`exec: ${command} ${commandArgs.join(" ")}`);
@@ -221,7 +222,7 @@ const execCommand = defineCommand({
           if (result.timedOut) consola.error("Command timed out.");
         } catch (err) {
           if (!ac.signal.aborted) throw err;
-          // User cancelled via Ctrl+C — silent exit
+          process.exitCode = 130;
         } finally {
           process.removeListener("SIGINT", onSignal);
           process.removeListener("SIGTERM", onSignal);

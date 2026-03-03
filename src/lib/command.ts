@@ -90,6 +90,8 @@ export class CommandFinished {
   }
 }
 
+const MAX_LOG_ENTRIES = 100_000;
+
 export class Command {
   readonly cmdId: string;
 
@@ -97,6 +99,7 @@ export class Command {
   private _exitCode: number | null = null;
   private _timedOut = false;
   private _logEntries: LogEntry[] = [];
+  private _logTruncated = false;
   private _eventQueue = new AsyncQueue<RunEvent>();
   private _completion: Promise<CommandFinished>;
 
@@ -142,7 +145,11 @@ export class Command {
             case "stdout":
             case "stderr": {
               if (event.data !== undefined) {
-                this._logEntries.push({ stream: event.type, data: event.data });
+                if (this._logEntries.length < MAX_LOG_ENTRIES) {
+                  this._logEntries.push({ stream: event.type, data: event.data });
+                } else {
+                  this._logTruncated = true;
+                }
                 (event.type === "stdout" ? onStdout : onStderr)?.(event.data);
               }
               break;
