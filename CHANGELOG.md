@@ -4,6 +4,12 @@
 
 ### Patch Changes
 
+- Merge pull request #26 from angelorc/feat/exec-command
+
+## 0.1.0
+
+### Patch Changes
+
 - Merge pull request #25 from angelorc/refactor/vm-validation-timeout-killer
 
 ## 0.1.0
