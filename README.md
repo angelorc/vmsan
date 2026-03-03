@@ -245,7 +245,7 @@ vmsan gives you **hardware-level isolation** with Firecracker's minimal attack s
 
 <!-- automd:contributors author="angelorc" license="Apache-2.0" -->
 
-Published under the [Apache-2.0](https://github.com/angelorc/vmsan/blob/main/LICENSE) license.
+Published under the [APACHE-2.0](https://github.com/angelorc/vmsan/blob/main/LICENSE) license.
 Made by [@angelorc](https://github.com/angelorc) and [community](https://github.com/angelorc/vmsan/graphs/contributors) 💛
 <br><br>
 <a href="https://github.com/angelorc/vmsan/graphs/contributors">
