@@ -4,6 +4,12 @@
 
 ### Patch Changes
 
+- Merge pull request #32 from angelorc/fix/connect-500-home-permissions
+
+## 0.1.0
+
+### Patch Changes
+
 - docs: make demo gif full-width section
 
 ## 0.1.0
