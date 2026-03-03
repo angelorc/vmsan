@@ -4,6 +4,12 @@
 
 ### Patch Changes
 
+- Merge pull request #30 from angelorc/docs/readme-refresh
+
+## 0.1.0
+
+### Patch Changes
+
 - Merge pull request #29 from angelorc/docs/add-exec-command
 
 ## 0.1.0
