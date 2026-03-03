@@ -14,6 +14,7 @@ export interface ShellSessionOptions {
   token: string;
   shell?: string;
   sessionId?: string;
+  initialCommand?: string;
 }
 
 export interface ShellCloseInfo {
@@ -89,6 +90,10 @@ export class ShellSession {
         this.ws!.send(serializeReady());
         if (process.stdout.columns && process.stdout.rows) {
           this.ws!.send(serializeResize(process.stdout.columns, process.stdout.rows));
+        }
+
+        if (this.opts.initialCommand) {
+          this.ws!.send(serializeData(Buffer.from(this.opts.initialCommand)));
         }
 
         process.stdin.on("data", onStdinData);
