@@ -106,6 +106,12 @@ vmsan create --from-image node:22-alpine
 # List all VMs
 vmsan list
 
+# Execute a command inside a VM
+vmsan exec <vm-id> ls -la
+
+# Interactive exec with PTY
+vmsan exec -i <vm-id> bash
+
 # Connect to a running VM shell
 vmsan connect <vm-id>
 
@@ -131,16 +137,17 @@ vmsan remove <vm-id>
 
 ### Commands
 
-| Command    | Alias | Description                       |
-| ---------- | ----- | --------------------------------- |
-| `create`   |       | Create and start a new microVM    |
-| `list`     | `ls`  | List all VMs                      |
-| `start`    |       | Start a stopped VM                |
-| `stop`     |       | Stop a running VM                 |
-| `remove`   | `rm`  | Remove a VM                       |
-| `connect`  |       | Open an interactive shell to a VM |
-| `upload`   |       | Upload files to a VM              |
-| `download` |       | Download files from a VM          |
+| Command    | Alias | Description                          |
+| ---------- | ----- | ------------------------------------ |
+| `create`   |       | Create and start a new microVM       |
+| `list`     | `ls`  | List all VMs                         |
+| `start`    |       | Start a stopped VM                   |
+| `stop`     |       | Stop a running VM                    |
+| `remove`   | `rm`  | Remove a VM                          |
+| `exec`     |       | Execute a command inside a running VM |
+| `connect`  |       | Open an interactive shell to a VM    |
+| `upload`   |       | Upload files to a VM                 |
+| `download` |       | Download files from a VM             |
 
 ## Development
 
