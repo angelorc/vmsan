@@ -18,7 +18,15 @@ export type {
   components as FirecrackerComponents,
 } from "./generated/firecracker-api.d.ts";
 export { AgentClient } from "./services/agent.ts";
-export type { RunParams, RunEvent, WriteFileEntry, SessionInfo } from "./services/agent.ts";
+export type { RunParams, RunEvent, WriteFileEntry, SessionInfo, RunCommandParams } from "./services/agent.ts";
+export { Command, CommandFinished } from "./lib/command.ts";
+export type { CommandInit, LogEntry } from "./lib/command.ts";
+export { TimeoutExtender } from "./lib/timeout-extender.ts";
+export type { TimeoutExtenderOptions } from "./lib/timeout-extender.ts";
+export { spawnTimeoutKiller } from "./lib/timeout-killer.ts";
+export type { SpawnTimeoutKillerOpts } from "./lib/timeout-killer.ts";
+export { resolveVmState } from "./lib/vm-context.ts";
+export type { RunningVmContext } from "./lib/vm-context.ts";
 export { VMService } from "./services/vm.ts";
 export type {
   StopResult,
@@ -94,6 +102,7 @@ export {
   vmStateNotFoundError,
   vmNotStoppedError,
   vmNotRunningError,
+  vmNoAgentTokenError,
   chrootNotFoundError,
   networkSlotsExhaustedError,
   snapshotNotFoundError,
@@ -146,7 +155,7 @@ export {
   getVmPid,
   getVmJailerPid,
 } from "./commands/create/environment.ts";
-export { waitForAgent } from "./commands/create/connect.ts";
+export { waitForAgent } from "./lib/vm-context.ts";
 export {
   killOrphanVmProcess,
   markVmAsError,

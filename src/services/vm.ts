@@ -1,7 +1,6 @@
 import { dirname, join } from "node:path";
 import { existsSync, rmSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { spawn } from "node:child_process";
 import type { VmsanContext } from "../context.ts";
 import type { VmState, VmStateStore } from "../lib/vm-state.ts";
 import { NetworkManager, type NetworkConfig } from "../lib/network.ts";
@@ -31,6 +30,7 @@ import {
   mutuallyExclusiveFlagsError,
 } from "../errors/index.ts";
 import { generateVmId, safeKill, toError } from "../lib/utils.ts";
+import { spawnTimeoutKiller } from "../lib/timeout-killer.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -325,24 +325,12 @@ export class VMService {
 
       // Timeout killer
       if (timeoutMs && pid) {
-        const stateFile = join(paths.vmsDir, `${vmId}.json`);
-        const killer = spawn(
-          "bash",
-          [
-            "-c",
-            [
-              `sleep ${Math.ceil(timeoutMs / 1000)}`,
-              `STATE=$(cat "${stateFile}" 2>/dev/null) || exit 0`,
-              `echo "$STATE" | grep -q '"status":"running"' || exit 0`,
-              `echo "$STATE" | grep -q '"pid":${pid}' || exit 0`,
-              `[ -d /proc/${pid} ] || exit 0`,
-              `grep -q "${vmId}" /proc/${pid}/cmdline 2>/dev/null || exit 0`,
-              `kill ${pid} 2>/dev/null`,
-            ].join(" && "),
-          ],
-          { detached: true, stdio: "ignore" },
-        );
-        killer.unref();
+        spawnTimeoutKiller({
+          vmId,
+          pid,
+          timeoutMs,
+          stateFile: join(paths.vmsDir, `${vmId}.json`),
+        });
       }
 
       const finalState = this.store.load(vmId)!;

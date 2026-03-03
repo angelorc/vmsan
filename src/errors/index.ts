@@ -37,6 +37,7 @@ export {
   vmStateNotFoundError,
   vmNotStoppedError,
   vmNotRunningError,
+  vmNoAgentTokenError,
   chrootNotFoundError,
   networkSlotsExhaustedError,
   snapshotNotFoundError,

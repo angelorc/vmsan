@@ -1,8 +1,32 @@
 import { randomBytes } from "node:crypto";
 import { execSync } from "node:child_process";
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, chownSync, mkdirSync, writeFileSync } from "node:fs";
 import { stripAnsi } from "consola/utils";
 import { invalidDurationError } from "../errors/index.ts";
+
+/**
+ * Resolve the UID/GID of the real (non-root) user when running under sudo.
+ * Returns null when not running under sudo or when env vars are missing.
+ */
+function getSudoOwner(): { uid: number; gid: number } | null {
+  const uid = process.env.SUDO_UID;
+  const gid = process.env.SUDO_GID;
+  if (!uid || !gid) return null;
+  const numUid = Number(uid);
+  const numGid = Number(gid);
+  if (!Number.isInteger(numUid) || !Number.isInteger(numGid)) return null;
+  return { uid: numUid, gid: numGid };
+}
+
+function chownToSudoUser(path: string): void {
+  const owner = getSudoOwner();
+  if (!owner) return;
+  try {
+    chownSync(path, owner.uid, owner.gid);
+  } catch {
+    // Best-effort — may fail for files inside root-owned chroots
+  }
+}
 
 export function toError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err));
@@ -99,6 +123,7 @@ export function mkdirSecure(path: string): void {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
+  chownToSudoUser(path);
 }
 
 export function writeSecure(path: string, contents: string): void {
@@ -108,6 +133,7 @@ export function writeSecure(path: string, contents: string): void {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
+  chownToSudoUser(path);
 }
 
 const TIME_UNITS: [number, string, string][] = [

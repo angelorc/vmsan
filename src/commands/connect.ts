@@ -3,9 +3,8 @@ import { defineCommand } from "citty";
 import { consola } from "consola";
 import { vmsanPaths } from "../paths.ts";
 import { createCommandLogger } from "../lib/logger/index.ts";
-import { FileVmStateStore } from "../lib/vm-state.ts";
-import { handleCommandError, vmNotFoundError } from "../errors/index.ts";
-import { waitForAgent } from "./create/connect.ts";
+import { handleCommandError } from "../errors/index.ts";
+import { resolveVmState, waitForAgent } from "../lib/vm-context.ts";
 import { ShellSession } from "../lib/shell/index.ts";
 
 const connectCommand = defineCommand({
@@ -31,33 +30,9 @@ const connectCommand = defineCommand({
     const paths = vmsanPaths();
 
     try {
-      const store = new FileVmStateStore(paths.vmsDir);
-      const state = store.load(args.vmId);
-
-      if (!state) {
-        throw vmNotFoundError(args.vmId);
-      }
-
-      if (state.status !== "running") {
-        consola.error(`VM ${args.vmId} is not running (status: ${state.status})`);
-        cmdLog.emit();
-        process.exitCode = 1;
-        return;
-      }
-
+      const { state, guestIp, port } = resolveVmState(args.vmId, paths);
       const log = consola.withTag(args.vmId);
-      const guestIp = state.network.guestIp;
-      const port = state.agentPort || paths.agentPort;
       consola.debug(`Agent endpoint: ${guestIp}:${port}`);
-
-      if (!state.agentToken) {
-        consola.error(
-          `VM ${args.vmId} has no agent token. The agent is required for shell access.`,
-        );
-        cmdLog.emit();
-        process.exitCode = 1;
-        return;
-      }
 
       log.start("Waiting for agent to become ready...");
       await waitForAgent(guestIp, port);
