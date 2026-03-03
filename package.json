@@ -4,7 +4,7 @@
   "description": "Firecracker microVM sandbox toolkit",
   "homepage": "https://github.com/angelorc/vmsan",
   "bugs": "https://github.com/angelorc/vmsan/issues",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/angelorc/vmsan.git"
