@@ -127,6 +127,21 @@ export class ShellSession {
         });
       });
 
+      this.ws.on("unexpected-response", (_req, res) => {
+        const maxBytes = 4096;
+        let body = "";
+        res.on("data", (chunk: Buffer) => {
+          if (body.length < maxBytes) {
+            body += chunk.toString().slice(0, maxBytes - body.length);
+          }
+        });
+        res.on("end", () => {
+          cleanup();
+          const detail = body.trim() || "no response body";
+          reject(new Error(`Shell connection failed (HTTP ${res.statusCode}): ${detail}`));
+        });
+      });
+
       this.ws.on("error", (err) => {
         cleanup();
         reject(err);

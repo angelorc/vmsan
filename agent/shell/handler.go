@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"strings"
 
 	"github.com/gorilla/websocket"
 )
@@ -81,7 +82,11 @@ func (h *Handler) handleNewSession(w http.ResponseWriter, r *http.Request) {
 		if err.Error() == "max sessions reached" {
 			http.Error(w, `{"error":"too many concurrent sessions"}`, http.StatusTooManyRequests)
 		} else {
-			http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+			h.logger.Error("shell.session.create_failed", "shell", shell, "user", runAs, "error", err)
+			// Sanitize: only include the first line to avoid leaking stack traces.
+			msg := strings.SplitN(err.Error(), "\n", 2)[0]
+			encoded, _ := json.Marshal(msg)
+			http.Error(w, `{"error":`+string(encoded)+`}`, http.StatusInternalServerError)
 		}
 		return
 	}
