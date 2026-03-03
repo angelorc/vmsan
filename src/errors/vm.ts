@@ -49,11 +49,21 @@ export const networkSlotsExhaustedError = (): VmError =>
     message: "No available network slots (max 255 VMs)",
   });
 
-export const vmNotRunningError = (vmId: string): VmError =>
+export const vmNotRunningError = (vmId: string, currentStatus?: string): VmError =>
   new VmError("ERR_VM_NOT_RUNNING", {
     vmId,
-    message: `VM ${vmId} is not running`,
-    fix: "The VM must be running to update its network policy. Start it with 'vmsan start <vm-id>'.",
+    message: currentStatus
+      ? `VM ${vmId} is not running (current status: ${currentStatus})`
+      : `VM ${vmId} is not running`,
+    fix: "The VM must be running. Start it with 'vmsan start <vm-id>'.",
+  });
+
+export const vmNoAgentTokenError = (vmId: string): VmError =>
+  new VmError("ERR_VM_NO_AGENT_TOKEN", {
+    vmId,
+    message: `VM ${vmId} has no agent token`,
+    why: "The vmsan-agent binary was not found at ~/.vmsan/bin/vmsan-agent when this VM was created.",
+    fix: "Install the agent binary into ~/.vmsan/bin/vmsan-agent and recreate the VM with 'vmsan create'.",
   });
 
 export const snapshotNotFoundError = (snapshotId: string): VmError =>
