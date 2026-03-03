@@ -4,6 +4,12 @@
 
 ### Patch Changes
 
+- Merge pull request #29 from angelorc/docs/add-exec-command
+
+## 0.1.0
+
+### Patch Changes
+
 - Merge pull request #28 from angelorc/refactor/sysuser-credentials
 
 ## 0.1.0
