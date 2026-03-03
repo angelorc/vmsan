@@ -33,16 +33,19 @@ export class TimeoutExtender {
 
   start(): void {
     if (this._timer) return;
-    if (this._signal?.aborted) return;
+
+    if (this._signal) {
+      this._signal.addEventListener("abort", () => this.stop(), { once: true });
+      if (this._signal.aborted) {
+        this.stop();
+        return;
+      }
+    }
 
     // Perform an immediate extension
     this._extend();
 
     this._timer = setInterval(() => this._extend(), this._intervalMs);
-
-    if (this._signal) {
-      this._signal.addEventListener("abort", () => this.stop(), { once: true });
-    }
   }
 
   stop(): void {
