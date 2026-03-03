@@ -16,14 +16,26 @@ function shellEscape(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'";
 }
 
-function parseEnvFlags(): Record<string, string> {
+function parseEnvFlags(targetCommand: string): Record<string, string> {
   const env: Record<string, string> = {};
+  // Only scan argv tokens before the target command to avoid capturing
+  // --env flags meant for the command being executed inside the VM.
   const argv = process.argv;
+  let positionalCount = 0;
 
-  for (let i = 0; i < argv.length; i++) {
+  for (let i = 2; i < argv.length; i++) {
     const arg = argv[i];
 
     if (arg === "--") break;
+
+    // Track positionals: "exec" (subcommand), vmId, then target command.
+    // Stop scanning once we hit the target command positional.
+    if (!arg.startsWith("-")) {
+      positionalCount++;
+      // positional 1 = "exec", 2 = vmId, 3 = target command
+      if (positionalCount >= 3) break;
+      continue;
+    }
 
     let value: string | undefined;
 
@@ -119,8 +131,8 @@ const execCommand = defineCommand({
         return;
       }
 
-      // Parse repeated --env / -e flags from process.argv
-      const envVars = parseEnvFlags();
+      // Parse repeated --env / -e flags from process.argv (only CLI-owned tokens)
+      const envVars = parseEnvFlags(command);
 
       const { state, guestIp, port, store } = resolveVmState(args.vmId, paths);
       consola.debug(`Agent endpoint: ${guestIp}:${port}`);
@@ -210,13 +222,13 @@ const execCommand = defineCommand({
         process.on("SIGINT", onSignal);
         process.on("SIGTERM", onSignal);
 
-        const cmdObj = await agent.exec(params, {
-          signal: ac.signal,
-          onStdout: (line) => process.stdout.write(line + "\n"),
-          onStderr: (line) => process.stderr.write(line + "\n"),
-        });
-
         try {
+          const cmdObj = await agent.exec(params, {
+            signal: ac.signal,
+            onStdout: (line) => process.stdout.write(line + "\n"),
+            onStderr: (line) => process.stderr.write(line + "\n"),
+          });
+
           const result = await cmdObj.wait();
           process.exitCode = result.exitCode;
           if (result.timedOut) consola.error("Command timed out.");
