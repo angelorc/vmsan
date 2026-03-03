@@ -173,7 +173,11 @@ export class AgentClient {
 
   async exec(
     params: RunParams,
-    opts?: { signal?: AbortSignal; onStdout?: (line: string) => void; onStderr?: (line: string) => void },
+    opts?: {
+      signal?: AbortSignal;
+      onStdout?: (line: string) => void;
+      onStderr?: (line: string) => void;
+    },
   ): Promise<Command> {
     const stream = this.run(params, opts?.signal);
 
@@ -199,7 +203,11 @@ export class AgentClient {
     });
   }
 
-  async runCommand(cmd: string, args?: string[], opts?: { signal?: AbortSignal }): Promise<CommandFinished>;
+  async runCommand(
+    cmd: string,
+    args?: string[],
+    opts?: { signal?: AbortSignal },
+  ): Promise<CommandFinished>;
   async runCommand(params: RunCommandParams & { detached: true }): Promise<Command>;
   async runCommand(params: RunCommandParams): Promise<CommandFinished>;
   async runCommand(

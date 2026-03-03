@@ -166,8 +166,14 @@ export class Command {
           new CommandFinished({
             cmdId,
             exitCode: this._exitCode ?? 1,
-            stdout: this._logEntries.filter((e) => e.stream === "stdout").map((e) => e.data).join("\n"),
-            stderr: this._logEntries.filter((e) => e.stream === "stderr").map((e) => e.data).join("\n"),
+            stdout: this._logEntries
+              .filter((e) => e.stream === "stdout")
+              .map((e) => e.data)
+              .join("\n"),
+            stderr: this._logEntries
+              .filter((e) => e.stream === "stderr")
+              .map((e) => e.data)
+              .join("\n"),
             output: this._logEntries.map((e) => e.data).join("\n"),
             timedOut: this._timedOut,
             startedAt,
