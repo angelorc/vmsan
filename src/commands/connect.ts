@@ -31,12 +31,9 @@ const connectCommand = defineCommand({
 
     try {
       const { state, guestIp, port } = resolveVmState(args.vmId, paths);
-      const log = consola.withTag(args.vmId);
       consola.debug(`Agent endpoint: ${guestIp}:${port}`);
-
-      log.start("Waiting for agent to become ready...");
+      consola.debug("Waiting for agent to become ready...");
       await waitForAgent(guestIp, port);
-      log.success("Agent is ready. Connecting via PTY shell...");
 
       const shell = new ShellSession({
         host: guestIp,
