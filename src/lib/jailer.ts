@@ -147,6 +147,9 @@ export class Jailer {
         { stdio: "pipe" },
       );
 
+      // Set hostname to VM ID (e.g. "vm-a1b2c3d4")
+      writeFileSync(join(tmpMount, "etc", "hostname"), `${this.vmId}\n`);
+
       // Inject vmsan-agent binary and systemd service.
       if (config.agent) {
         const agentDst = join(tmpMount, "usr", "local", "bin", "vmsan-agent");
