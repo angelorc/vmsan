@@ -21,8 +21,6 @@ export class PidFile {
     const pid = this.read();
     if (pid === null) return;
     safeKill(pid, signal);
-    if (signal === "SIGTERM" || signal === "SIGKILL") {
-      rmSync(this.path, { force: true });
-    }
+    rmSync(this.path, { force: true });
   }
 }

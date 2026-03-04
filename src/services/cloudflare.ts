@@ -23,6 +23,7 @@ export interface CloudflareConfig {
   domain: string;
   tunnelId?: string;
   accountId?: string;
+  tunnelToken?: string;
 }
 
 export interface TunnelRoute {
@@ -37,8 +38,6 @@ export class CloudflareService {
   private readonly cfDir: string;
   private readonly configPath: string;
   private readonly routesPath: string;
-  private readonly tunnelConfigPath: string;
-  private readonly credentialsPath: string;
   private readonly logPath: string;
   private readonly cloudflaredBin: string;
   private readonly lock: FileLock;
@@ -48,8 +47,6 @@ export class CloudflareService {
     this.cfDir = join(baseDir, "cloudflare");
     this.configPath = join(this.cfDir, "cloudflare.json");
     this.routesPath = join(this.cfDir, "routes.json");
-    this.tunnelConfigPath = join(this.cfDir, "config.yml");
-    this.credentialsPath = join(this.cfDir, "tunnel-credentials.json");
     this.logPath = join(this.cfDir, "cloudflared.log");
     this.cloudflaredBin = join(baseDir, "bin", "cloudflared");
     this.lock = new FileLock(join(this.cfDir, "lock"), "Cloudflare");
@@ -102,11 +99,9 @@ export class CloudflareService {
       const config = this.load();
       if (!config) throw cloudflareNotConfiguredError();
 
-      const hasCredentials =
-        typeof config.tunnelId === "string" ? this.hasCredentials(config.tunnelId) : false;
       const previousTunnelId = config.tunnelId;
 
-      if (config.tunnelId && hasCredentials) {
+      if (config.tunnelId && config.tunnelToken) {
         return { tunnelId: config.tunnelId };
       }
 
@@ -114,15 +109,15 @@ export class CloudflareService {
       const accountId = config.accountId || (await this.resolveAccountId(client, config.domain));
       const tunnelSecret = randomBytes(32).toString("base64");
       const tunnelName =
-        config.tunnelId && !hasCredentials ? `vmsan-${Date.now().toString(36)}` : "vmsan";
+        config.tunnelId && !config.tunnelToken ? `vmsan-${Date.now().toString(36)}` : "vmsan";
 
-      let tunnel: { id?: string };
+      let tunnel: { id?: string; token?: string };
       try {
         tunnel = await client.zeroTrust.tunnels.cloudflared.create({
           account_id: accountId,
           name: tunnelName,
           tunnel_secret: tunnelSecret,
-          config_src: "local",
+          config_src: "cloudflare",
         });
       } catch (err) {
         const errMsg = toError(err).message;
@@ -133,7 +128,7 @@ export class CloudflareService {
             account_id: accountId,
             name: tunnelName,
             tunnel_secret: tunnelSecret,
-            config_src: "local",
+            config_src: "cloudflare",
           });
         } else {
           throw err;
@@ -143,18 +138,11 @@ export class CloudflareService {
       const tunnelId = tunnel.id;
       if (!tunnelId) throw cloudflareTunnelNoIdError();
 
-      mkdirSecure(this.cfDir);
-      writeSecure(
-        this.credentialsPath,
-        JSON.stringify({
-          AccountTag: accountId,
-          TunnelSecret: tunnelSecret,
-          TunnelID: tunnelId,
-        }),
-      );
+      const tunnelToken = (tunnel as Record<string, unknown>).token as string | undefined;
 
       config.tunnelId = tunnelId;
       config.accountId = accountId;
+      config.tunnelToken = tunnelToken;
       this.save(config);
 
       if (previousTunnelId && previousTunnelId !== tunnelId) {
@@ -210,11 +198,6 @@ export class CloudflareService {
       const filtered = routes.filter((r) => r.vmId !== route.vmId || r.hostname !== route.hostname);
       filtered.push(route);
       this.saveRoutes(filtered);
-
-      const config = this.load();
-      if (config?.tunnelId) {
-        writeSecure(this.tunnelConfigPath, this.buildConfigYml(filtered, config.tunnelId));
-      }
     });
   }
 
@@ -223,11 +206,6 @@ export class CloudflareService {
       const routes = this.loadRoutes();
       const filtered = routes.filter((r) => r.vmId !== vmId);
       this.saveRoutes(filtered);
-
-      const config = this.load();
-      if (config?.tunnelId) {
-        writeSecure(this.tunnelConfigPath, this.buildConfigYml(filtered, config.tunnelId));
-      }
     });
   }
 
@@ -307,7 +285,8 @@ export class CloudflareService {
       throw cloudflaredNotFoundError();
     }
 
-    if (!existsSync(this.tunnelConfigPath)) {
+    const config = this.load();
+    if (!config?.tunnelToken) {
       throw cloudflareConfigNotFoundError();
     }
 
@@ -317,7 +296,7 @@ export class CloudflareService {
     try {
       const child = spawn(
         this.cloudflaredBin,
-        ["tunnel", "--config", this.tunnelConfigPath, "run"],
+        ["tunnel", "--no-autoupdate", "run", "--token", config.tunnelToken],
         {
           detached: true,
           stdio: ["ignore", logFd, logFd],
@@ -348,14 +327,6 @@ export class CloudflareService {
 
   stop(): void {
     this.pidFile.kill("SIGTERM");
-  }
-
-  reload(): void {
-    if (this.pidFile.read() !== null) {
-      this.pidFile.kill("SIGHUP");
-      return;
-    }
-    this.start();
   }
 
   ensureRunning(): void {
@@ -415,37 +386,6 @@ export class CloudflareService {
     }));
     ingress.push({ service: "http_status:404" });
     return ingress;
-  }
-
-  private buildConfigYml(routes: TunnelRoute[], tunnelId: string): string {
-    const lines = [`tunnel: ${tunnelId}`, `credentials-file: ${this.credentialsPath}`, `ingress:`];
-    for (const route of routes) {
-      lines.push(`  - hostname: ${route.hostname}`);
-      lines.push(`    service: ${route.service}`);
-    }
-    lines.push(`  - service: http_status:404`);
-    return lines.join("\n");
-  }
-
-  private hasCredentials(expectedTunnelId?: string): boolean {
-    if (!existsSync(this.credentialsPath)) return false;
-    try {
-      const creds = JSON.parse(readFileSync(this.credentialsPath, "utf-8")) as {
-        AccountTag?: string;
-        TunnelSecret?: string;
-        TunnelID?: string;
-      };
-      if (!creds.AccountTag || !creds.TunnelSecret || !creds.TunnelID) {
-        return false;
-      }
-      if (expectedTunnelId && creds.TunnelID !== expectedTunnelId) {
-        return false;
-      }
-      return true;
-    } catch (err) {
-      consola.warn(`Credentials file corrupt: ${toError(err).message}`);
-      return false;
-    }
   }
 
   private async resolveAccountId(client: Cloudflare, domain?: string): Promise<string> {

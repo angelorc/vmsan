@@ -31,7 +31,7 @@ async function setupTunnelRoutes(
   }
   await Promise.all(dnsPromises);
   await cloudflare.pushConfig();
-  cloudflare.reload();
+  cloudflare.ensureRunning();
   return { hostnames, primaryHostname: hostnames[0] };
 }
 
@@ -108,7 +108,6 @@ export function cloudflarePlugin(baseDir: string): VmsanPlugin {
           cloudflare.removeRoute(vmId);
           await cloudflare.pushConfig();
           await Promise.all(allHostnames.map((hostname) => cloudflare.removeDns(hostname)));
-          cloudflare.reload();
         } catch (err) {
           ctx.logger.debug(`Cloudflare cleanup failed for VM ${vmId}: ${toError(err).message}`);
         }

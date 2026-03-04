@@ -14,13 +14,6 @@ export async function cleanupCloudflareResources(
     } catch (err) {
       consola.debug(`Config push failed during cleanup: ${toError(err).message}`);
     }
-    try {
-      if (cloudflare.isRunning()) {
-        cloudflare.reload();
-      }
-    } catch (err) {
-      consola.debug(`cloudflared reload failed during cleanup: ${toError(err).message}`);
-    }
   }
 
   for (const hostname of new Set(hostnames)) {
