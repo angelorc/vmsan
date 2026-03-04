@@ -72,6 +72,7 @@ export type {
   NetworkErrorCode,
   TimeoutErrorCode,
   SetupErrorCode,
+  CloudflareErrorCode,
 } from "./errors/index.ts";
 export { handleCommandError } from "./errors/index.ts";
 export {
@@ -177,6 +178,13 @@ export {
 export type { ImageReference } from "./commands/create/validation.ts";
 export { ensureSeccompFilter, compileSeccompFilter } from "./lib/seccomp.ts";
 export { resolveImageRootfs } from "./commands/create/image-rootfs.ts";
+
+// Cloudflare plugin
+export { cloudflarePlugin } from "./plugins/cloudflare.ts";
+export { CloudflareService, resolveTunnelHostnames } from "./services/cloudflare.ts";
+export type { CloudflareConfig, TunnelRoute } from "./services/cloudflare.ts";
+export { CloudflareError } from "./errors/cloudflare.ts";
+export { cleanupCloudflareResources } from "./lib/cloudflare-cleanup.ts";
 
 export async function getFirecrackerVersion(dir?: string): Promise<string | undefined> {
   const { vmsanPaths: paths } = await import("./paths.ts");

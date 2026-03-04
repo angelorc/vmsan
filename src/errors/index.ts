@@ -6,6 +6,7 @@ export type {
   NetworkErrorCode,
   TimeoutErrorCode,
   SetupErrorCode,
+  CloudflareErrorCode,
 } from "./codes.ts";
 
 export { VmsanError } from "./base.ts";
@@ -62,3 +63,17 @@ export {
 } from "./setup.ts";
 
 export { handleCommandError } from "./display.ts";
+
+export { CloudflareError } from "./cloudflare.ts";
+export {
+  cloudflareNotConfiguredError,
+  cloudflareTunnelNoIdError,
+  cloudflaredNotFoundError,
+  cloudflareConfigNotFoundError,
+  cloudflaredStartFailedError,
+  cloudflareNoAccountsError,
+  cloudflareNoZoneError,
+  cloudflareTokenInvalidError,
+  cloudflareTokenInactiveError,
+  cloudflareNoZoneForDomainError,
+} from "./cloudflare.ts";
