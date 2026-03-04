@@ -404,10 +404,124 @@ EOF
   fi
 fi
 
+# --- runtime images ---
+
+build_runtime() {
+  local name="$1"
+  local base_image="$2"
+  local dest="$VMSAN_DIR/rootfs/${name}.ext4"
+
+  if [ -f "$dest" ]; then
+    success "Runtime ${name} already built"
+    return
+  fi
+
+  need_cmd docker
+
+  info "Building runtime ${name} from ${base_image}..."
+
+  local build_dir
+  build_dir=$(mktemp -d)
+  local build_tag="vmsan-rootfs-${name}:latest"
+  local container_name="vmsan-export-${name}-$$"
+  trap 'docker rm -f "$container_name" >/dev/null 2>&1 || true; rm -rf "$build_dir"' RETURN
+
+  # Detect package manager and install appropriate packages
+  cat > "$build_dir/Dockerfile" <<'DEOF'
+FROM __BASE_IMAGE__
+RUN if command -v apt-get >/dev/null 2>&1; then \
+      apt-get update && apt-get install -y --no-install-recommends \
+        bind9-utils bzip2 findutils git gzip iputils-ping libicu-dev libjpeg-dev \
+        libpng-dev ncurses-base libssl-dev openssh-server openssl procps sudo \
+        systemd systemd-sysv tar unzip debianutils whois zstd \
+      && rm -rf /var/lib/apt/lists/*; \
+    elif command -v dnf >/dev/null 2>&1; then \
+      dnf install -y bind-utils bzip2 findutils git gzip iputils libicu libjpeg \
+        libpng ncurses-libs openssh-server openssl openssl-libs procps sudo \
+        systemd tar unzip which whois zstd \
+      && dnf clean all; \
+    elif command -v apk >/dev/null 2>&1; then \
+      apk add --no-cache bash bind-tools bzip2 findutils git gzip iputils \
+        icu-libs libjpeg-turbo libpng ncurses-libs openrc openssh openssl \
+        procps sudo tar unzip whois zstd; \
+    fi
+RUN if command -v apk >/dev/null 2>&1; then \
+      id -u ubuntu >/dev/null 2>&1 || adduser -D -s /bin/bash ubuntu; \
+    else \
+      id -u ubuntu >/dev/null 2>&1 || useradd -m -s /bin/bash ubuntu; \
+    fi; \
+    echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/ubuntu; \
+    chmod 440 /etc/sudoers.d/ubuntu; \
+    mkdir -p /home/ubuntu/.ssh && chown -R ubuntu:ubuntu /home/ubuntu
+RUN ssh-keygen -A 2>/dev/null || true; \
+    mkdir -p /root/.ssh && chmod 700 /root/.ssh; \
+    if [ -f /etc/ssh/sshd_config ]; then \
+      sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config; \
+    fi; \
+    if command -v rc-update >/dev/null 2>&1; then \
+      rc-update add devfs sysinit 2>/dev/null || true; \
+      rc-update add mdev sysinit 2>/dev/null || true; \
+      rc-update add hwdrivers sysinit 2>/dev/null || true; \
+      rc-update add modules boot 2>/dev/null || true; \
+      rc-update add sysctl boot 2>/dev/null || true; \
+      rc-update add hostname boot 2>/dev/null || true; \
+      rc-update add bootmisc boot 2>/dev/null || true; \
+      rc-update add networking boot 2>/dev/null || true; \
+      rc-update add sshd default 2>/dev/null || true; \
+      printf '%s\n' '::sysinit:/sbin/openrc sysinit' '::sysinit:/sbin/openrc boot' '::wait:/sbin/openrc default' '::shutdown:/sbin/openrc shutdown' 'ttyS0::respawn:/sbin/getty 115200 ttyS0' > /etc/inittab; \
+    fi; \
+    if command -v systemctl >/dev/null 2>&1; then systemctl enable sshd 2>/dev/null || systemctl enable ssh 2>/dev/null || true; fi
+DEOF
+
+  sed -i "s|__BASE_IMAGE__|${base_image}|" "$build_dir/Dockerfile"
+
+  # Build
+  docker build -t "$build_tag" -f "$build_dir/Dockerfile" "$build_dir" >/dev/null 2>&1
+
+  # Export
+  docker create --name "$container_name" "$build_tag" >/dev/null 2>&1
+  docker export "$container_name" -o "$build_dir/rootfs.tar" 2>/dev/null
+
+  # Convert to ext4
+  local tar_bytes
+  tar_bytes=$(stat -c %s "$build_dir/rootfs.tar")
+  local tar_mb=$(( tar_bytes / 1024 / 1024 ))
+  local image_mb=$(( tar_mb + 512 ))
+  [ "$image_mb" -lt 1024 ] && image_mb=1024
+
+  dd if=/dev/zero of="$dest" bs=1M count="$image_mb" status=none
+  mkfs.ext4 -q "$dest"
+  tune2fs -m 0 "$dest" >/dev/null 2>&1
+
+  local mnt_dir="$build_dir/mnt"
+  mkdir -p "$mnt_dir"
+  mount -o loop "$dest" "$mnt_dir"
+  tar -xf "$build_dir/rootfs.tar" -C "$mnt_dir"
+  umount "$mnt_dir"
+
+  success "Runtime ${name} built (${image_mb} MB)"
+}
+
+if command -v docker >/dev/null 2>&1; then
+  build_runtime "node22" "node:22"
+  build_runtime "node24" "node:24"
+  build_runtime "python3.13" "python:3.13-slim"
+else
+  warn "Docker not found — skipping runtime image builds. Install Docker and re-run to build runtime images."
+fi
+
 # --- summary ---
 
 CF_STATUS="not configured"
 [ -f "$VMSAN_DIR/cloudflare/cloudflare.json" ] && CF_STATUS="configured"
+
+RUNTIME_STATUS=""
+for rt in node22 node24 python3.13; do
+  if [ -f "$VMSAN_DIR/rootfs/${rt}.ext4" ]; then
+    RUNTIME_STATUS="${RUNTIME_STATUS}${rt} "
+  fi
+done
+RUNTIME_STATUS="${RUNTIME_STATUS:-none}"
 
 echo ""
 success "vmsan environment ready at $VMSAN_DIR"
@@ -416,6 +530,7 @@ echo "  Firecracker  $VMSAN_DIR/bin/firecracker"
 echo "  Jailer       $VMSAN_DIR/bin/jailer"
 echo "  Kernel       $VMSAN_DIR/kernels/$KERNEL_FILE"
 echo "  Rootfs       $VMSAN_DIR/rootfs/$ROOTFS_FILE"
+echo "  Runtimes     $RUNTIME_STATUS"
 echo "  Agent        $AGENT_PATH"
 echo "  cloudflared  $CLOUDFLARED_PATH ($CF_STATUS)"
 echo "  CLI          $(command -v vmsan 2>/dev/null || echo 'vmsan (npm global)')"

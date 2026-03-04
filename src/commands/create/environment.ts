@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { connect } from "node:net";
 import { join } from "node:path";
 import type { VmsanPaths } from "../../paths.ts";
+import type { Runtime } from "./types.ts";
 import {
   missingBinaryError,
   noKernelDirError,
@@ -11,6 +12,7 @@ import {
   snapshotNotFoundError,
 } from "../../errors/index.ts";
 import { socketTimeoutError } from "../../errors/index.ts";
+import { SetupError } from "../../errors/index.ts";
 
 export function validateEnvironment(baseDir: string): void {
   const firecrackerPath = join(baseDir, "bin", "firecracker");
@@ -34,6 +36,24 @@ export function findKernel(baseDir: string): string {
     throw noKernelError();
   }
   return join(kernelDir, files.sort().at(-1)!);
+}
+
+const RUNTIME_ROOTFS_MAP: Record<Exclude<Runtime, "base">, string> = {
+  "node22": "node22.ext4",
+  "node24": "node24.ext4",
+  "python3.13": "python3.13.ext4",
+};
+
+export function findRuntimeRootfs(runtime: Exclude<Runtime, "base">, baseDir: string): string {
+  const filename = RUNTIME_ROOTFS_MAP[runtime];
+  const rootfsPath = join(baseDir, "rootfs", filename);
+  if (!existsSync(rootfsPath)) {
+    throw new SetupError("ERR_SETUP_NO_EXT4_ROOTFS", {
+      message: `Runtime "${runtime}" rootfs not found at ${rootfsPath}`,
+      fix: 'Run "curl -fsSL https://vmsan.dev/install | bash" to build runtime images.',
+    });
+  }
+  return rootfsPath;
 }
 
 export function findRootfs(baseDir: string): string {
