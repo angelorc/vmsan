@@ -52,4 +52,3 @@ export const cloudflareNoZoneError = (domain: string): CloudflareError =>
     domain,
     message: `No active Cloudflare zone found for domain: ${domain}`,
   });
-
