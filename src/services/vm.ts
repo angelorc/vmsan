@@ -349,7 +349,10 @@ export class VMService {
       // Hook: afterCreate
       await hooks.callHook("vm:afterCreate", finalState);
 
-      return { vmId, pid, state: finalState };
+      // Re-read state: hooks (e.g. Cloudflare plugin) may have updated it
+      const updatedState = this.store.load(vmId) ?? finalState;
+
+      return { vmId, pid, state: updatedState };
     } catch (error) {
       // Error hooks
       if (vmId) {

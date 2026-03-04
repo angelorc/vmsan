@@ -51,6 +51,7 @@ export interface CreateSummaryInput {
   guestIp: string;
   macAddress: string;
   stateFilePath: string;
+  tunnelHostnames?: string[];
 }
 
 export interface InitialVmStateInput {

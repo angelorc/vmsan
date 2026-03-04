@@ -24,6 +24,9 @@ export function buildCreateSummaryLines(input: CreateSummaryInput): string[] {
       : []),
     ...(input.deniedCidrs.length > 0 ? [`    Denied CIDRs:  ${input.deniedCidrs.join(", ")}`] : []),
     ...(input.ports.length > 0 ? [`    Ports:  ${input.ports.join(", ")}`] : []),
+    ...(input.tunnelHostnames?.length
+      ? input.tunnelHostnames.map((h) => `    Tunnel: https://${h}`)
+      : []),
     "",
     `  Kernel:   ${input.kernelPath}`,
     `  Rootfs:   ${input.rootfsPath}`,

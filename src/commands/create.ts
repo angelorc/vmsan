@@ -105,6 +105,12 @@ const createCommand = defineCommand({
       const log = createScopedLogger(result.vmId);
       const state = result.state;
 
+      const tunnelHostnames = state.network.tunnelHostnames?.length
+        ? state.network.tunnelHostnames
+        : state.network.tunnelHostname
+          ? [state.network.tunnelHostname]
+          : [];
+
       const summaryLines = buildCreateSummaryLines({
         vmId: result.vmId,
         pid: result.pid,
@@ -129,6 +135,7 @@ const createCommand = defineCommand({
         guestIp: state.network.guestIp,
         macAddress: state.network.macAddress,
         stateFilePath: join(vmsan.paths.vmsDir, `${result.vmId}.json`),
+        tunnelHostnames,
       });
       log.box(summaryLines.join("\n"));
 
