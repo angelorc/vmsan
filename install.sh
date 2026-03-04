@@ -44,12 +44,25 @@ if [ "${1:-}" = "--uninstall" ]; then
   echo "  vmsan uninstaller"
   echo ""
 
-  if command -v vmsan >/dev/null 2>&1; then
-    info "Removing vmsan CLI (npm global)..."
-    npm uninstall -g vmsan
-    success "vmsan CLI removed"
-  else
-    success "vmsan CLI not installed"
+  # Stop running VMs before removing CLI
+  if command -v vmsan >/dev/null 2>&1 && [ -d "$VMSAN_DIR/vms" ]; then
+    for state_file in "$VMSAN_DIR"/vms/*.json; do
+      [ -f "$state_file" ] || continue
+      VM_ID="$(grep -oP '"id"\s*:\s*"\K[^"]+' "$state_file" 2>/dev/null || true)"
+      if [ -n "$VM_ID" ]; then
+        info "Stopping VM $VM_ID..."
+        vmsan stop "$VM_ID" 2>/dev/null || true
+      fi
+    done
+  fi
+
+  # Kill VM processes that may still be running
+  if [ -d "$VMSAN_DIR/vms" ]; then
+    for state_file in "$VMSAN_DIR"/vms/*.json; do
+      [ -f "$state_file" ] || continue
+      VM_PID="$(grep -oP '"pid"\s*:\s*\K\d+' "$state_file" 2>/dev/null || true)"
+      [ -n "$VM_PID" ] && kill -9 "$VM_PID" 2>/dev/null || true
+    done
   fi
 
   if [ -f "$VMSAN_DIR/cloudflare/cloudflared.pid" ]; then
@@ -59,32 +72,40 @@ if [ "${1:-}" = "--uninstall" ]; then
     fi
   fi
 
-  # Stop running VMs and clean up network interfaces
-  if command -v vmsan >/dev/null 2>&1 && [ -d "$VMSAN_DIR/vms" ]; then
-    for state_file in "$VMSAN_DIR"/vms/*.json; do
-      [ -f "$state_file" ] || continue
-      VM_ID="$(grep -oP '"id"\s*:\s*"\K[^"]+' "$state_file" 2>/dev/null || true)"
-      [ -n "$VM_ID" ] && vmsan stop "$VM_ID" 2>/dev/null || true
-    done
+  if command -v vmsan >/dev/null 2>&1; then
+    info "Removing vmsan CLI (npm global)..."
+    npm uninstall -g vmsan
+    success "vmsan CLI removed"
+  else
+    success "vmsan CLI not installed"
   fi
 
-  # Clean up orphan TAP and veth interfaces
-  TAP_COUNT=0
-  for iface in /sys/class/net/fhvm* /sys/class/net/veth-h-* /sys/class/net/veth-g-*; do
-    [ -e "$iface" ] || continue
-    DEV="$(basename "$iface")"
-    ip link delete "$DEV" 2>/dev/null || true
-    TAP_COUNT=$((TAP_COUNT + 1))
+  # Clean up TAP and veth interfaces (host namespace)
+  NET_COUNT=0
+  for iface_path in /sys/class/net/fhvm* /sys/class/net/veth-h-* /sys/class/net/veth-g-*; do
+    [ -e "$iface_path" ] || continue
+    DEV="$(basename "$iface_path")"
+    ip link delete "$DEV" 2>/dev/null && NET_COUNT=$((NET_COUNT + 1))
   done
-  [ "$TAP_COUNT" -gt 0 ] && success "Removed $TAP_COUNT network interfaces"
 
-  # Clean up iptables rules referencing vmsan TAP devices
-  iptables -t nat -S 2>/dev/null | grep -E 'fhvm|172\.16\.' | while read -r rule; do
-    iptables -t nat $(echo "$rule" | sed 's/^-A/-D/') 2>/dev/null || true
+  # Clean up network namespaces created by vmsan
+  for ns in $(ip netns list 2>/dev/null | awk '{print $1}' | grep '^vmsan-'); do
+    ip netns delete "$ns" 2>/dev/null && NET_COUNT=$((NET_COUNT + 1))
   done
-  iptables -S FORWARD 2>/dev/null | grep -E 'fhvm|172\.16\.' | while read -r rule; do
-    iptables $(echo "$rule" | sed 's/^-A/-D/') 2>/dev/null || true
-  done
+
+  [ "$NET_COUNT" -gt 0 ] && success "Cleaned up $NET_COUNT network resources"
+
+  # Clean up iptables rules referencing vmsan
+  iptables-save 2>/dev/null | grep -cE 'fhvm|172\.16\.' >/dev/null 2>&1 && {
+    info "Cleaning iptables rules..."
+    iptables -t nat -S 2>/dev/null | grep -E 'fhvm|172\.16\.' | while IFS= read -r rule; do
+      eval "iptables -t nat $(echo "$rule" | sed 's/^-A/-D/')" 2>/dev/null || true
+    done
+    iptables -S FORWARD 2>/dev/null | grep -E 'fhvm|172\.16\.' | while IFS= read -r rule; do
+      eval "iptables $(echo "$rule" | sed 's/^-A/-D/')" 2>/dev/null || true
+    done
+    success "iptables rules cleaned"
+  }
 
   # Delete Cloudflare tunnel via API before removing local files
   if [ -f "$VMSAN_DIR/cloudflare/cloudflare.json" ]; then
