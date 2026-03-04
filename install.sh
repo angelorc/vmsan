@@ -60,8 +60,11 @@ if [ "${1:-}" = "--uninstall" ]; then
 
   if [ -f "$VMSAN_DIR/cloudflare/cloudflared.pid" ]; then
     CF_PID="$(cat "$VMSAN_DIR/cloudflare/cloudflared.pid" 2>/dev/null || true)"
-    if [ -n "${CF_PID:-}" ]; then
-      kill -TERM "$CF_PID" 2>/dev/null || true
+    if [ -n "${CF_PID:-}" ] && [ -d "/proc/$CF_PID" ]; then
+      CF_COMM="$(cat "/proc/$CF_PID/comm" 2>/dev/null || true)"
+      if [ "$CF_COMM" = "cloudflared" ]; then
+        kill -TERM "$CF_PID" 2>/dev/null || true
+      fi
     fi
   fi
 
@@ -363,7 +366,8 @@ else
       echo "    - Zone / DNS / Edit"
       echo ""
       printf "  Cloudflare API token: "
-      read -r CF_TOKEN </dev/tty
+      read -rs CF_TOKEN </dev/tty
+      echo ""
 
       if [ -z "$CF_TOKEN" ]; then
         warn "No token provided — skipping Cloudflare configuration"

@@ -17,6 +17,9 @@ async function setupTunnelRoutes(
   hostnames: string[],
   ports: number[],
 ): Promise<SetupTunnelResult> {
+  if (ports.length === 0) {
+    throw new Error("Cloudflare tunnel setup requires at least one published port");
+  }
   const { tunnelId } = await cloudflare.createTunnel();
   const routes = hostnames.map((hostname, i) => ({
     vmId: state.id,
@@ -76,7 +79,7 @@ export function cloudflarePlugin(baseDir: string): VmsanPlugin {
       // Restore tunnels on start
       ctx.hooks.hook("vm:afterStart", async (state) => {
         const savedHostnames = resolveTunnelHostnames(state.network);
-        if (!savedHostnames.length || !cloudflare.isConfigured()) return;
+        if (!savedHostnames.length || !cloudflare.isConfigured() || !state.network.publishedPorts?.length) return;
         await withTunnelSetup(
           ctx,
           cloudflare,

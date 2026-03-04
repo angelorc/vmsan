@@ -380,6 +380,19 @@ export class CloudflareService {
   }
 
   private async resolveAccountId(client: Cloudflare, domain?: string): Promise<string> {
+    // Prefer domain-based zone lookup to ensure correct account with multi-account tokens
+    if (domain) {
+      try {
+        const page = await client.zones.list({ name: domain, status: "active" });
+        const zones = page.getPaginatedItems();
+        if (zones.length > 0 && zones[0].account?.id) {
+          return zones[0].account.id;
+        }
+      } catch (err) {
+        consola.debug(`Zone lookup failed, falling back to account list: ${toError(err).message}`);
+      }
+    }
+
     try {
       const page = await client.accounts.list();
       const accounts = page.getPaginatedItems();
@@ -387,15 +400,7 @@ export class CloudflareService {
         return accounts[0].id;
       }
     } catch (err) {
-      consola.debug(`Account list failed, falling back to zone lookup: ${toError(err).message}`);
-    }
-
-    if (domain) {
-      const page = await client.zones.list({ name: domain, status: "active" });
-      const zones = page.getPaginatedItems();
-      if (zones.length > 0 && zones[0].account?.id) {
-        return zones[0].account.id;
-      }
+      consola.debug(`Account list failed: ${toError(err).message}`);
     }
 
     throw cloudflareNoAccountsError();
