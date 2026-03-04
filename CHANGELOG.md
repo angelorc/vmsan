@@ -4,6 +4,12 @@
 
 ### Patch Changes
 
+- Add Cloudflare Tunnel plugin and improvements (#34)
+
+## 0.1.0
+
+### Patch Changes
+
 - Merge pull request #32 from angelorc/fix/connect-500-home-permissions
 
 ## 0.1.0
