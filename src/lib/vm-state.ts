@@ -18,6 +18,7 @@ export interface VmNetwork {
   tunnelHostnames?: string[];
   bandwidthMbit?: number;
   netnsName?: string;
+  skipDnat?: boolean;
 }
 
 export interface VmState {

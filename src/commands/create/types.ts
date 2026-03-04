@@ -51,6 +51,7 @@ export interface CreateSummaryInput {
   guestIp: string;
   macAddress: string;
   stateFilePath: string;
+  tunnelHostnames?: string[];
 }
 
 export interface InitialVmStateInput {
@@ -78,6 +79,7 @@ export interface InitialVmStateInput {
   agentPort: number;
   bandwidthMbit?: number;
   netnsName?: string;
+  skipDnat?: boolean;
 }
 
 export type CreateState = VmState;

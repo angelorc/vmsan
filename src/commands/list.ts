@@ -68,6 +68,7 @@ const listCommand = defineCommand({
             runtime: vm.runtime,
             timeoutAt: vm.timeoutAt ?? null,
             snapshot: vm.snapshot ?? null,
+            tunnelHostnames: vm.network.tunnelHostnames ?? [],
           })),
         });
       } else {
@@ -85,6 +86,14 @@ const listCommand = defineCommand({
             RUNTIME: { value: (vm) => vm.runtime },
             TIMEOUT: {
               value: (vm) => (vm.timeoutAt ? timeRemaining(vm.timeoutAt) : "-"),
+            },
+            TUNNEL: {
+              value: (vm) =>
+                vm.network.tunnelHostnames?.length
+                  ? vm.network.tunnelHostnames.map((h) => `https://${h}`).join(", ")
+                  : vm.network.tunnelHostname
+                    ? `https://${vm.network.tunnelHostname}`
+                    : "-",
             },
             SNAPSHOT: { value: (vm) => vm.snapshot ?? "-" },
           },

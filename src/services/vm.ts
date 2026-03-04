@@ -18,7 +18,10 @@ import {
 import { killOrphanVmProcess, cleanupNetwork, cleanupChroot } from "../commands/create/cleanup.ts";
 import { buildInitialVmState } from "../commands/create/state.ts";
 import { resolveImageRootfs } from "../commands/create/image-rootfs.ts";
-import type { ImageReference } from "../commands/create/validation.ts";
+import {
+  type ImageReference,
+  validatePublishedPortsAvailable,
+} from "../commands/create/validation.ts";
 import { ensureSeccompFilter } from "../lib/seccomp.ts";
 import type { NetworkPolicy, Runtime } from "../commands/create/types.ts";
 import {
@@ -57,6 +60,7 @@ export interface CreateVmOptions {
   disableCgroup?: boolean;
   timeoutMs?: number;
   snapshotId?: string;
+  skipDnat?: boolean;
 }
 
 export interface CreateVmResult {
@@ -153,8 +157,13 @@ export class VMService {
       const snapshotId = opts.snapshotId ?? null;
       const timeoutMs = opts.timeoutMs ?? null;
 
-      // Hook: beforeCreate
+      // Hook: beforeCreate (plugins may set opts.skipDnat)
       await hooks.callHook("vm:beforeCreate", { vmId, options: opts });
+
+      // Port conflict check (only when DNAT is active)
+      if (!opts.skipDnat) {
+        validatePublishedPortsAvailable(ports, paths);
+      }
 
       // Resolve kernel
       const kernelPath = opts.kernelPath ?? findKernel(paths.baseDir);
@@ -188,6 +197,7 @@ export class VMService {
           ports,
           bandwidthMbit,
           netnsName,
+          opts.skipDnat,
         );
         networkConfig = net.config;
 
@@ -216,6 +226,7 @@ export class VMService {
           agentPort: paths.agentPort,
           bandwidthMbit,
           netnsName,
+          skipDnat: opts.skipDnat,
         });
         this.store.save(state);
 
@@ -338,7 +349,10 @@ export class VMService {
       // Hook: afterCreate
       await hooks.callHook("vm:afterCreate", finalState);
 
-      return { vmId, pid, state: finalState };
+      // Re-read state: hooks (e.g. Cloudflare plugin) may have updated it
+      const updatedState = this.store.load(vmId) ?? finalState;
+
+      return { vmId, pid, state: updatedState };
     } catch (error) {
       // Error hooks
       if (vmId) {
@@ -615,8 +629,8 @@ export class VMService {
         const netCfg = NetworkManager.fromVmNetwork(state.network);
         try {
           netCfg.teardown();
-        } catch {
-          // Network may be partially torn down from a prior attempt
+        } catch (err) {
+          this.logger.debug(`Network teardown failed for VM ${vmId}: ${toError(err).message}`);
         }
 
         // Hook: network:afterTeardown
@@ -799,8 +813,8 @@ export class VMService {
         status: "error",
         error: toError(error).message,
       });
-    } catch {
-      // State store may be corrupt during error recovery
+    } catch (err) {
+      this.logger.warn(`Failed to mark VM ${vmId} as error: ${toError(err).message}`);
     }
   }
 }

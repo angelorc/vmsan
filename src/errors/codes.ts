@@ -35,10 +35,20 @@ export type SetupErrorCode =
   | "ERR_SETUP_NO_ROOTFS_DIR"
   | "ERR_SETUP_NO_EXT4_ROOTFS";
 
+export type CloudflareErrorCode =
+  | "ERR_CLOUDFLARE_NOT_CONFIGURED"
+  | "ERR_CLOUDFLARE_TUNNEL_NO_ID"
+  | "ERR_CLOUDFLARE_BINARY_NOT_FOUND"
+  | "ERR_CLOUDFLARE_CONFIG_NOT_FOUND"
+  | "ERR_CLOUDFLARE_START_FAILED"
+  | "ERR_CLOUDFLARE_NO_ACCOUNTS"
+  | "ERR_CLOUDFLARE_NO_ZONE";
+
 export type VmsanErrorCode =
   | ValidationErrorCode
   | VmErrorCode
   | FirecrackerErrorCode
   | NetworkErrorCode
   | TimeoutErrorCode
-  | SetupErrorCode;
+  | SetupErrorCode
+  | CloudflareErrorCode;

@@ -32,6 +32,16 @@ export function toError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err));
 }
 
+const SLEEP_ARRAY = new Int32Array(new SharedArrayBuffer(4));
+
+export function sleepSync(ms: number): void {
+  Atomics.wait(SLEEP_ARRAY, 0, 0, ms);
+}
+
+export function sleepAsync(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Send a signal to a process. Returns true if delivered, false if
  * the process is already dead (ESRCH). Falls back to sudo for

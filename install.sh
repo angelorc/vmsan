@@ -8,7 +8,9 @@ set -euo pipefail
 
 VMSAN_DIR="${VMSAN_DIR:-$HOME/.vmsan}"
 VMSAN_REPO="angelorc/vmsan"
+VMSAN_REF="${VMSAN_REF:-}"
 ARCH="$(uname -m)"
+CLOUDFLARED_VERSION="${CLOUDFLARED_VERSION:-2026.2.0}"
 
 # --- helpers ---
 
@@ -27,6 +29,14 @@ download() {
   curl -fsSL -o "$dest" "$url"
 }
 
+go_arch() {
+  case "$ARCH" in
+    x86_64)  echo "amd64" ;;
+    aarch64) echo "arm64" ;;
+    *)       error "Unsupported architecture: $ARCH" ;;
+  esac
+}
+
 # --- uninstall ---
 
 if [ "${1:-}" = "--uninstall" ]; then
@@ -34,12 +44,86 @@ if [ "${1:-}" = "--uninstall" ]; then
   echo "  vmsan uninstaller"
   echo ""
 
+  # Stop running VMs before removing CLI
+  if [ -d "$VMSAN_DIR/vms" ]; then
+    for state_file in "$VMSAN_DIR"/vms/*.json; do
+      [ -f "$state_file" ] || continue
+      VM_ID="$(grep -oP '"id"\s*:\s*"\K[^"]+' "$state_file" 2>/dev/null || true)"
+      VM_PID="$(grep -oP '"pid"\s*:\s*\K\d+' "$state_file" 2>/dev/null || true)"
+      if [ -n "$VM_ID" ] && command -v vmsan >/dev/null 2>&1; then
+        info "Stopping VM $VM_ID..."
+        vmsan stop "$VM_ID" 2>/dev/null || true
+      fi
+      [ -n "$VM_PID" ] && kill -9 "$VM_PID" 2>/dev/null || true
+    done
+  fi
+
+  if [ -f "$VMSAN_DIR/cloudflare/cloudflared.pid" ]; then
+    CF_PID="$(cat "$VMSAN_DIR/cloudflare/cloudflared.pid" 2>/dev/null || true)"
+    if [ -n "${CF_PID:-}" ] && [ -d "/proc/$CF_PID" ]; then
+      CF_COMM="$(cat "/proc/$CF_PID/comm" 2>/dev/null || true)"
+      if [ "$CF_COMM" = "cloudflared" ]; then
+        kill -TERM "$CF_PID" 2>/dev/null || true
+      fi
+    fi
+  fi
+
   if command -v vmsan >/dev/null 2>&1; then
     info "Removing vmsan CLI (npm global)..."
     npm uninstall -g vmsan
     success "vmsan CLI removed"
   else
     success "vmsan CLI not installed"
+  fi
+
+  # Clean up TAP and veth interfaces (host namespace)
+  NET_COUNT=0
+  for iface_path in /sys/class/net/fhvm* /sys/class/net/veth-h-* /sys/class/net/veth-g-*; do
+    [ -e "$iface_path" ] || continue
+    DEV="$(basename "$iface_path")"
+    ip link delete "$DEV" 2>/dev/null && NET_COUNT=$((NET_COUNT + 1))
+  done
+
+  # Clean up network namespaces created by vmsan
+  for ns in $(ip netns list 2>/dev/null | awk '{print $1}' | grep '^vmsan-'); do
+    ip netns delete "$ns" 2>/dev/null && NET_COUNT=$((NET_COUNT + 1))
+  done
+
+  [ "$NET_COUNT" -gt 0 ] && success "Cleaned up $NET_COUNT network resources"
+
+  # Clean up iptables rules referencing vmsan
+  iptables-save 2>/dev/null | grep -cE 'fhvm|172\.16\.' >/dev/null 2>&1 && {
+    info "Cleaning iptables rules..."
+    iptables -t nat -S 2>/dev/null | grep -E 'fhvm|172\.16\.' | while IFS= read -r rule; do
+      eval "iptables -t nat $(echo "$rule" | sed 's/^-A/-D/')" 2>/dev/null || true
+    done
+    iptables -S FORWARD 2>/dev/null | grep -E 'fhvm|172\.16\.' | while IFS= read -r rule; do
+      eval "iptables $(echo "$rule" | sed 's/^-A/-D/')" 2>/dev/null || true
+    done
+    success "iptables rules cleaned"
+  }
+
+  # Delete Cloudflare tunnel via API before removing local files
+  if [ -f "$VMSAN_DIR/cloudflare/cloudflare.json" ]; then
+    CF_TOKEN="$(grep -oP '"token"\s*:\s*"\K[^"]+' "$VMSAN_DIR/cloudflare/cloudflare.json" 2>/dev/null || true)"
+    CF_TUNNEL_ID="$(grep -oP '"tunnelId"\s*:\s*"\K[^"]+' "$VMSAN_DIR/cloudflare/cloudflare.json" 2>/dev/null || true)"
+    CF_ACCOUNT_ID="$(grep -oP '"accountId"\s*:\s*"\K[^"]+' "$VMSAN_DIR/cloudflare/cloudflare.json" 2>/dev/null || true)"
+    if [ -n "$CF_TOKEN" ] && [ -n "$CF_TUNNEL_ID" ] && [ -n "$CF_ACCOUNT_ID" ]; then
+      info "Deleting Cloudflare Tunnel $CF_TUNNEL_ID..."
+      # Clean tunnel connections first, then delete
+      curl -fsSL -X DELETE \
+        -H "Authorization: Bearer $CF_TOKEN" \
+        -H "Content-Type: application/json" \
+        "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/cfd_tunnel/$CF_TUNNEL_ID/connections" >/dev/null 2>&1 || true
+      if curl -fsSL -o /dev/null -X DELETE \
+        -H "Authorization: Bearer $CF_TOKEN" \
+        -H "Content-Type: application/json" \
+        "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/cfd_tunnel/$CF_TUNNEL_ID" 2>/dev/null; then
+        success "Cloudflare Tunnel deleted"
+      else
+        warn "Could not delete Cloudflare Tunnel (may need manual cleanup)"
+      fi
+    fi
   fi
 
   if [ -d "$VMSAN_DIR" ]; then
@@ -110,7 +194,7 @@ fi
 # --- directories ---
 
 info "Setting up $VMSAN_DIR..."
-mkdir -p "$VMSAN_DIR"/{bin,kernels,rootfs,vms,jailer,registry/rootfs,snapshots}
+mkdir -p "$VMSAN_DIR"/{bin,kernels,rootfs,vms,jailer,registry/rootfs,snapshots,cloudflare}
 success "Directories created"
 
 # --- firecracker + jailer ---
@@ -204,7 +288,18 @@ success "Latest release: $LATEST_TAG"
 
 # --- vmsan CLI ---
 
-if command -v vmsan >/dev/null 2>&1; then
+if [ -n "$VMSAN_REF" ]; then
+  info "Installing vmsan CLI from branch/ref: $VMSAN_REF..."
+  VMSAN_SRC="$VMSAN_DIR/src"
+  rm -rf "$VMSAN_SRC"
+  mkdir -p "$VMSAN_SRC"
+  curl -fsSL "https://github.com/$VMSAN_REPO/archive/refs/heads/${VMSAN_REF}.tar.gz" \
+    | tar -xz --strip-components=1 -C "$VMSAN_SRC"
+  (cd "$VMSAN_SRC" && npm install --ignore-scripts && npx obuild)
+  npm install -g "$VMSAN_SRC"
+  VMSAN_VER=$(vmsan --version 2>/dev/null || echo "unknown")
+  success "vmsan CLI installed from $VMSAN_REF ($VMSAN_VER)"
+elif command -v vmsan >/dev/null 2>&1; then
   VMSAN_VER=$(vmsan --version 2>/dev/null || echo "unknown")
   success "vmsan CLI already installed ($VMSAN_VER)"
 else
@@ -227,7 +322,92 @@ else
   success "vmsan-agent ${LATEST_TAG} installed"
 fi
 
+# --- cloudflared ---
+
+CLOUDFLARED_PATH="$VMSAN_DIR/bin/cloudflared"
+
+if [ -x "$CLOUDFLARED_PATH" ]; then
+  success "cloudflared already installed"
+else
+  CLOUDFLARED_ARCH=$(go_arch)
+  CLOUDFLARED_URL="https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-${CLOUDFLARED_ARCH}"
+  download "$CLOUDFLARED_URL" "$CLOUDFLARED_PATH"
+  chmod +x "$CLOUDFLARED_PATH"
+  success "cloudflared $CLOUDFLARED_VERSION installed"
+fi
+
+# --- cloudflare configuration ---
+
+CLOUDFLARE_JSON="$VMSAN_DIR/cloudflare/cloudflare.json"
+
+if [ -f "$CLOUDFLARE_JSON" ]; then
+  success "Cloudflare already configured"
+else
+  if (exec </dev/tty) 2>/dev/null; then
+    echo ""
+    echo "  ┌─────────────────────────────────────────────────────────────┐"
+    echo "  │  Cloudflare Tunnel (optional)                              │"
+    echo "  │                                                            │"
+    echo "  │  vmsan can expose VMs via Cloudflare Tunnels.              │"
+    echo "  │  You need a Cloudflare API token and a domain managed      │"
+    echo "  │  by Cloudflare.                                            │"
+    echo "  └─────────────────────────────────────────────────────────────┘"
+    echo ""
+    printf "  Configure Cloudflare now? [y/N] "
+    read -r CF_SETUP </dev/tty
+
+    if [ "$CF_SETUP" = "y" ] || [ "$CF_SETUP" = "Y" ]; then
+      echo ""
+      echo "  Create an API token at:"
+      echo "  https://dash.cloudflare.com/profile/api-tokens"
+      echo ""
+      echo "  Required permissions:"
+      echo "    - Account / Cloudflare Tunnel / Edit"
+      echo "    - Zone / DNS / Edit"
+      echo ""
+      printf "  Cloudflare API token: "
+      read -rs CF_TOKEN </dev/tty
+      echo ""
+
+      if [ -z "$CF_TOKEN" ]; then
+        warn "No token provided — skipping Cloudflare configuration"
+      else
+        printf "  Cloudflare domain (e.g. example.com): "
+        read -r CF_DOMAIN </dev/tty
+
+        if [ -z "$CF_DOMAIN" ]; then
+          warn "No domain provided — skipping Cloudflare configuration"
+        else
+          # Verify token via Cloudflare API
+          info "Verifying Cloudflare API token..."
+          CF_VERIFY=$(curl -fsSL -H "Authorization: Bearer $CF_TOKEN" \
+            "https://api.cloudflare.com/client/v4/user/tokens/verify" 2>/dev/null || echo "")
+
+          if echo "$CF_VERIFY" | grep -q '"success":true'; then
+            cat > "$CLOUDFLARE_JSON" <<EOF
+{
+  "token": "$CF_TOKEN",
+  "domain": "$CF_DOMAIN"
+}
+EOF
+            chmod 600 "$CLOUDFLARE_JSON"
+            success "Cloudflare configured (domain: $CF_DOMAIN)"
+            info "VMs will be exposed via Cloudflare Tunnel (direct port forwarding disabled)"
+          else
+            warn "Token verification failed — skipping Cloudflare configuration"
+          fi
+        fi
+      fi
+    else
+      info "Skipping Cloudflare configuration"
+    fi
+  fi
+fi
+
 # --- summary ---
+
+CF_STATUS="not configured"
+[ -f "$VMSAN_DIR/cloudflare/cloudflare.json" ] && CF_STATUS="configured"
 
 echo ""
 success "vmsan environment ready at $VMSAN_DIR"
@@ -237,5 +417,13 @@ echo "  Jailer       $VMSAN_DIR/bin/jailer"
 echo "  Kernel       $VMSAN_DIR/kernels/$KERNEL_FILE"
 echo "  Rootfs       $VMSAN_DIR/rootfs/$ROOTFS_FILE"
 echo "  Agent        $AGENT_PATH"
+echo "  cloudflared  $CLOUDFLARED_PATH ($CF_STATUS)"
 echo "  CLI          $(command -v vmsan 2>/dev/null || echo 'vmsan (npm global)')"
 echo ""
+if [ "$CF_STATUS" = "configured" ]; then
+  echo "  Tunnel mode active — VMs exposed via Cloudflare (no DNAT)."
+  echo ""
+elif [ "$CF_STATUS" = "not configured" ]; then
+  echo "  To configure Cloudflare later, re-run this installer."
+  echo ""
+fi
