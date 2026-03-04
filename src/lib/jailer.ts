@@ -149,6 +149,12 @@ export class Jailer {
 
       // Set hostname to VM ID (e.g. "vm-a1b2c3d4")
       writeFileSync(join(tmpMount, "etc", "hostname"), `${this.vmId}\n`);
+      // Add hostname to /etc/hosts so sudo doesn't warn "unable to resolve host"
+      const hostsPath = join(tmpMount, "etc", "hosts");
+      const hostsContent = existsSync(hostsPath) ? readFileSync(hostsPath, "utf-8") : "";
+      if (!hostsContent.includes(this.vmId)) {
+        writeFileSync(hostsPath, `${hostsContent.trimEnd()}\n127.0.1.1 ${this.vmId}\n`);
+      }
 
       // Inject vmsan-agent binary and systemd service.
       if (config.agent) {

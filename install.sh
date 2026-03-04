@@ -431,17 +431,17 @@ build_runtime() {
 FROM __BASE_IMAGE__
 RUN if command -v apt-get >/dev/null 2>&1; then \
       apt-get update && apt-get install -y --no-install-recommends \
-        bind9-utils bzip2 findutils git gzip iputils-ping libicu-dev libjpeg-dev \
+        bind9-utils bzip2 findutils git gzip iptables iputils-ping libicu-dev libjpeg-dev \
         libpng-dev ncurses-base libssl-dev openssl procps sudo \
         systemd systemd-sysv tar unzip debianutils whois zstd \
       && rm -rf /var/lib/apt/lists/*; \
     elif command -v dnf >/dev/null 2>&1; then \
-      dnf install -y bind-utils bzip2 findutils git gzip iputils libicu libjpeg \
+      dnf install -y bind-utils bzip2 findutils git gzip iptables iputils libicu libjpeg \
         libpng ncurses-libs openssl openssl-libs procps sudo \
         systemd tar unzip which whois zstd \
       && dnf clean all; \
     elif command -v apk >/dev/null 2>&1; then \
-      apk add --no-cache bash bind-tools bzip2 findutils git gzip iputils \
+      apk add --no-cache bash bind-tools bzip2 findutils git gzip iptables iputils \
         icu-libs libjpeg-turbo libpng ncurses-libs openrc openssl \
         procps sudo tar unzip whois zstd; \
     fi
