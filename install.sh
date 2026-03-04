@@ -8,6 +8,7 @@ set -euo pipefail
 
 VMSAN_DIR="${VMSAN_DIR:-$HOME/.vmsan}"
 VMSAN_REPO="angelorc/vmsan"
+VMSAN_REF="${VMSAN_REF:-}"
 ARCH="$(uname -m)"
 CLOUDFLARED_VERSION="${CLOUDFLARED_VERSION:-2026.2.0}"
 
@@ -220,7 +221,18 @@ success "Latest release: $LATEST_TAG"
 
 # --- vmsan CLI ---
 
-if command -v vmsan >/dev/null 2>&1; then
+if [ -n "$VMSAN_REF" ]; then
+  info "Installing vmsan CLI from branch/ref: $VMSAN_REF..."
+  VMSAN_SRC="$VMSAN_DIR/src"
+  rm -rf "$VMSAN_SRC"
+  mkdir -p "$VMSAN_SRC"
+  curl -fsSL "https://github.com/$VMSAN_REPO/archive/refs/heads/${VMSAN_REF}.tar.gz" \
+    | tar -xz --strip-components=1 -C "$VMSAN_SRC"
+  (cd "$VMSAN_SRC" && npm install --ignore-scripts && npx obuild)
+  npm install -g "$VMSAN_SRC"
+  VMSAN_VER=$(vmsan --version 2>/dev/null || echo "unknown")
+  success "vmsan CLI installed from $VMSAN_REF ($VMSAN_VER)"
+elif command -v vmsan >/dev/null 2>&1; then
   VMSAN_VER=$(vmsan --version 2>/dev/null || echo "unknown")
   success "vmsan CLI already installed ($VMSAN_VER)"
 else

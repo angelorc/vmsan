@@ -5,6 +5,7 @@ import type { VmsanHooks } from "./hooks.ts";
 import type { VmsanPlugin } from "./plugin.ts";
 import { createDefaultLogger, type VmsanLogger } from "./vmsan-logger.ts";
 import { VMService } from "./services/vm.ts";
+import { cloudflarePlugin } from "./plugins/cloudflare.ts";
 
 export interface VmsanOptions {
   paths?: string | VmsanPaths;
@@ -35,10 +36,10 @@ export async function createVmsan(options?: VmsanOptions): Promise<VMService> {
   const ctx: VmsanContext = { paths, store, hooks, logger };
   const vmsan = new VMService(ctx);
 
-  if (options?.plugins) {
-    for (const plugin of options.plugins) {
-      await plugin.setup(ctx);
-    }
+  const builtinPlugins: VmsanPlugin[] = [cloudflarePlugin(paths.baseDir)];
+  const allPlugins = [...builtinPlugins, ...(options?.plugins ?? [])];
+  for (const plugin of allPlugins) {
+    await plugin.setup(ctx);
   }
 
   return vmsan;
