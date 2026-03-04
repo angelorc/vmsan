@@ -98,10 +98,10 @@ RUN if command -v apk >/dev/null 2>&1; then \\
 RUN EXTRA=""; \\
     if command -v npm >/dev/null 2>&1; then \\
       su -c 'mkdir -p /home/ubuntu/.npm-global && npm config set prefix /home/ubuntu/.npm-global' ubuntu; \\
-      EXTRA="${EXTRA}export PATH=\\"/home/ubuntu/.npm-global/bin:\\$PATH\\"\\n"; \\
+      EXTRA="\${EXTRA}export PATH=\\"/home/ubuntu/.npm-global/bin:\\$PATH\\"\\n"; \\
     fi; \\
     if command -v pip3 >/dev/null 2>&1 || command -v pip >/dev/null 2>&1; then \\
-      EXTRA="${EXTRA}export PATH=\\"/home/ubuntu/.local/bin:\\$PATH\\"\\n"; \\
+      EXTRA="\${EXTRA}export PATH=\\"/home/ubuntu/.local/bin:\\$PATH\\"\\n"; \\
     fi; \\
     if [ -n "$EXTRA" ]; then \\
       printf '%b' "$EXTRA" >> /home/ubuntu/.profile; \\
