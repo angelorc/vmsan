@@ -20,7 +20,7 @@ export const createCommandArgs = {
   "from-image": {
     type: "string",
     description:
-      "Build rootfs from a Docker/OCI image (e.g. ubuntu:latest). Agent is not installed; connect, exec, cp unavailable.",
+      "Build rootfs from a Docker/OCI image (e.g. ubuntu:latest). Agent is not installed; connect, exec, upload/download unavailable.",
   },
   runtime: {
     type: "string",

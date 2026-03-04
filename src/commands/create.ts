@@ -143,7 +143,7 @@ const createCommand = defineCommand({
 
       if (commandArgs["from-image"]) {
         consola.warn(
-          "Custom image mode: connect, exec, and cp are not available (no agent installed). Use port forwarding to access your service.",
+          "Custom image mode: connect, exec, and upload/download are not available (no agent installed). Use port forwarding to access your service.",
         );
       }
 
