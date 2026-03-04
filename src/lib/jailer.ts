@@ -178,7 +178,7 @@ export class Jailer {
       // by root:root which causes EACCES when the agent runs commands as ubuntu.
       const ubuntuHome = join(tmpMount, "home", "ubuntu");
       if (existsSync(ubuntuHome)) {
-        execSync(`sudo chown 1000:1000 "${ubuntuHome}"`, { stdio: "pipe" });
+        execSync(`sudo chown -R ubuntu:ubuntu "${ubuntuHome}"`, { stdio: "pipe" });
       }
 
       execSync(`sudo umount "${tmpMount}"`, { stdio: "pipe" });
