@@ -848,7 +848,7 @@ export class VMService {
       const iptablesRules = ports
         .map(
           (p) =>
-            `sudo iptables -t nat -A PREROUTING -i eth0 -p tcp --dport ${p} -j DNAT --to-destination 127.0.0.1:${p}`,
+            `sudo iptables-legacy -t nat -A PREROUTING -i eth0 -p tcp --dport ${p} -j DNAT --to-destination 127.0.0.1:${p}`,
         )
         .join(" && ");
       await agent.runCommand({
