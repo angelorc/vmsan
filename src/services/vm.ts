@@ -857,9 +857,7 @@ export class VMService {
       });
       this.logger.debug(`Localhost port forwarding set up for ports: ${ports.join(", ")}`);
     } catch (err) {
-      this.logger.warn(
-        `Failed to set up localhost port forwarding: ${toError(err).message}`,
-      );
+      this.logger.warn(`Failed to set up localhost port forwarding: ${toError(err).message}`);
     }
   }
 
