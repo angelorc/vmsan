@@ -153,6 +153,8 @@ export function validatePublishedPortsAvailable(ports: number[], paths: VmsanPat
     .filter((state) => state.status === "running" || state.status === "creating");
 
   for (const state of activeStates) {
+    // VMs using tunnel routing (skipDnat) don't occupy host ports
+    if (state.network.skipDnat) continue;
     for (const usedPort of state.network.publishedPorts ?? []) {
       if (!ports.includes(usedPort)) continue;
       const existing = collisions.get(usedPort) ?? [];

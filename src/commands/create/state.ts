@@ -32,6 +32,7 @@ export function buildInitialVmState(input: InitialVmStateInput): VmState {
       tunnelHostnames: [],
       bandwidthMbit: input.bandwidthMbit,
       netnsName: input.netnsName,
+      skipDnat: input.skipDnat,
     },
     snapshot: input.snapshotId,
     timeoutMs: input.timeoutMs,

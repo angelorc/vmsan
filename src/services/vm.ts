@@ -18,7 +18,10 @@ import {
 import { killOrphanVmProcess, cleanupNetwork, cleanupChroot } from "../commands/create/cleanup.ts";
 import { buildInitialVmState } from "../commands/create/state.ts";
 import { resolveImageRootfs } from "../commands/create/image-rootfs.ts";
-import type { ImageReference } from "../commands/create/validation.ts";
+import {
+  type ImageReference,
+  validatePublishedPortsAvailable,
+} from "../commands/create/validation.ts";
 import { ensureSeccompFilter } from "../lib/seccomp.ts";
 import type { NetworkPolicy, Runtime } from "../commands/create/types.ts";
 import {
@@ -57,6 +60,7 @@ export interface CreateVmOptions {
   disableCgroup?: boolean;
   timeoutMs?: number;
   snapshotId?: string;
+  skipDnat?: boolean;
 }
 
 export interface CreateVmResult {
@@ -153,8 +157,13 @@ export class VMService {
       const snapshotId = opts.snapshotId ?? null;
       const timeoutMs = opts.timeoutMs ?? null;
 
-      // Hook: beforeCreate
+      // Hook: beforeCreate (plugins may set opts.skipDnat)
       await hooks.callHook("vm:beforeCreate", { vmId, options: opts });
+
+      // Port conflict check (only when DNAT is active)
+      if (!opts.skipDnat) {
+        validatePublishedPortsAvailable(ports, paths);
+      }
 
       // Resolve kernel
       const kernelPath = opts.kernelPath ?? findKernel(paths.baseDir);
@@ -188,6 +197,7 @@ export class VMService {
           ports,
           bandwidthMbit,
           netnsName,
+          opts.skipDnat,
         );
         networkConfig = net.config;
 
@@ -216,6 +226,7 @@ export class VMService {
           agentPort: paths.agentPort,
           bandwidthMbit,
           netnsName,
+          skipDnat: opts.skipDnat,
         });
         this.store.save(state);
 

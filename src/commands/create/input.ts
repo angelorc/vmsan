@@ -12,7 +12,6 @@ import {
   parseRuntime,
   parseVcpuCount,
   validateCidr,
-  validatePublishedPortsAvailable,
 } from "./validation.ts";
 import { policyConflictError } from "../../errors/index.ts";
 
@@ -45,8 +44,6 @@ export function parseCreateInput(
   const timeoutMs = typeof args.timeout === "string" ? parseDuration(args.timeout) : null;
   const snapshotId = typeof args.snapshot === "string" ? args.snapshot : null;
   const diskSizeGb = parseDiskSizeGb(args.disk);
-
-  validatePublishedPortsAvailable(ports, paths);
 
   for (const cidr of allowedCidrs) validateCidr(cidr);
   for (const cidr of deniedCidrs) validateCidr(cidr);

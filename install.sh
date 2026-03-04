@@ -324,6 +324,7 @@ else
 EOF
             chmod 600 "$CLOUDFLARE_JSON"
             success "Cloudflare configured (domain: $CF_DOMAIN)"
+            info "VMs will be exposed via Cloudflare Tunnel (direct port forwarding disabled)"
           else
             warn "Token verification failed — skipping Cloudflare configuration"
           fi
@@ -351,7 +352,10 @@ echo "  Agent        $AGENT_PATH"
 echo "  cloudflared  $CLOUDFLARED_PATH ($CF_STATUS)"
 echo "  CLI          $(command -v vmsan 2>/dev/null || echo 'vmsan (npm global)')"
 echo ""
-if [ "$CF_STATUS" = "not configured" ]; then
+if [ "$CF_STATUS" = "configured" ]; then
+  echo "  Tunnel mode active — VMs exposed via Cloudflare (no DNAT)."
+  echo ""
+elif [ "$CF_STATUS" = "not configured" ]; then
   echo "  To configure Cloudflare later, re-run this installer."
   echo ""
 fi

@@ -78,6 +78,7 @@ export interface InitialVmStateInput {
   agentPort: number;
   bandwidthMbit?: number;
   netnsName?: string;
+  skipDnat?: boolean;
 }
 
 export type CreateState = VmState;

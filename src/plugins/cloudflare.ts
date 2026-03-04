@@ -41,12 +41,15 @@ export function cloudflarePlugin(baseDir: string): VmsanPlugin {
     setup(ctx) {
       const cloudflare = new CloudflareService(baseDir);
 
-      // Pre-flight: abort if cloudflared missing + ports requested
+      // Pre-flight: configure tunnel mode when Cloudflare is active
       ctx.hooks.hook("vm:beforeCreate", ({ options }) => {
+        if (!cloudflare.isConfigured()) return;
         const ports = (options as Record<string, unknown>).ports as number[] | undefined;
-        if (ports?.length && cloudflare.isConfigured() && !cloudflare.isInstalled()) {
+        if (ports?.length && !cloudflare.isInstalled()) {
           throw cloudflaredNotFoundError();
         }
+        // Disable DNAT — Cloudflare Tunnel handles routing
+        options.skipDnat = true;
       });
 
       // Create tunnels after VM is running
@@ -63,7 +66,7 @@ export function cloudflarePlugin(baseDir: string): VmsanPlugin {
           startMsg: "Setting up Cloudflare Tunnel...",
           successMsg: (h) => `Cloudflare Tunnel: https://${h}`,
           failMsg: (e) =>
-            `Cloudflare Tunnel setup failed: ${e}. Port forwarding via DNAT still active.`,
+            `Cloudflare Tunnel setup failed: ${e}. VM ports are not externally reachable.`,
           onSuccess: (result) => {
             ctx.store.update(state.id, {
               network: {
@@ -89,7 +92,8 @@ export function cloudflarePlugin(baseDir: string): VmsanPlugin {
           {
             startMsg: "Restoring Cloudflare Tunnel...",
             successMsg: (h) => `Cloudflare Tunnel restored: https://${h}`,
-            failMsg: (e) => `Cloudflare restore failed: ${e}. DNAT still active.`,
+            failMsg: (e) =>
+              `Cloudflare restore failed: ${e}. VM ports are not externally reachable.`,
           },
         );
       });

@@ -19,6 +19,7 @@ export interface NetworkConfig {
   publishedPorts: number[];
   bandwidthMbit?: number;
   netnsName?: string;
+  skipDnat?: boolean;
 }
 
 // DNS resolvers the VM uses (Google Public DNS)
@@ -92,6 +93,7 @@ export class NetworkManager {
     publishedPorts: number[],
     bandwidthMbit?: number,
     netnsName?: string,
+    skipDnat?: boolean,
   ) {
     this.config = {
       slot,
@@ -107,6 +109,7 @@ export class NetworkManager {
       publishedPorts,
       bandwidthMbit,
       netnsName,
+      skipDnat,
     };
   }
 
@@ -140,6 +143,7 @@ export class NetworkManager {
       publishedPorts: network.publishedPorts,
       bandwidthMbit: network.bandwidthMbit,
       netnsName: network.netnsName,
+      skipDnat: network.skipDnat,
     });
   }
 
@@ -588,39 +592,41 @@ export class NetworkManager {
       "ACCEPT",
     ]);
 
-    // Port forwarding: DNAT rules (always on host — external traffic arrives there)
-    for (const port of publishedPorts) {
-      const portStr = String(port);
-      sudo([
-        "iptables",
-        "-t",
-        "nat",
-        "-A",
-        "PREROUTING",
-        "-i",
-        defaultIface,
-        "-p",
-        "tcp",
-        "--dport",
-        portStr,
-        "-j",
-        "DNAT",
-        "--to-destination",
-        `${guestIp}:${portStr}`,
-      ]);
-      sudo([
-        "iptables",
-        "-A",
-        "FORWARD",
-        "-p",
-        "tcp",
-        "-d",
-        guestIp,
-        "--dport",
-        portStr,
-        "-j",
-        "ACCEPT",
-      ]);
+    // Port forwarding: DNAT rules (skipped when Cloudflare Tunnel handles routing)
+    if (!this.config.skipDnat) {
+      for (const port of publishedPorts) {
+        const portStr = String(port);
+        sudo([
+          "iptables",
+          "-t",
+          "nat",
+          "-A",
+          "PREROUTING",
+          "-i",
+          defaultIface,
+          "-p",
+          "tcp",
+          "--dport",
+          portStr,
+          "-j",
+          "DNAT",
+          "--to-destination",
+          `${guestIp}:${portStr}`,
+        ]);
+        sudo([
+          "iptables",
+          "-A",
+          "FORWARD",
+          "-p",
+          "tcp",
+          "-d",
+          guestIp,
+          "--dport",
+          portStr,
+          "-j",
+          "ACCEPT",
+        ]);
+      }
     }
   }
 
@@ -685,41 +691,43 @@ export class NetworkManager {
       }
     };
 
-    // Remove port forwarding rules (always on host)
-    for (const port of publishedPorts) {
-      const portStr = String(port);
-      if (defaultIface) {
+    // Remove port forwarding rules (skipped when DNAT was not created)
+    if (!this.config.skipDnat) {
+      for (const port of publishedPorts) {
+        const portStr = String(port);
+        if (defaultIface) {
+          tryRun([
+            "iptables",
+            "-t",
+            "nat",
+            "-D",
+            "PREROUTING",
+            "-i",
+            defaultIface,
+            "-p",
+            "tcp",
+            "--dport",
+            portStr,
+            "-j",
+            "DNAT",
+            "--to-destination",
+            `${guestIp}:${portStr}`,
+          ]);
+        }
         tryRun([
           "iptables",
-          "-t",
-          "nat",
           "-D",
-          "PREROUTING",
-          "-i",
-          defaultIface,
+          "FORWARD",
           "-p",
           "tcp",
+          "-d",
+          guestIp,
           "--dport",
           portStr,
           "-j",
-          "DNAT",
-          "--to-destination",
-          `${guestIp}:${portStr}`,
+          "ACCEPT",
         ]);
       }
-      tryRun([
-        "iptables",
-        "-D",
-        "FORWARD",
-        "-p",
-        "tcp",
-        "-d",
-        guestIp,
-        "--dport",
-        portStr,
-        "-j",
-        "ACCEPT",
-      ]);
     }
 
     // When netns is enabled, FORWARD rules inside the namespace are auto-cleaned
