@@ -111,7 +111,7 @@ if [ "${1:-}" = "--uninstall" ]; then
       curl -fsSL -X DELETE \
         -H "Authorization: Bearer $CF_TOKEN" \
         -H "Content-Type: application/json" \
-        "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/cfd_tunnel/$CF_TUNNEL_ID/connections" 2>/dev/null || true
+        "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/cfd_tunnel/$CF_TUNNEL_ID/connections" >/dev/null 2>&1 || true
       CF_DEL=$(curl -fsSL -X DELETE \
         -H "Authorization: Bearer $CF_TOKEN" \
         -H "Content-Type: application/json" \
