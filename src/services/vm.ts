@@ -350,7 +350,7 @@ export class VMService {
       // Forward published ports to localhost inside the VM
       if (agentToken && opts.ports?.length) {
         await this.setupLocalhostPortForwarding(
-          netCfg.config.guestIp,
+          netCfg.guestIp,
           paths.agentPort,
           agentToken,
           opts.ports,
