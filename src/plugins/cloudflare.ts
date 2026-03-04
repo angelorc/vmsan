@@ -79,7 +79,12 @@ export function cloudflarePlugin(baseDir: string): VmsanPlugin {
       // Restore tunnels on start
       ctx.hooks.hook("vm:afterStart", async (state) => {
         const savedHostnames = resolveTunnelHostnames(state.network);
-        if (!savedHostnames.length || !cloudflare.isConfigured() || !state.network.publishedPorts?.length) return;
+        if (
+          !savedHostnames.length ||
+          !cloudflare.isConfigured() ||
+          !state.network.publishedPorts?.length
+        )
+          return;
         await withTunnelSetup(
           ctx,
           cloudflare,
