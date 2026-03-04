@@ -59,6 +59,33 @@ if [ "${1:-}" = "--uninstall" ]; then
     fi
   fi
 
+  # Stop running VMs and clean up network interfaces
+  if command -v vmsan >/dev/null 2>&1 && [ -d "$VMSAN_DIR/vms" ]; then
+    for state_file in "$VMSAN_DIR"/vms/*.json; do
+      [ -f "$state_file" ] || continue
+      VM_ID="$(grep -oP '"id"\s*:\s*"\K[^"]+' "$state_file" 2>/dev/null || true)"
+      [ -n "$VM_ID" ] && vmsan stop "$VM_ID" 2>/dev/null || true
+    done
+  fi
+
+  # Clean up orphan TAP and veth interfaces
+  TAP_COUNT=0
+  for iface in /sys/class/net/fhvm* /sys/class/net/veth-h-* /sys/class/net/veth-g-*; do
+    [ -e "$iface" ] || continue
+    DEV="$(basename "$iface")"
+    ip link delete "$DEV" 2>/dev/null || true
+    TAP_COUNT=$((TAP_COUNT + 1))
+  done
+  [ "$TAP_COUNT" -gt 0 ] && success "Removed $TAP_COUNT network interfaces"
+
+  # Clean up iptables rules referencing vmsan TAP devices
+  iptables -t nat -S 2>/dev/null | grep -E 'fhvm|172\.16\.' | while read -r rule; do
+    iptables -t nat $(echo "$rule" | sed 's/^-A/-D/') 2>/dev/null || true
+  done
+  iptables -S FORWARD 2>/dev/null | grep -E 'fhvm|172\.16\.' | while read -r rule; do
+    iptables $(echo "$rule" | sed 's/^-A/-D/') 2>/dev/null || true
+  done
+
   # Delete Cloudflare tunnel via API before removing local files
   if [ -f "$VMSAN_DIR/cloudflare/cloudflare.json" ]; then
     CF_TOKEN="$(grep -oP '"token"\s*:\s*"\K[^"]+' "$VMSAN_DIR/cloudflare/cloudflare.json" 2>/dev/null || true)"
