@@ -432,17 +432,17 @@ FROM __BASE_IMAGE__
 RUN if command -v apt-get >/dev/null 2>&1; then \
       apt-get update && apt-get install -y --no-install-recommends \
         bind9-utils bzip2 findutils git gzip iputils-ping libicu-dev libjpeg-dev \
-        libpng-dev ncurses-base libssl-dev openssh-server openssl procps sudo \
+        libpng-dev ncurses-base libssl-dev openssl procps sudo \
         systemd systemd-sysv tar unzip debianutils whois zstd \
       && rm -rf /var/lib/apt/lists/*; \
     elif command -v dnf >/dev/null 2>&1; then \
       dnf install -y bind-utils bzip2 findutils git gzip iputils libicu libjpeg \
-        libpng ncurses-libs openssh-server openssl openssl-libs procps sudo \
+        libpng ncurses-libs openssl openssl-libs procps sudo \
         systemd tar unzip which whois zstd \
       && dnf clean all; \
     elif command -v apk >/dev/null 2>&1; then \
       apk add --no-cache bash bind-tools bzip2 findutils git gzip iputils \
-        icu-libs libjpeg-turbo libpng ncurses-libs openrc openssh openssl \
+        icu-libs libjpeg-turbo libpng ncurses-libs openrc openssl \
         procps sudo tar unzip whois zstd; \
     fi
 RUN if command -v apk >/dev/null 2>&1; then \
@@ -452,7 +452,7 @@ RUN if command -v apk >/dev/null 2>&1; then \
     fi; \
     echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/ubuntu; \
     chmod 440 /etc/sudoers.d/ubuntu; \
-    mkdir -p /home/ubuntu/.ssh && chown -R ubuntu:ubuntu /home/ubuntu
+    chown -R ubuntu:ubuntu /home/ubuntu
 RUN EXTRA=""; \
     if command -v npm >/dev/null 2>&1; then \
       su -c 'mkdir -p /home/ubuntu/.npm-global && npm config set prefix /home/ubuntu/.npm-global' ubuntu; \
@@ -467,12 +467,7 @@ RUN EXTRA=""; \
         && mv /home/ubuntu/.bashrc.tmp /home/ubuntu/.bashrc; \
     fi; \
     chown -R ubuntu:ubuntu /home/ubuntu
-RUN ssh-keygen -A 2>/dev/null || true; \
-    mkdir -p /root/.ssh && chmod 700 /root/.ssh; \
-    if [ -f /etc/ssh/sshd_config ]; then \
-      sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config; \
-    fi; \
-    if command -v rc-update >/dev/null 2>&1; then \
+RUN if command -v rc-update >/dev/null 2>&1; then \
       rc-update add devfs sysinit 2>/dev/null || true; \
       rc-update add mdev sysinit 2>/dev/null || true; \
       rc-update add hwdrivers sysinit 2>/dev/null || true; \
@@ -481,10 +476,8 @@ RUN ssh-keygen -A 2>/dev/null || true; \
       rc-update add hostname boot 2>/dev/null || true; \
       rc-update add bootmisc boot 2>/dev/null || true; \
       rc-update add networking boot 2>/dev/null || true; \
-      rc-update add sshd default 2>/dev/null || true; \
       printf '%s\n' '::sysinit:/sbin/openrc sysinit' '::sysinit:/sbin/openrc boot' '::wait:/sbin/openrc default' '::shutdown:/sbin/openrc shutdown' 'ttyS0::respawn:/sbin/getty 115200 ttyS0' > /etc/inittab; \
-    fi; \
-    if command -v systemctl >/dev/null 2>&1; then systemctl enable sshd 2>/dev/null || systemctl enable ssh 2>/dev/null || true; fi
+    fi
 DEOF
 
   sed -i "s|__BASE_IMAGE__|${base_image}|" "$build_dir/Dockerfile"

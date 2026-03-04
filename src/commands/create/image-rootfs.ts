@@ -17,7 +17,6 @@ const APT_PACKAGES = [
   "libpng-dev",
   "ncurses-base",
   "libssl-dev",
-  "openssh-server",
   "openssl",
   "procps",
   "sudo",
@@ -41,7 +40,6 @@ const DNF_PACKAGES = [
   "libjpeg",
   "libpng",
   "ncurses-libs",
-  "openssh-server",
   "openssl",
   "openssl-libs",
   "procps",
@@ -66,7 +64,6 @@ const APK_PACKAGES = [
   "libpng",
   "ncurses-libs",
   "openrc",
-  "openssh",
   "openssl",
   "procps",
   "sudo",
@@ -97,7 +94,7 @@ RUN if command -v apk >/dev/null 2>&1; then \\
     fi; \\
     echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/ubuntu; \\
     chmod 440 /etc/sudoers.d/ubuntu; \\
-    mkdir -p /home/ubuntu/.ssh && chown -R ubuntu:ubuntu /home/ubuntu
+    chown -R ubuntu:ubuntu /home/ubuntu
 RUN EXTRA=""; \\
     if command -v npm >/dev/null 2>&1; then \\
       su -c 'mkdir -p /home/ubuntu/.npm-global && npm config set prefix /home/ubuntu/.npm-global' ubuntu; \\
@@ -112,12 +109,7 @@ RUN EXTRA=""; \\
         && mv /home/ubuntu/.bashrc.tmp /home/ubuntu/.bashrc; \\
     fi; \\
     chown -R ubuntu:ubuntu /home/ubuntu
-RUN ssh-keygen -A 2>/dev/null || true; \\
-    mkdir -p /root/.ssh && chmod 700 /root/.ssh; \\
-    if [ -f /etc/ssh/sshd_config ]; then \\
-      sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config; \\
-    fi; \\
-    if command -v rc-update >/dev/null 2>&1; then \\
+RUN if command -v rc-update >/dev/null 2>&1; then \\
       rc-update add devfs sysinit 2>/dev/null || true; \\
       rc-update add mdev sysinit 2>/dev/null || true; \\
       rc-update add hwdrivers sysinit 2>/dev/null || true; \\
@@ -126,10 +118,8 @@ RUN ssh-keygen -A 2>/dev/null || true; \\
       rc-update add hostname boot 2>/dev/null || true; \\
       rc-update add bootmisc boot 2>/dev/null || true; \\
       rc-update add networking boot 2>/dev/null || true; \\
-      rc-update add sshd default 2>/dev/null || true; \\
       printf '%s\\n' '::sysinit:/sbin/openrc sysinit' '::sysinit:/sbin/openrc boot' '::wait:/sbin/openrc default' '::shutdown:/sbin/openrc shutdown' 'ttyS0::respawn:/sbin/getty 115200 ttyS0' > /etc/inittab; \\
-    fi; \\
-    if command -v systemctl >/dev/null 2>&1; then systemctl enable sshd 2>/dev/null || systemctl enable ssh 2>/dev/null || true; fi
+    fi
 `;
 }
 
