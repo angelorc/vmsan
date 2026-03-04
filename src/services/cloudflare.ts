@@ -3,8 +3,9 @@ import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import Cloudflare from "cloudflare";
+import { consola } from "consola";
 import pRetry, { AbortError } from "p-retry";
-import { mkdirSecure, writeSecure } from "../lib/utils.ts";
+import { mkdirSecure, toError, writeSecure } from "../lib/utils.ts";
 import { FileLock } from "../lib/file-lock.ts";
 import { PidFile } from "../lib/pid-file.ts";
 import {
@@ -63,8 +64,8 @@ export class CloudflareService {
     if (!existsSync(this.configPath)) return null;
     try {
       return JSON.parse(readFileSync(this.configPath, "utf-8")) as CloudflareConfig;
-    } catch {
-      // Config file missing or corrupt — treat as unconfigured
+    } catch (err) {
+      consola.warn(`Cloudflare config file corrupt: ${toError(err).message}`);
       return null;
     }
   }
@@ -144,8 +145,10 @@ export class CloudflareService {
           await client.zeroTrust.tunnels.cloudflared.delete(previousTunnelId, {
             account_id: accountId,
           });
-        } catch {
-          // Previous tunnel may already be deleted or inaccessible
+        } catch (err) {
+          consola.debug(
+            `Failed to delete previous tunnel ${previousTunnelId}: ${toError(err).message}`,
+          );
         }
       }
 
@@ -273,8 +276,8 @@ export class CloudflareService {
         }
         Atomics.wait(WAIT_ARRAY, 0, 0, 150);
       }
-    } catch {
-      // Best-effort DNS cleanup — API may be unreachable during teardown
+    } catch (err) {
+      consola.debug(`DNS cleanup failed for ${hostname}: ${toError(err).message}`);
     }
   }
 
@@ -319,8 +322,8 @@ export class CloudflareService {
       try {
         const lines = readFileSync(this.logPath, "utf-8").trim().split("\n");
         logTail = lines.slice(-8).join("\n");
-      } catch {
-        // Log file may not exist yet if cloudflared crashed immediately
+      } catch (err) {
+        consola.debug(`Could not read cloudflared log: ${toError(err).message}`);
       }
       throw cloudflaredStartFailedError(logTail || undefined);
     }
@@ -344,8 +347,8 @@ export class CloudflareService {
     if (!existsSync(this.routesPath)) return [];
     try {
       return JSON.parse(readFileSync(this.routesPath, "utf-8")) as TunnelRoute[];
-    } catch {
-      // Routes file missing or corrupt — treat as empty
+    } catch (err) {
+      consola.warn(`Routes file corrupt: ${toError(err).message}`);
       return [];
     }
   }
@@ -388,8 +391,8 @@ export class CloudflareService {
         return false;
       }
       return true;
-    } catch {
-      // Credentials file missing or corrupt — treat as absent
+    } catch (err) {
+      consola.warn(`Credentials file corrupt: ${toError(err).message}`);
       return false;
     }
   }
@@ -401,8 +404,8 @@ export class CloudflareService {
       if (accounts.length > 0) {
         return accounts[0].id;
       }
-    } catch {
-      // Token may lack account-level permissions — fall through to zone lookup
+    } catch (err) {
+      consola.debug(`Account list failed, falling back to zone lookup: ${toError(err).message}`);
     }
 
     if (domain) {

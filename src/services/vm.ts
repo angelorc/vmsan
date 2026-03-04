@@ -615,8 +615,8 @@ export class VMService {
         const netCfg = NetworkManager.fromVmNetwork(state.network);
         try {
           netCfg.teardown();
-        } catch {
-          // Network may be partially torn down from a prior attempt
+        } catch (err) {
+          this.logger.debug(`Network teardown failed for VM ${vmId}: ${toError(err).message}`);
         }
 
         // Hook: network:afterTeardown
@@ -799,8 +799,8 @@ export class VMService {
         status: "error",
         error: toError(error).message,
       });
-    } catch {
-      // State store may be corrupt during error recovery
+    } catch (err) {
+      this.logger.warn(`Failed to mark VM ${vmId} as error: ${toError(err).message}`);
     }
   }
 }

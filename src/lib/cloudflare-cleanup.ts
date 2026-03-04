@@ -1,4 +1,6 @@
+import { consola } from "consola";
 import type { CloudflareService } from "../services/cloudflare.ts";
+import { toError } from "./utils.ts";
 
 export async function cleanupCloudflareResources(
   cloudflare: CloudflareService,
@@ -9,21 +11,21 @@ export async function cleanupCloudflareResources(
     cloudflare.removeRoute(vmId);
     try {
       await cloudflare.pushConfigWithRetry();
-    } catch {
-      // API push failed after retries; local config still applied via reload below
+    } catch (err) {
+      consola.debug(`Config push failed during cleanup: ${toError(err).message}`);
     }
     try {
       cloudflare.ensureRunning();
-    } catch {
-      // cloudflared process may not be running
+    } catch (err) {
+      consola.debug(`cloudflared ensureRunning failed during cleanup: ${toError(err).message}`);
     }
   }
 
   for (const hostname of new Set(hostnames)) {
     try {
       await cloudflare.removeDns(hostname);
-    } catch {
-      // DNS record may not exist or API unreachable during teardown
+    } catch (err) {
+      consola.debug(`DNS cleanup failed for ${hostname}: ${toError(err).message}`);
     }
   }
 }

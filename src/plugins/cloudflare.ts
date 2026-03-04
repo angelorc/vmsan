@@ -105,8 +105,8 @@ export function cloudflarePlugin(baseDir: string): VmsanPlugin {
           await cloudflare.pushConfig();
           await Promise.all(allHostnames.map((hostname) => cloudflare.removeDns(hostname)));
           cloudflare.reload();
-        } catch {
-          // Best-effort cleanup
+        } catch (err) {
+          ctx.logger.debug(`Cloudflare cleanup failed for VM ${vmId}: ${toError(err).message}`);
         }
       });
     },

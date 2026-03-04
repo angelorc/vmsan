@@ -1,6 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { consola } from "consola";
 import { defaultInterfaceNotFoundError } from "../errors/index.ts";
+import { toError } from "./utils.ts";
 import type { VmNetwork } from "./vm-state.ts";
 
 export interface NetworkConfig {
@@ -163,8 +165,8 @@ export class NetworkManager {
     if (existsSync(`/sys/class/net/${vethHost}`)) {
       try {
         sudo(["ip", "link", "delete", vethHost]);
-      } catch {
-        // Best-effort — may already be gone
+      } catch (err) {
+        consola.debug(`Stale veth ${vethHost} cleanup failed: ${toError(err).message}`);
       }
     }
 
@@ -206,8 +208,10 @@ export class NetworkManager {
     const tryRun = (args: string[]): void => {
       try {
         sudo(args);
-      } catch {
-        // Best-effort cleanup
+      } catch (err) {
+        consola.debug(
+          `Namespace teardown command failed (${args.slice(0, 3).join(" ")}): ${toError(err).message}`,
+        );
       }
     };
 
@@ -226,8 +230,8 @@ export class NetworkManager {
       if (existsSync(`/sys/class/net/${tapDevice}`)) {
         try {
           sudo(["ip", "link", "delete", tapDevice]);
-        } catch {
-          // Leaked TAP device may be in-use; creation will fail with clear error
+        } catch (err) {
+          consola.debug(`Stale TAP ${tapDevice} cleanup failed: ${toError(err).message}`);
         }
       }
 
@@ -646,8 +650,8 @@ export class NetworkManager {
     const { tapDevice } = this.config;
     try {
       this.nsRun(["tc", "qdisc", "del", "dev", tapDevice, "root"]);
-    } catch {
-      // Best-effort — qdisc may not exist
+    } catch (err) {
+      consola.debug(`Throttle teardown for ${tapDevice} failed: ${toError(err).message}`);
     }
   }
 
@@ -657,23 +661,27 @@ export class NetworkManager {
     let defaultIface: string | undefined;
     try {
       defaultIface = getDefaultInterface();
-    } catch {
-      // Interface may not exist; cleanup proceeds without NAT rule removal
+    } catch (err) {
+      consola.debug(`Default interface detection skipped: ${toError(err).message}`);
     }
 
     const tryRun = (args: string[]): void => {
       try {
         sudo(args);
-      } catch {
-        // Best-effort iptables cleanup — rule may already be removed
+      } catch (err) {
+        consola.debug(
+          `iptables host cleanup failed (${args.slice(0, 4).join(" ")}): ${toError(err).message}`,
+        );
       }
     };
 
     const tryFwd = (args: string[]): void => {
       try {
         this.nsRun(args);
-      } catch {
-        // Best-effort cleanup
+      } catch (err) {
+        consola.debug(
+          `iptables fwd cleanup failed (${args.slice(0, 4).join(" ")}): ${toError(err).message}`,
+        );
       }
     };
 
@@ -920,8 +928,8 @@ export class NetworkManager {
     if (netnsName) return;
     try {
       sudo(["ip", "link", "delete", tapDevice]);
-    } catch {
-      // Best-effort — TAP may already be deleted
+    } catch (err) {
+      consola.debug(`TAP device ${tapDevice} teardown failed: ${toError(err).message}`);
     }
   }
 
@@ -967,8 +975,10 @@ export class NetworkManager {
       this.config = oldConfig;
       try {
         this.setupRules();
-      } catch {
-        // Rollback failed — VM has no rules; caller should handle
+      } catch (rollbackErr) {
+        consola.warn(
+          `iptables rollback failed for ${this.config.tapDevice}, VM may have no rules: ${toError(rollbackErr).message}`,
+        );
       }
       throw err;
     }
