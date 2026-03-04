@@ -38,8 +38,8 @@ export function findKernel(baseDir: string): string {
 }
 
 const RUNTIME_ROOTFS_MAP: Record<Exclude<Runtime, "base">, string> = {
-  "node22": "node22.ext4",
-  "node24": "node24.ext4",
+  node22: "node22.ext4",
+  node24: "node24.ext4",
   "python3.13": "python3.13.ext4",
 };
 

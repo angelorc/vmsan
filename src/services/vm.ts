@@ -183,9 +183,7 @@ export class VMService {
 
       const netnsName = opts.disableNetns ? undefined : `vmsan-${vmId}`;
       const agentToken =
-        !opts.fromImage && existsSync(paths.agentBin)
-          ? randomBytes(32).toString("hex")
-          : null;
+        !opts.fromImage && existsSync(paths.agentBin) ? randomBytes(32).toString("hex") : null;
 
       log.start(`Creating VM ${vmId}...`);
 
