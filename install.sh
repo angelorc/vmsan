@@ -112,11 +112,10 @@ if [ "${1:-}" = "--uninstall" ]; then
         -H "Authorization: Bearer $CF_TOKEN" \
         -H "Content-Type: application/json" \
         "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/cfd_tunnel/$CF_TUNNEL_ID/connections" >/dev/null 2>&1 || true
-      CF_DEL=$(curl -fsSL -X DELETE \
+      if curl -fsSL -o /dev/null -X DELETE \
         -H "Authorization: Bearer $CF_TOKEN" \
         -H "Content-Type: application/json" \
-        "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/cfd_tunnel/$CF_TUNNEL_ID" 2>/dev/null || echo "")
-      if echo "$CF_DEL" | grep -q '"success":true'; then
+        "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/cfd_tunnel/$CF_TUNNEL_ID" 2>/dev/null; then
         success "Cloudflare Tunnel deleted"
       else
         warn "Could not delete Cloudflare Tunnel (may need manual cleanup)"
