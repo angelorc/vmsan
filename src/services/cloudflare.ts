@@ -351,7 +351,10 @@ export class CloudflareService {
   }
 
   reload(): void {
-    this.stop();
+    if (this.pidFile.read() !== null) {
+      this.pidFile.kill("SIGHUP");
+      return;
+    }
     this.start();
   }
 
