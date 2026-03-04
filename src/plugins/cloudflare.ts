@@ -128,15 +128,13 @@ async function withTunnelSetup(
   ports: number[],
   msgs: TunnelSetupMessages,
 ): Promise<void> {
-  const attemptedHostnames: string[] = [];
   try {
     ctx.logger.start(msgs.startMsg);
     const result = await setupTunnelRoutes(cloudflare, state, hostnames, ports);
-    attemptedHostnames.push(...result.hostnames);
     msgs.onSuccess?.(result);
     ctx.logger.success(msgs.successMsg(result.primaryHostname));
   } catch (err) {
-    await cleanupCloudflareResources(cloudflare, state.id, attemptedHostnames);
+    await cleanupCloudflareResources(cloudflare, state.id, hostnames);
     ctx.logger.warn(msgs.failMsg(toError(err).message));
   }
 }

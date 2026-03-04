@@ -51,7 +51,12 @@ if [ "${1:-}" = "--uninstall" ]; then
     success "vmsan CLI not installed"
   fi
 
-  killall -9 cloudflared 2>/dev/null || true
+  if [ -f "$VMSAN_DIR/cloudflare/cloudflared.pid" ]; then
+    CF_PID="$(cat "$VMSAN_DIR/cloudflare/cloudflared.pid" 2>/dev/null || true)"
+    if [ -n "${CF_PID:-}" ]; then
+      kill -TERM "$CF_PID" 2>/dev/null || true
+    fi
+  fi
 
   if [ -d "$VMSAN_DIR" ]; then
     info "Removing $VMSAN_DIR..."
@@ -287,33 +292,28 @@ else
       if [ -z "$CF_TOKEN" ]; then
         warn "No token provided — skipping Cloudflare configuration"
       else
-        # Basic JWT format validation (three dot-separated segments)
-        if ! echo "$CF_TOKEN" | grep -qP '^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$'; then
-          warn "Token does not look like a valid Cloudflare API token — skipping"
+        printf "  Cloudflare domain (e.g. example.com): "
+        read -r CF_DOMAIN </dev/tty
+
+        if [ -z "$CF_DOMAIN" ]; then
+          warn "No domain provided — skipping Cloudflare configuration"
         else
-          printf "  Cloudflare domain (e.g. example.com): "
-          read -r CF_DOMAIN </dev/tty
+          # Verify token via Cloudflare API
+          info "Verifying Cloudflare API token..."
+          CF_VERIFY=$(curl -fsSL -H "Authorization: Bearer $CF_TOKEN" \
+            "https://api.cloudflare.com/client/v4/user/tokens/verify" 2>/dev/null || echo "")
 
-          if [ -z "$CF_DOMAIN" ]; then
-            warn "No domain provided — skipping Cloudflare configuration"
-          else
-            # Verify token via Cloudflare API
-            info "Verifying Cloudflare API token..."
-            CF_VERIFY=$(curl -fsSL -H "Authorization: Bearer $CF_TOKEN" \
-              "https://api.cloudflare.com/client/v4/user/tokens/verify" 2>/dev/null || echo "")
-
-            if echo "$CF_VERIFY" | grep -q '"success":true'; then
-              cat > "$CLOUDFLARE_JSON" <<EOF
+          if echo "$CF_VERIFY" | grep -q '"success":true'; then
+            cat > "$CLOUDFLARE_JSON" <<EOF
 {
   "token": "$CF_TOKEN",
   "domain": "$CF_DOMAIN"
 }
 EOF
-              chmod 600 "$CLOUDFLARE_JSON"
-              success "Cloudflare configured (domain: $CF_DOMAIN)"
-            else
-              warn "Token verification failed — skipping Cloudflare configuration"
-            fi
+            chmod 600 "$CLOUDFLARE_JSON"
+            success "Cloudflare configured (domain: $CF_DOMAIN)"
+          else
+            warn "Token verification failed — skipping Cloudflare configuration"
           fi
         fi
       fi

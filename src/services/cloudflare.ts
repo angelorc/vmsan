@@ -311,8 +311,8 @@ export class CloudflareService {
     } finally {
       try {
         closeSync(logFd);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EBADF") throw error;
+      } catch (err) {
+        consola.debug(`Failed to close log fd: ${toError(err).message}`);
       }
     }
 

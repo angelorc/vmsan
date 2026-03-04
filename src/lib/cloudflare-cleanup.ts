@@ -15,9 +15,11 @@ export async function cleanupCloudflareResources(
       consola.debug(`Config push failed during cleanup: ${toError(err).message}`);
     }
     try {
-      cloudflare.ensureRunning();
+      if (cloudflare.isRunning()) {
+        cloudflare.reload();
+      }
     } catch (err) {
-      consola.debug(`cloudflared ensureRunning failed during cleanup: ${toError(err).message}`);
+      consola.debug(`cloudflared reload failed during cleanup: ${toError(err).message}`);
     }
   }
 
