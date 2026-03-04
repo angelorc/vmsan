@@ -2,11 +2,11 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { lockSync, lock, type LockOptions } from "proper-lockfile";
 import { lockTimeoutError } from "../errors/index.ts";
+import { sleepSync } from "./utils.ts";
 
 const STALE_MS = 300_000;
 const RETRY_MS = 50;
 const MAX_RETRIES = 600;
-const WAIT_ARRAY = new Int32Array(new SharedArrayBuffer(4));
 
 interface FileLockOptions {
   stale?: number;
@@ -41,7 +41,7 @@ export class FileLock {
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ELOCKED") throw error;
         if (attempt >= this.retries) throw lockTimeoutError(this.name);
-        Atomics.wait(WAIT_ARRAY, 0, 0, RETRY_MS);
+        sleepSync(RETRY_MS);
       }
     }
     try {

@@ -16,11 +16,13 @@ export async function cleanupCloudflareResources(
     }
   }
 
-  for (const hostname of new Set(hostnames)) {
-    try {
-      await cloudflare.removeDns(hostname);
-    } catch (err) {
-      consola.debug(`DNS cleanup failed for ${hostname}: ${toError(err).message}`);
-    }
-  }
+  await Promise.all(
+    [...new Set(hostnames)].map(async (hostname) => {
+      try {
+        await cloudflare.removeDns(hostname);
+      } catch (err) {
+        consola.debug(`DNS cleanup failed for ${hostname}: ${toError(err).message}`);
+      }
+    }),
+  );
 }

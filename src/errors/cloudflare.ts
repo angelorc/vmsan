@@ -53,20 +53,3 @@ export const cloudflareNoZoneError = (domain: string): CloudflareError =>
     message: `No active Cloudflare zone found for domain: ${domain}`,
   });
 
-export const cloudflareTokenInvalidError = (): CloudflareError =>
-  new CloudflareError("ERR_CLOUDFLARE_TOKEN_INVALID", {
-    message:
-      "Provided --cloudflare-token looks like a tunnel run token (from 'cloudflared service install'). " +
-      "Use a Cloudflare API token with Zone:DNS Edit and Cloudflare Tunnel Edit permissions.",
-  });
-
-export const cloudflareTokenInactiveError = (status: string): CloudflareError =>
-  new CloudflareError("ERR_CLOUDFLARE_TOKEN_INACTIVE", {
-    message: `Cloudflare token is not active (status: ${status})`,
-  });
-
-export const cloudflareNoZoneForDomainError = (domain: string): CloudflareError =>
-  new CloudflareError("ERR_CLOUDFLARE_NO_ZONE", {
-    domain,
-    message: `No active Cloudflare zone found for --cloudflare-domain '${domain}'`,
-  });

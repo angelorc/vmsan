@@ -18,18 +18,13 @@ async function setupTunnelRoutes(
   ports: number[],
 ): Promise<SetupTunnelResult> {
   const { tunnelId } = await cloudflare.createTunnel();
-  const dnsPromises: Promise<void>[] = [];
-  for (let i = 0; i < hostnames.length; i++) {
-    const hostname = hostnames[i];
-    const port = ports[i] ?? ports[0];
-    cloudflare.addRoute({
-      vmId: state.id,
-      hostname,
-      service: `http://${state.network.guestIp}:${port}`,
-    });
-    dnsPromises.push(cloudflare.addDns(hostname, tunnelId));
-  }
-  await Promise.all(dnsPromises);
+  const routes = hostnames.map((hostname, i) => ({
+    vmId: state.id,
+    hostname,
+    service: `http://${state.network.guestIp}:${ports[i] ?? ports[0]}`,
+  }));
+  cloudflare.addRoutes(routes);
+  await Promise.all(hostnames.map((h) => cloudflare.addDns(h, tunnelId)));
   await cloudflare.pushConfig();
   cloudflare.ensureRunning();
   return { hostnames, primaryHostname: hostnames[0] };
@@ -44,8 +39,7 @@ export function cloudflarePlugin(baseDir: string): VmsanPlugin {
       // Pre-flight: configure tunnel mode when Cloudflare is active
       ctx.hooks.hook("vm:beforeCreate", ({ options }) => {
         if (!cloudflare.isConfigured()) return;
-        const ports = (options as Record<string, unknown>).ports as number[] | undefined;
-        if (ports?.length && !cloudflare.isInstalled()) {
+        if (options.ports?.length && !cloudflare.isInstalled()) {
           throw cloudflaredNotFoundError();
         }
         // Disable DNAT — Cloudflare Tunnel handles routing
@@ -104,13 +98,7 @@ export function cloudflarePlugin(baseDir: string): VmsanPlugin {
         const routeHostnames = cloudflare.getHostnames(vmId);
         const allHostnames = [...new Set([...tunnelHostnames, ...routeHostnames])];
         if (!allHostnames.length) return;
-        try {
-          cloudflare.removeRoute(vmId);
-          await cloudflare.pushConfig();
-          await Promise.all(allHostnames.map((hostname) => cloudflare.removeDns(hostname)));
-        } catch (err) {
-          ctx.logger.debug(`Cloudflare cleanup failed for VM ${vmId}: ${toError(err).message}`);
-        }
+        await cleanupCloudflareResources(cloudflare, vmId, allHostnames);
       });
     },
   });

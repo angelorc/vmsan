@@ -45,22 +45,15 @@ if [ "${1:-}" = "--uninstall" ]; then
   echo ""
 
   # Stop running VMs before removing CLI
-  if command -v vmsan >/dev/null 2>&1 && [ -d "$VMSAN_DIR/vms" ]; then
-    for state_file in "$VMSAN_DIR"/vms/*.json; do
-      [ -f "$state_file" ] || continue
-      VM_ID="$(grep -oP '"id"\s*:\s*"\K[^"]+' "$state_file" 2>/dev/null || true)"
-      if [ -n "$VM_ID" ]; then
-        info "Stopping VM $VM_ID..."
-        vmsan stop "$VM_ID" 2>/dev/null || true
-      fi
-    done
-  fi
-
-  # Kill VM processes that may still be running
   if [ -d "$VMSAN_DIR/vms" ]; then
     for state_file in "$VMSAN_DIR"/vms/*.json; do
       [ -f "$state_file" ] || continue
+      VM_ID="$(grep -oP '"id"\s*:\s*"\K[^"]+' "$state_file" 2>/dev/null || true)"
       VM_PID="$(grep -oP '"pid"\s*:\s*\K\d+' "$state_file" 2>/dev/null || true)"
+      if [ -n "$VM_ID" ] && command -v vmsan >/dev/null 2>&1; then
+        info "Stopping VM $VM_ID..."
+        vmsan stop "$VM_ID" 2>/dev/null || true
+      fi
       [ -n "$VM_PID" ] && kill -9 "$VM_PID" 2>/dev/null || true
     done
   fi

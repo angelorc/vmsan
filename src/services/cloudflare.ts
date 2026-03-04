@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import Cloudflare from "cloudflare";
 import { consola } from "consola";
 import pRetry, { AbortError } from "p-retry";
-import { mkdirSecure, toError, writeSecure } from "../lib/utils.ts";
+import { mkdirSecure, sleepSync, toError, writeSecure } from "../lib/utils.ts";
 import { FileLock } from "../lib/file-lock.ts";
 import { PidFile } from "../lib/pid-file.ts";
 import {
@@ -31,8 +31,6 @@ export interface TunnelRoute {
   hostname: string;
   service: string;
 }
-
-const WAIT_ARRAY = new Int32Array(new SharedArrayBuffer(4));
 
 export class CloudflareService {
   private readonly cfDir: string;
@@ -193,11 +191,18 @@ export class CloudflareService {
   }
 
   addRoute(route: TunnelRoute): void {
+    this.addRoutes([route]);
+  }
+
+  addRoutes(newRoutes: TunnelRoute[]): void {
+    if (newRoutes.length === 0) return;
     this.lock.run(() => {
-      const routes = this.loadRoutes();
-      const filtered = routes.filter((r) => r.vmId !== route.vmId || r.hostname !== route.hostname);
-      filtered.push(route);
-      this.saveRoutes(filtered);
+      let routes = this.loadRoutes();
+      for (const route of newRoutes) {
+        routes = routes.filter((r) => r.vmId !== route.vmId || r.hostname !== route.hostname);
+        routes.push(route);
+      }
+      this.saveRoutes(routes);
     });
   }
 
@@ -216,6 +221,15 @@ export class CloudflareService {
     const client = this.getClient(config.token);
     const zoneId = await this.resolveZoneId(client, config.domain);
 
+    const record = {
+      zone_id: zoneId,
+      type: "CNAME" as const,
+      name: hostname,
+      content: `${tunnelId}.cfargotunnel.com`,
+      proxied: true,
+      ttl: 1 as const,
+    };
+
     const existing = await client.dns.records.list({
       zone_id: zoneId,
       type: "CNAME",
@@ -223,25 +237,11 @@ export class CloudflareService {
     });
     const records = existing.getPaginatedItems();
     if (records.length > 0) {
-      await client.dns.records.update(records[0].id, {
-        zone_id: zoneId,
-        type: "CNAME",
-        name: hostname,
-        content: `${tunnelId}.cfargotunnel.com`,
-        proxied: true,
-        ttl: 1,
-      });
+      await client.dns.records.update(records[0].id, record);
       return;
     }
 
-    await client.dns.records.create({
-      zone_id: zoneId,
-      type: "CNAME",
-      name: hostname,
-      content: `${tunnelId}.cfargotunnel.com`,
-      proxied: true,
-      ttl: 1,
-    });
+    await client.dns.records.create(record);
   }
 
   async removeDns(hostname: string): Promise<void> {
@@ -251,25 +251,16 @@ export class CloudflareService {
     try {
       const client = this.getClient(config.token);
       const zoneId = await this.resolveZoneId(client, config.domain);
-      for (let attempt = 0; attempt < 5; attempt++) {
-        const existing = await client.dns.records.list({
-          zone_id: zoneId,
-          type: "CNAME",
-          name: { exact: hostname },
-        });
-        const records = existing.getPaginatedItems();
-        if (records.length === 0) {
-          if (attempt < 4) {
-            Atomics.wait(WAIT_ARRAY, 0, 0, 250);
-          }
-          continue;
+      const existing = await client.dns.records.list({
+        zone_id: zoneId,
+        type: "CNAME",
+        name: { exact: hostname },
+      });
+      const records = existing.getPaginatedItems();
+      for (const record of records) {
+        if (record?.id) {
+          await client.dns.records.delete(record.id, { zone_id: zoneId });
         }
-        for (const record of records) {
-          if (record?.id) {
-            await client.dns.records.delete(record.id, { zone_id: zoneId });
-          }
-        }
-        Atomics.wait(WAIT_ARRAY, 0, 0, 150);
       }
     } catch (err) {
       consola.debug(`DNS cleanup failed for ${hostname}: ${toError(err).message}`);
@@ -312,7 +303,7 @@ export class CloudflareService {
       }
     }
 
-    Atomics.wait(WAIT_ARRAY, 0, 0, 1000);
+    sleepSync(1000);
     if (this.pidFile.read() === null) {
       let logTail = "";
       try {
