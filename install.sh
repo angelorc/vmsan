@@ -264,7 +264,7 @@ CLOUDFLARE_JSON="$VMSAN_DIR/cloudflare/cloudflare.json"
 if [ -f "$CLOUDFLARE_JSON" ]; then
   success "Cloudflare already configured"
 else
-  if [ -t 0 ] 2>/dev/null; then
+  if [ -c /dev/tty ] 2>/dev/null; then
     echo ""
     echo "  ┌─────────────────────────────────────────────────────────────┐"
     echo "  │  Cloudflare Tunnel (optional)                              │"
