@@ -13,6 +13,7 @@ import {
   validateEnvironment,
   findKernel,
   findRootfs,
+  findRuntimeRootfs,
   waitForSocket,
 } from "../commands/create/environment.ts";
 import { killOrphanVmProcess, cleanupNetwork, cleanupChroot } from "../commands/create/cleanup.ts";
@@ -172,14 +173,19 @@ export class VMService {
       // Resolve rootfs
       let rootfsPath: string;
       if (opts.fromImage) {
-        rootfsPath = resolveImageRootfs(opts.fromImage, paths.registryDir);
+        rootfsPath = resolveImageRootfs(opts.fromImage, paths.registryDir, true);
+      } else if (runtime !== "base" && !opts.rootfsPath) {
+        rootfsPath = findRuntimeRootfs(runtime as Exclude<Runtime, "base">, paths.baseDir);
       } else {
         rootfsPath = opts.rootfsPath ?? findRootfs(paths.baseDir);
       }
       logger.debug(`Rootfs resolved: ${rootfsPath}`);
 
       const netnsName = opts.disableNetns ? undefined : `vmsan-${vmId}`;
-      const agentToken = existsSync(paths.agentBin) ? randomBytes(32).toString("hex") : null;
+      const agentToken =
+        !opts.fromImage && existsSync(paths.agentBin)
+          ? randomBytes(32).toString("hex")
+          : null;
 
       log.start(`Creating VM ${vmId}...`);
 
@@ -260,8 +266,6 @@ export class VMService {
         : undefined;
 
       const jailer = new Jailer(vmId, paths.jailerBaseDir);
-      const welcomePage =
-        runtime === "node22-demo" && ports.length > 0 ? { vmId, ports } : undefined;
 
       const agentConfig = agentToken
         ? {
@@ -277,7 +281,6 @@ export class VMService {
         rootfsSrc: rootfsPath,
         diskSizeGb,
         snapshot: snapshotConfig,
-        welcomePage,
         agent: agentConfig,
       });
       chrootDir = jailerPaths.chrootDir;

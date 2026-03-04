@@ -9,11 +9,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import {
-  generateWelcomeHtml,
-  generateWelcomeServer,
-  generateWelcomeService,
-} from "./welcome-page.ts";
 import { generateAgentService, generateAgentEnv } from "./agent-service.ts";
 
 export interface JailerPaths {
@@ -36,10 +31,6 @@ export interface PrepareChrootConfig {
   snapshot?: {
     snapshotFile: string;
     memFile: string;
-  };
-  welcomePage?: {
-    vmId: string;
-    ports: number[];
   };
   agent?: {
     binaryPath: string;
@@ -155,33 +146,6 @@ export class Jailer {
         `rm -f "${tmpMount}/etc/resolv.conf" && ln -s /proc/net/pnp "${tmpMount}/etc/resolv.conf"`,
         { stdio: "pipe" },
       );
-
-      // Inject welcome page files for node22-demo runtime.
-      if (config.welcomePage) {
-        const { vmId: welcomeVmId, ports: welcomePorts } = config.welcomePage;
-        const welcomeDir = join(tmpMount, "opt", "vmsan", "welcome");
-        mkdirSync(welcomeDir, { recursive: true });
-        writeFileSync(
-          join(welcomeDir, "index.html"),
-          generateWelcomeHtml(welcomeVmId, welcomePorts),
-        );
-        writeFileSync(join(welcomeDir, "server.js"), generateWelcomeServer(welcomePorts));
-
-        const systemdDir = join(tmpMount, "etc", "systemd", "system");
-        mkdirSync(systemdDir, { recursive: true });
-        writeFileSync(
-          join(systemdDir, "vmsan-welcome.service"),
-          generateWelcomeService(welcomePorts),
-        );
-
-        // Enable the service at boot via symlink into multi-user.target.wants
-        const wantsDir = join(systemdDir, "multi-user.target.wants");
-        mkdirSync(wantsDir, { recursive: true });
-        execSync(
-          `ln -sf /etc/systemd/system/vmsan-welcome.service "${join(wantsDir, "vmsan-welcome.service")}"`,
-          { stdio: "pipe" },
-        );
-      }
 
       // Inject vmsan-agent binary and systemd service.
       if (config.agent) {

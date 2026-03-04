@@ -1,6 +1,5 @@
 /**
  * Template generators for the vmsan-agent systemd service.
- * Follows the same pattern as welcome-page.ts.
  */
 
 export function generateAgentService(): string {
