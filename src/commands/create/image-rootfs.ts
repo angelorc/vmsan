@@ -98,6 +98,20 @@ RUN if command -v apk >/dev/null 2>&1; then \\
     echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/ubuntu; \\
     chmod 440 /etc/sudoers.d/ubuntu; \\
     mkdir -p /home/ubuntu/.ssh && chown -R ubuntu:ubuntu /home/ubuntu
+RUN EXTRA=""; \\
+    if command -v npm >/dev/null 2>&1; then \\
+      su -c 'mkdir -p /home/ubuntu/.npm-global && npm config set prefix /home/ubuntu/.npm-global' ubuntu; \\
+      EXTRA="${EXTRA}export PATH=\\"/home/ubuntu/.npm-global/bin:\\$PATH\\"\\n"; \\
+    fi; \\
+    if command -v pip3 >/dev/null 2>&1 || command -v pip >/dev/null 2>&1; then \\
+      EXTRA="${EXTRA}export PATH=\\"/home/ubuntu/.local/bin:\\$PATH\\"\\n"; \\
+    fi; \\
+    if [ -n "$EXTRA" ]; then \\
+      printf '%b' "$EXTRA" >> /home/ubuntu/.profile; \\
+      { printf '%b' "$EXTRA"; cat /home/ubuntu/.bashrc; } > /home/ubuntu/.bashrc.tmp \\
+        && mv /home/ubuntu/.bashrc.tmp /home/ubuntu/.bashrc; \\
+    fi; \\
+    chown -R ubuntu:ubuntu /home/ubuntu
 RUN ssh-keygen -A 2>/dev/null || true; \\
     mkdir -p /root/.ssh && chmod 700 /root/.ssh; \\
     if [ -f /etc/ssh/sshd_config ]; then \\

@@ -173,12 +173,21 @@ export class Jailer {
         );
       }
 
-      // Fix /home/ubuntu ownership so the ubuntu user (uid 1000) can access
-      // their home directory. Some base rootfs images ship /home/ubuntu owned
-      // by root:root which causes EACCES when the agent runs commands as ubuntu.
+      // Fix /home/ubuntu ownership so the ubuntu user can access their home.
+      // Resolve uid/gid from the rootfs's /etc/passwd (not the host's).
       const ubuntuHome = join(tmpMount, "home", "ubuntu");
-      if (existsSync(ubuntuHome)) {
-        execSync(`sudo chown -R ubuntu:ubuntu "${ubuntuHome}"`, { stdio: "pipe" });
+      const rootfsPasswd = join(tmpMount, "etc", "passwd");
+      if (existsSync(ubuntuHome) && existsSync(rootfsPasswd)) {
+        const passwdContent = readFileSync(rootfsPasswd, "utf-8");
+        const ubuntuEntry = passwdContent.split("\n").find((l) => l.startsWith("ubuntu:"));
+        if (ubuntuEntry) {
+          const fields = ubuntuEntry.split(":");
+          if (fields.length >= 4 && /^\d+$/.test(fields[2]) && /^\d+$/.test(fields[3])) {
+            execFileSync("sudo", ["chown", "-R", `${fields[2]}:${fields[3]}`, ubuntuHome], {
+              stdio: "pipe",
+            });
+          }
+        }
       }
 
       execSync(`sudo umount "${tmpMount}"`, { stdio: "pipe" });
