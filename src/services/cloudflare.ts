@@ -116,12 +116,29 @@ export class CloudflareService {
       const tunnelName =
         config.tunnelId && !hasCredentials ? `vmsan-${Date.now().toString(36)}` : "vmsan";
 
-      const tunnel = await client.zeroTrust.tunnels.cloudflared.create({
-        account_id: accountId,
-        name: tunnelName,
-        tunnel_secret: tunnelSecret,
-        config_src: "local",
-      });
+      let tunnel: { id?: string };
+      try {
+        tunnel = await client.zeroTrust.tunnels.cloudflared.create({
+          account_id: accountId,
+          name: tunnelName,
+          tunnel_secret: tunnelSecret,
+          config_src: "local",
+        });
+      } catch (err) {
+        const errMsg = toError(err).message;
+        if (errMsg.includes("409") || errMsg.toLowerCase().includes("conflict")) {
+          consola.debug(`Tunnel name "${tunnelName}" already exists, cleaning up stale tunnel...`);
+          await this.deleteExistingTunnel(client, accountId, tunnelName);
+          tunnel = await client.zeroTrust.tunnels.cloudflared.create({
+            account_id: accountId,
+            name: tunnelName,
+            tunnel_secret: tunnelSecret,
+            config_src: "local",
+          });
+        } else {
+          throw err;
+        }
+      }
 
       const tunnelId = tunnel.id;
       if (!tunnelId) throw cloudflareTunnelNoIdError();
@@ -341,6 +358,37 @@ export class CloudflareService {
   ensureRunning(): void {
     if (this.pidFile.read() !== null) return;
     this.start();
+  }
+
+  private async deleteExistingTunnel(
+    client: Cloudflare,
+    accountId: string,
+    name: string,
+  ): Promise<void> {
+    const page = await client.zeroTrust.tunnels.cloudflared.list({
+      account_id: accountId,
+      name,
+      is_deleted: false,
+    });
+    const tunnels = page.getPaginatedItems();
+    for (const t of tunnels) {
+      if (!t.id) continue;
+      try {
+        await client.zeroTrust.tunnels.cloudflared.connections.delete(t.id, {
+          account_id: accountId,
+        });
+      } catch (err) {
+        consola.debug(`Failed to clean connections for tunnel ${t.id}: ${toError(err).message}`);
+      }
+      try {
+        await client.zeroTrust.tunnels.cloudflared.delete(t.id, {
+          account_id: accountId,
+        });
+        consola.debug(`Deleted stale tunnel ${t.id} (name: ${name})`);
+      } catch (err) {
+        consola.debug(`Failed to delete stale tunnel ${t.id}: ${toError(err).message}`);
+      }
+    }
   }
 
   private loadRoutes(): TunnelRoute[] {

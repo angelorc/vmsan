@@ -59,6 +59,30 @@ if [ "${1:-}" = "--uninstall" ]; then
     fi
   fi
 
+  # Delete Cloudflare tunnel via API before removing local files
+  if [ -f "$VMSAN_DIR/cloudflare/cloudflare.json" ]; then
+    CF_TOKEN="$(grep -oP '"token"\s*:\s*"\K[^"]+' "$VMSAN_DIR/cloudflare/cloudflare.json" 2>/dev/null || true)"
+    CF_TUNNEL_ID="$(grep -oP '"tunnelId"\s*:\s*"\K[^"]+' "$VMSAN_DIR/cloudflare/cloudflare.json" 2>/dev/null || true)"
+    CF_ACCOUNT_ID="$(grep -oP '"accountId"\s*:\s*"\K[^"]+' "$VMSAN_DIR/cloudflare/cloudflare.json" 2>/dev/null || true)"
+    if [ -n "$CF_TOKEN" ] && [ -n "$CF_TUNNEL_ID" ] && [ -n "$CF_ACCOUNT_ID" ]; then
+      info "Deleting Cloudflare Tunnel $CF_TUNNEL_ID..."
+      # Clean tunnel connections first, then delete
+      curl -fsSL -X DELETE \
+        -H "Authorization: Bearer $CF_TOKEN" \
+        -H "Content-Type: application/json" \
+        "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/cfd_tunnel/$CF_TUNNEL_ID/connections" 2>/dev/null || true
+      CF_DEL=$(curl -fsSL -X DELETE \
+        -H "Authorization: Bearer $CF_TOKEN" \
+        -H "Content-Type: application/json" \
+        "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/cfd_tunnel/$CF_TUNNEL_ID" 2>/dev/null || echo "")
+      if echo "$CF_DEL" | grep -q '"success":true'; then
+        success "Cloudflare Tunnel deleted"
+      else
+        warn "Could not delete Cloudflare Tunnel (may need manual cleanup)"
+      fi
+    fi
+  fi
+
   if [ -d "$VMSAN_DIR" ]; then
     info "Removing $VMSAN_DIR..."
     rm -rf "$VMSAN_DIR"
