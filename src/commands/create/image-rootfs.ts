@@ -21,6 +21,8 @@ const APT_PACKAGES = [
   "openssl",
   "procps",
   "sudo",
+  "systemd",
+  "systemd-sysv",
   "tar",
   "unzip",
   "debianutils",
@@ -74,7 +76,9 @@ const APK_PACKAGES = [
   "zstd",
 ];
 
-function generateDockerfile(baseImage: string): string {
+function generateDockerfile(baseImage: string, minimal = false): string {
+  if (minimal) return `FROM ${baseImage}\n`;
+
   const aptInstall = `apt-get update && apt-get install -y --no-install-recommends ${APT_PACKAGES.join(" ")} && rm -rf /var/lib/apt/lists/*`;
   const dnfInstall = `dnf install -y ${DNF_PACKAGES.join(" ")} && dnf clean all`;
   const yumInstall = `yum install -y ${DNF_PACKAGES.join(" ")} && yum clean all`;
@@ -123,7 +127,7 @@ function verifyDocker(): void {
   }
 }
 
-function buildImageRootfs(imageRef: ImageReference, cacheDir: string): string {
+function buildImageRootfs(imageRef: ImageReference, cacheDir: string, minimal = false): string {
   const ext4Path = join(cacheDir, "rootfs.ext4");
 
   verifyDocker();
@@ -136,7 +140,7 @@ function buildImageRootfs(imageRef: ImageReference, cacheDir: string): string {
 
   try {
     consola.start(`Building image from ${imageRef.full}...`);
-    const dockerfile = generateDockerfile(imageRef.full);
+    const dockerfile = generateDockerfile(imageRef.full, minimal);
     execSync(`docker build -t "${buildTag}" -f - . <<'DOCKERFILE'\n${dockerfile}\nDOCKERFILE`, {
       stdio: "pipe",
       shell: "/bin/bash",
@@ -190,8 +194,13 @@ function buildImageRootfs(imageRef: ImageReference, cacheDir: string): string {
   }
 }
 
-export function resolveImageRootfs(imageRef: ImageReference, registryDir: string): string {
-  const cacheDir = join(registryDir, imageRef.cacheKey);
+export function resolveImageRootfs(
+  imageRef: ImageReference,
+  registryDir: string,
+  minimal = false,
+): string {
+  const cacheSuffix = minimal ? "-minimal" : "";
+  const cacheDir = join(registryDir, `${imageRef.cacheKey}${cacheSuffix}`);
   const ext4Path = join(cacheDir, "rootfs.ext4");
 
   if (existsSync(ext4Path)) {
@@ -199,5 +208,5 @@ export function resolveImageRootfs(imageRef: ImageReference, registryDir: string
     return ext4Path;
   }
 
-  return buildImageRootfs(imageRef, cacheDir);
+  return buildImageRootfs(imageRef, cacheDir, minimal);
 }

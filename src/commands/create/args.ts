@@ -19,13 +19,14 @@ export const createCommandArgs = {
   },
   "from-image": {
     type: "string",
-    description: "Build rootfs from a Docker/OCI image (e.g. ubuntu:latest).",
+    description:
+      "Build rootfs from a Docker/OCI image (e.g. ubuntu:latest). Agent is not installed; connect, exec, cp unavailable.",
   },
   runtime: {
     type: "string",
     default: "base",
     description:
-      "Runtime label (e.g. python3.13, node22, node22-demo). node22-demo auto-selects node:22 image and serves a branded welcome page. Default: base",
+      "Runtime environment (base, node22, node24, python3.13). Pre-built during install. Default: base",
   },
   project: {
     type: "string",

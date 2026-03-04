@@ -150,6 +150,7 @@ export {
   validateEnvironment,
   findKernel,
   findRootfs,
+  findRuntimeRootfs,
   waitForSocket,
   getVmPid,
   getVmJailerPid,

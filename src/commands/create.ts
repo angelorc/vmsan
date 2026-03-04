@@ -3,7 +3,7 @@ import { defineCommand } from "citty";
 import { consola } from "consola";
 import { join } from "node:path";
 import { createCommandLogger, createScopedLogger, initVmsanLogger } from "../lib/logger/index.ts";
-import { handleCommandError } from "../errors/index.ts";
+import { handleCommandError, mutuallyExclusiveFlagsError } from "../errors/index.ts";
 import { createVmsan } from "../context.ts";
 import { createCommandArgs } from "./create/args.ts";
 import { parseCreateInput, type CreateCommandRuntimeArgs } from "./create/input.ts";
@@ -16,10 +16,6 @@ import {
   parseDomains,
   parseBandwidth,
 } from "./create/validation.ts";
-
-const RUNTIME_DEFAULT_IMAGES: Record<string, string> = {
-  "node22-demo": "node:22",
-};
 
 interface CreateCommandArgs extends CreateCommandRuntimeArgs {
   kernel?: string;
@@ -54,17 +50,9 @@ const createCommand = defineCommand({
       const vmsan = await createVmsan();
       const parsedInput = parseCreateInput(commandArgs, vmsan.paths);
 
-      // Auto-select Docker image for runtimes that define a default
-      const defaultImage = RUNTIME_DEFAULT_IMAGES[parsedInput.runtime];
-      if (defaultImage && !commandArgs["from-image"] && !commandArgs.rootfs) {
-        commandArgs["from-image"] = defaultImage;
-        consola.info(`Runtime "${parsedInput.runtime}" auto-selected image: ${defaultImage}`);
-      }
-
-      if (parsedInput.runtime === "node22-demo" && parsedInput.ports.length === 0) {
-        consola.warn(
-          "Runtime node22-demo serves a welcome page, but no --publish-port was specified. The page won't be accessible externally.",
-        );
+      // --from-image is incompatible with --connect (no agent installed)
+      if (commandArgs["from-image"] && commandArgs.connect) {
+        throw mutuallyExclusiveFlagsError("--from-image", "--connect");
       }
 
       if (parsedInput.domains.length > 0) {
@@ -152,6 +140,12 @@ const createCommand = defineCommand({
         diskSizeGb: parsedInput.diskSizeGb,
       });
       cmdLog.emit();
+
+      if (commandArgs["from-image"]) {
+        consola.warn(
+          "Custom image mode: connect, exec, and cp are not available (no agent installed). Use port forwarding to access your service.",
+        );
+      }
 
       if (commandArgs.connect && state.agentToken) {
         log.start("Waiting for agent to become ready...");
