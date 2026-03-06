@@ -16,7 +16,7 @@ function shellEscape(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'";
 }
 
-function parseEnvFlags(targetCommand: string): Record<string, string> {
+function parseEnvFlags(_targetCommand: string): Record<string, string> {
   const env: Record<string, string> = {};
   // Only scan argv tokens before the target command to avoid capturing
   // --env flags meant for the command being executed inside the VM.
