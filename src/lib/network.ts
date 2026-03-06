@@ -311,6 +311,11 @@ export class NetworkManager {
       "MASQUERADE",
     ]);
 
+    // Host-originated traffic to the guest agent and services must bypass
+    // host firewalls that deny special-purpose/private ranges by default.
+    sudo(["iptables", "-I", "OUTPUT", "1", "-d", guestIp, "-j", "ACCEPT"]);
+    sudo(["iptables", "-I", "INPUT", "1", "-s", guestIp, "-j", "ACCEPT"]);
+
     // When netns is enabled, traffic exits via veth pair — host needs FORWARD rules
     if (this.config.netnsName) {
       const vethHost = `veth-h-${this.config.slot}`;
@@ -732,6 +737,9 @@ export class NetworkManager {
         );
       }
     };
+
+    tryRun(["iptables", "-D", "OUTPUT", "-d", guestIp, "-j", "ACCEPT"]);
+    tryRun(["iptables", "-D", "INPUT", "-s", guestIp, "-j", "ACCEPT"]);
 
     const tryFwd = (args: string[]): void => {
       try {

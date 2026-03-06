@@ -106,6 +106,8 @@ cleanup_iptables_rules_for_vm() {
 
   if [ -n "$default_iface_name" ] && [ -n "$guest_cidr" ]; then
     iptables_delete_rule -t nat -D POSTROUTING -s "$guest_cidr" -o "$default_iface_name" -j MASQUERADE
+    iptables_delete_rule -D OUTPUT -d "$guest_ip" -j ACCEPT
+    iptables_delete_rule -D INPUT -s "$guest_ip" -j ACCEPT
 
     if [ "$skip_dnat" != "true" ]; then
       while IFS= read -r port; do
