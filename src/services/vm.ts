@@ -822,7 +822,7 @@ export class VMService {
     memMib: number,
   ): Promise<void> {
     const vm = new FirecrackerClient(socketPath);
-    const bootArgs = NetworkManager.bootArgs(netCfg.slot);
+    const bootArgs = NetworkManager.bootArgs(netCfg);
     this.logger.debug(`Boot args: ${bootArgs}`);
     await vm.boot("kernel/vmlinux", bootArgs);
     await vm.addDrive("rootfs", "rootfs/rootfs.ext4", true, false);

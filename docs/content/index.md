@@ -235,7 +235,7 @@ description: Powerful isolation primitives wrapped in an intuitive developer exp
     vmsan list --json
     [{"id":"vm-a3f7b2c","status":"running",
       "runtime":"node22","memory":128,
-      "cpus":1,"ip":"172.16.1.2",
+      "cpus":1,"ip":"198.19.1.2",
       "networkPolicy":"allow-all"}]
     ```
     ::::

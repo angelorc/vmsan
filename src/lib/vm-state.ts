@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { vmStateNotFoundError, networkSlotsExhaustedError } from "../errors/index.ts";
+import { slotFromVmHostIp } from "./network-address.ts";
 import { mkdirSecure, writeSecure } from "./utils.ts";
 
 export interface VmNetwork {
@@ -54,14 +55,15 @@ export interface VmStateStore {
 }
 
 export function findFreeNetworkSlot(states: VmState[]): number {
-  const usedSlots = new Set(
-    states
-      .filter((s) => s.status === "running" || s.status === "creating")
-      .map((s) => {
-        const parts = s.network.hostIp.split(".");
-        return Number(parts[2]);
-      }),
-  );
+  const usedSlots = new Set<number>();
+  for (const state of states) {
+    if (state.status !== "running" && state.status !== "creating") continue;
+    try {
+      usedSlots.add(slotFromVmHostIp(state.network.hostIp));
+    } catch {
+      // Ignore malformed legacy state entries when scanning for a free slot.
+    }
+  }
   for (const slot of getActiveTapSlots()) {
     usedSlots.add(slot);
   }
