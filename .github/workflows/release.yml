@@ -11,15 +11,38 @@ concurrency:
 permissions: {}
 
 jobs:
+  release-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install
+
+      - run: bun run lint
+
+      - run: bun run typecheck
+
+      - run: bun run build
+
+      - run: bun run test
+
   release:
+    needs: release-checks
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       id-token: write
       contents: write
+      pull-requests: write
     outputs:
-      published: ${{ steps.publish.outputs.published }}
-      version: ${{ steps.publish.outputs.version }}
+      published: ${{ steps.changesets.outputs.published }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -34,44 +57,19 @@ jobs:
 
       - run: bun install
 
-      - run: bun run build
-
-      - name: Version and publish
-        id: publish
+      - name: Version packages or publish
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          version: bun run version-packages
+          publish: bun run release
+          commit: Version Packages
+          title: Version Packages
+          createGithubReleases: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: true
-        run: |
-          # Auto-create changeset if none exists
-          CHANGESETS=$(find .changeset -name '*.md' ! -name 'README.md' 2>/dev/null || true)
-          if [ -z "$CHANGESETS" ]; then
-            SUMMARY=$(git log -1 --pretty=%s)
-            cat > .changeset/auto-release.md << EOF
-          ---
-          "vmsan": patch
-          ---
-
-          ${SUMMARY}
-          EOF
-          fi
-
-          # Version (consumes changesets, updates CHANGELOG, bumps version)
-          bash scripts/version.sh
-
-          # Commit and push version bump
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "Version Packages"
-          git push
-
-          # Publish to npm
-          bunx changeset publish
-
-          VERSION=$(node -p "require('./package.json').version")
-          echo "published=true" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
   release-agent:
     needs: release
@@ -91,9 +89,19 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
       - uses: actions/setup-go@v5
         with:
           go-version-file: agent/go.mod
+
+      - name: Read package version
+        id: meta
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build vmsan-agent
         working-directory: agent
@@ -101,10 +109,10 @@ jobs:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-        run: go build -ldflags="-s -w -X main.version=v${{ needs.release.outputs.version }}" -o vmsan-agent-${{ matrix.arch }} .
+        run: go build -ldflags="-s -w -X main.version=v${{ steps.meta.outputs.version }}" -o vmsan-agent-${{ matrix.arch }} .
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ needs.release.outputs.version }}
+          tag_name: v${{ steps.meta.outputs.version }}
           files: agent/vmsan-agent-${{ matrix.arch }}
