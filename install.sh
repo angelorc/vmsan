@@ -177,8 +177,10 @@ bootstrap_ref_installer() {
   local resolved_sha="$1"
   shift
   local script_tmp
+  local script_tmp_quoted
   script_tmp="$(mktemp)"
-  trap 'rm -f "$script_tmp"' EXIT
+  script_tmp_quoted="$(printf '%q' "$script_tmp")"
+  trap "rm -f -- $script_tmp_quoted" EXIT
 
   download "https://raw.githubusercontent.com/$VMSAN_REPO/$resolved_sha/install.sh" "$script_tmp"
   chmod +x "$script_tmp"
