@@ -1,5 +1,15 @@
 # vmsan
 
+## 0.1.0-alpha.26
+
+### Patch Changes
+
+- [#40](https://github.com/angelorc/vmsan/pull/40) [`fe41441`](https://github.com/angelorc/vmsan/commit/fe4144124d9fc371f7cd3d449c03d9db744008e7) Thanks [@angelorc](https://github.com/angelorc)! - Harden installer and VM networking reliability across mixed Linux hosts.
+
+  - fix branch/commit installs and uninstalls in `install.sh`, including safer cleanup of per-VM iptables rules
+  - migrate the default VM subnet to `198.19.x.x` while preserving compatibility with legacy persisted `172.16.x.x` states
+  - keep stopped VM slots reserved, tighten persisted IP parsing, and restore agent connectivity on hosts with restrictive local firewalls
+
 ## 0.1.0-alpha.25
 
 ### Patch Changes
