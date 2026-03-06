@@ -53,8 +53,6 @@ This downloads and installs everything into `~/.vmsan/`:
 - vmsan CLI + in-VM agent
 - Runtime images (node22, node24, python3.13)
 
-If `VMSAN_RUNTIME_ARTIFACT_BASE_URL` is set, the installer will first try to download prebuilt runtime images for the current vmsan version and architecture before falling back to local Docker builds.
-
 <details>
 <summary>Uninstall</summary>
 
@@ -163,35 +161,6 @@ bun run typecheck
 # Lint & format
 bun run lint
 bun run fmt
-```
-
-## 📦 Publish Runtime Images To R2
-
-You can publish locally built runtime images to Cloudflare R2 and then have the installer download them instead of rebuilding on every server.
-
-```bash
-export R2_BUCKET=your-r2-bucket
-export R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
-export R2_PUBLIC_BASE_URL=https://artifacts.vmsan.dev
-
-bun run publish:runtimes:r2
-```
-
-The publisher uploads the runtime ext4 images already present in `~/.vmsan/rootfs/`, plus checksum and metadata files, and merges them into a versioned `manifest.json`.
-
-To consume those artifacts during install:
-
-```bash
-export VMSAN_RUNTIME_ARTIFACT_BASE_URL=https://artifacts.vmsan.dev/runtimes
-curl -fsSL https://vmsan.dev/install | bash
-```
-
-For deterministic release builds, pin the source images on the publishing machine:
-
-```bash
-export VMSAN_RUNTIME_NODE22_IMAGE='node:22@sha256:...'
-export VMSAN_RUNTIME_NODE24_IMAGE='node:24@sha256:...'
-export VMSAN_RUNTIME_PYTHON313_IMAGE='python:3.13-slim@sha256:...'
 ```
 
 ## 🏗️ Architecture

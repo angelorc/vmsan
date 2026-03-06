@@ -18,11 +18,6 @@ ARCH="$(uname -m)"
 CLOUDFLARED_VERSION="${CLOUDFLARED_VERSION:-2026.2.0}"
 GO_REQUIRED_VERSION="${GO_REQUIRED_VERSION:-1.22.0}"
 GO_INSTALL_VERSION="${GO_INSTALL_VERSION:-1.22.0}"
-NODE22_BASE_IMAGE="${VMSAN_RUNTIME_NODE22_IMAGE:-node:22}"
-NODE24_BASE_IMAGE="${VMSAN_RUNTIME_NODE24_IMAGE:-node:24}"
-PYTHON313_BASE_IMAGE="${VMSAN_RUNTIME_PYTHON313_IMAGE:-python:3.13-slim}"
-RUNTIME_ARTIFACT_BASE_URL="${VMSAN_RUNTIME_ARTIFACT_BASE_URL:-}"
-RUNTIME_ARTIFACT_VERSION="${VMSAN_RUNTIME_ARTIFACT_VERSION:-}"
 REQUESTED_REF="$VMSAN_INSTALL_REQUESTED_REF"
 REQUESTED_SHA="$VMSAN_INSTALL_REQUESTED_SHA"
 UNINSTALL=0
@@ -455,66 +450,6 @@ download_source_tree() {
     | tar -xz --strip-components=1 -C "$dest"
 }
 
-trim_trailing_slash() {
-  local value="$1"
-  printf '%s\n' "${value%/}"
-}
-
-runtime_current_version() {
-  if [ -n "$RUNTIME_ARTIFACT_VERSION" ]; then
-    printf '%s\n' "$RUNTIME_ARTIFACT_VERSION"
-  elif [ "$INSTALL_MODE" = "source" ]; then
-    printf '%s\n' "$SOURCE_SHA"
-  else
-    printf '%s\n' "$LATEST_TAG"
-  fi
-}
-
-node_manifest_field() {
-  local manifest_path="$1" runtime_name="$2" platform="$3" field="$4"
-  node --input-type=module - "$manifest_path" "$runtime_name" "$platform" "$field" <<'NODE'
-import fs from "node:fs";
-
-const [manifestPath, runtimeName, platform, field] = process.argv.slice(2);
-const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-const value = manifest?.runtimes?.[runtimeName]?.[platform]?.[field];
-if (typeof value === "string" || typeof value === "number") {
-  process.stdout.write(String(value));
-}
-NODE
-}
-
-json_file_field() {
-  local file_path="$1" field="$2"
-  node --input-type=module - "$file_path" "$field" <<'NODE'
-import fs from "node:fs";
-
-const [filePath, field] = process.argv.slice(2);
-const data = JSON.parse(fs.readFileSync(filePath, "utf8"));
-const value = data?.[field];
-if (typeof value === "string" || typeof value === "number") {
-  process.stdout.write(String(value));
-}
-NODE
-}
-
-sha256_verify_file() {
-  local dir_path="$1"
-  if command -v sha256sum >/dev/null 2>&1; then
-    (cd "$dir_path" && sha256sum -c rootfs.ext4.sha256 >/dev/null 2>&1)
-  elif command -v shasum >/dev/null 2>&1; then
-    (cd "$dir_path" && shasum -a 256 -c rootfs.ext4.sha256 >/dev/null 2>&1)
-  else
-    error "Neither sha256sum nor shasum is available to verify runtime artifacts"
-  fi
-}
-
-docker_repo_digest() {
-  local image_ref="$1"
-  docker image inspect "$image_ref" --format '{{index .RepoDigests 0}}' 2>/dev/null \
-    | head -n1 | sed '/^<no value>$/d' || true
-}
-
 MISSING_PKGS=()
 command -v unzip       >/dev/null 2>&1 || MISSING_PKGS+=(unzip)
 command -v unsquashfs  >/dev/null 2>&1 || MISSING_PKGS+=(squashfs-tools)
@@ -757,9 +692,6 @@ fi
 # --- runtime images ---
 
 RUNTIME_RECIPE_VERSION="2"
-RUNTIME_ARTIFACT_MANIFEST_PATH=""
-RUNTIME_ARTIFACT_MANIFEST_READY=0
-RUNTIME_ARTIFACT_MANIFEST_FAILED=0
 
 runtime_metadata_path() {
   local name="$1"
@@ -769,7 +701,6 @@ runtime_metadata_path() {
 runtime_metadata_matches() {
   local name="$1"
   local base_image="$2"
-  local runtime_version="$3"
   local meta
   meta="$(runtime_metadata_path "$name")"
 
@@ -777,174 +708,40 @@ runtime_metadata_matches() {
 
   local recipe_version
   local recorded_base_image
-  local recorded_runtime_version
   recipe_version="$(sed -n 's/^recipe_version=//p' "$meta" | head -n1)"
   recorded_base_image="$(sed -n 's/^base_image=//p' "$meta" | head -n1)"
-  recorded_runtime_version="$(sed -n 's/^runtime_version=//p' "$meta" | head -n1)"
 
-  [ "$recipe_version" = "$RUNTIME_RECIPE_VERSION" ] \
-    && [ "$recorded_base_image" = "$base_image" ] \
-    && [ "$recorded_runtime_version" = "$runtime_version" ]
+  [ "$recipe_version" = "$RUNTIME_RECIPE_VERSION" ] && [ "$recorded_base_image" = "$base_image" ]
 }
 
 write_runtime_metadata() {
   local name="$1"
   local base_image="$2"
-  local runtime_version="$3"
-  local source_image_digest="$4"
   local meta
   meta="$(runtime_metadata_path "$name")"
 
   cat > "$meta" <<EOF
 recipe_version=$RUNTIME_RECIPE_VERSION
 base_image=$base_image
-runtime_version=$runtime_version
-platform=linux-$(go_arch)
-source=local-build
-source_image_digest=$source_image_digest
 built_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
-}
-
-ensure_runtime_artifact_manifest() {
-  [ -n "$RUNTIME_ARTIFACT_BASE_URL" ] || return 1
-  [ "$RUNTIME_ARTIFACT_MANIFEST_FAILED" -eq 0 ] || return 1
-  [ "$RUNTIME_ARTIFACT_MANIFEST_READY" -eq 0 ] || return 0
-
-  local runtime_version
-  runtime_version="$(runtime_current_version)"
-  [ -n "$runtime_version" ] || return 1
-
-  local cache_key manifest_url
-  cache_key="$(printf '%s' "$runtime_version" | sed 's/[^A-Za-z0-9._-]/_/g')"
-  RUNTIME_ARTIFACT_MANIFEST_PATH="$VMSAN_DIR/rootfs/.runtime-manifest-${cache_key}.json"
-
-  if [ ! -f "$RUNTIME_ARTIFACT_MANIFEST_PATH" ]; then
-    manifest_url="$(trim_trailing_slash "$RUNTIME_ARTIFACT_BASE_URL")/${runtime_version}/manifest.json"
-    info "Checking prebuilt runtime manifest ${runtime_version}..."
-    if ! curl -fsSL -o "$RUNTIME_ARTIFACT_MANIFEST_PATH" "$manifest_url"; then
-      rm -f "$RUNTIME_ARTIFACT_MANIFEST_PATH"
-      RUNTIME_ARTIFACT_MANIFEST_FAILED=1
-      warn "Could not download runtime manifest from ${manifest_url}; falling back to local runtime builds."
-      return 1
-    fi
-  fi
-
-  RUNTIME_ARTIFACT_MANIFEST_READY=1
-  return 0
-}
-
-write_downloaded_runtime_metadata() {
-  local name="$1"
-  local base_image="$2"
-  local runtime_version="$3"
-  local artifact_sha256="$4"
-  local metadata_json="$5"
-  local meta
-  meta="$(runtime_metadata_path "$name")"
-
-  local recipe_version recorded_base_image source_image_digest platform published_at
-  recipe_version="$RUNTIME_RECIPE_VERSION"
-  recorded_base_image="$base_image"
-  source_image_digest=""
-  platform="linux-$(go_arch)"
-  published_at=""
-
-  if [ -f "$metadata_json" ]; then
-    recipe_version="$(json_file_field "$metadata_json" recipeVersion || true)"
-    recorded_base_image="$(json_file_field "$metadata_json" baseImage || true)"
-    source_image_digest="$(json_file_field "$metadata_json" sourceImageDigest || true)"
-    platform="$(json_file_field "$metadata_json" platform || true)"
-    published_at="$(json_file_field "$metadata_json" publishedAt || true)"
-  fi
-
-  [ -n "$recipe_version" ] || recipe_version="$RUNTIME_RECIPE_VERSION"
-  [ -n "$recorded_base_image" ] || recorded_base_image="$base_image"
-  [ -n "$platform" ] || platform="linux-$(go_arch)"
-
-  cat > "$meta" <<EOF
-recipe_version=$recipe_version
-base_image=$recorded_base_image
-runtime_version=$runtime_version
-platform=$platform
-source=artifact
-source_image_digest=$source_image_digest
-artifact_sha256=$artifact_sha256
-published_at=$published_at
-downloaded_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-EOF
-}
-
-download_runtime_artifact() {
-  local name="$1"
-  local base_image="$2"
-  local runtime_version="$3"
-  local dest="$VMSAN_DIR/rootfs/${name}.ext4"
-
-  ensure_runtime_artifact_manifest || return 1
-
-  local platform rootfs_url sha256_url metadata_url
-  platform="linux-$(go_arch)"
-  rootfs_url="$(node_manifest_field "$RUNTIME_ARTIFACT_MANIFEST_PATH" "$name" "$platform" rootfs || true)"
-  sha256_url="$(node_manifest_field "$RUNTIME_ARTIFACT_MANIFEST_PATH" "$name" "$platform" sha256 || true)"
-  metadata_url="$(node_manifest_field "$RUNTIME_ARTIFACT_MANIFEST_PATH" "$name" "$platform" metadata || true)"
-
-  if [ -z "$rootfs_url" ] || [ -z "$sha256_url" ]; then
-    return 1
-  fi
-
-  local tmp_dir metadata_tmp artifact_sha256
-  tmp_dir="$(mktemp -d)"
-  metadata_tmp="$tmp_dir/metadata.json"
-
-  info "Downloading prebuilt runtime ${name} (${platform})..."
-  if ! curl -fsSL -o "$tmp_dir/rootfs.ext4" "$rootfs_url"; then
-    rm -rf "$tmp_dir"
-    return 1
-  fi
-  if ! curl -fsSL -o "$tmp_dir/rootfs.ext4.sha256" "$sha256_url"; then
-    rm -rf "$tmp_dir"
-    return 1
-  fi
-  if ! sha256_verify_file "$tmp_dir"; then
-    rm -rf "$tmp_dir"
-    error "SHA256 verification failed for runtime ${name}"
-  fi
-
-  artifact_sha256="$(awk '{print $1}' "$tmp_dir/rootfs.ext4.sha256" | head -n1)"
-
-  if [ -n "$metadata_url" ]; then
-    curl -fsSL -o "$metadata_tmp" "$metadata_url" >/dev/null 2>&1 || true
-  fi
-
-  mv "$tmp_dir/rootfs.ext4" "$dest"
-  write_downloaded_runtime_metadata "$name" "$base_image" "$runtime_version" "$artifact_sha256" "$metadata_tmp"
-  rm -rf "$tmp_dir"
-
-  success "Runtime ${name} downloaded (${platform})"
-  return 0
 }
 
 build_runtime() {
   local name="$1"
   local base_image="$2"
-  local runtime_version="$3"
   local dest="$VMSAN_DIR/rootfs/${name}.ext4"
   local meta
   meta="$(runtime_metadata_path "$name")"
 
-  if [ -f "$dest" ] && runtime_metadata_matches "$name" "$base_image" "$runtime_version"; then
+  if [ -f "$dest" ] && runtime_metadata_matches "$name" "$base_image"; then
     success "Runtime ${name} already built"
     return
   fi
 
   if [ -f "$dest" ]; then
-    info "Refreshing runtime ${name} to match ${runtime_version}..."
+    info "Rebuilding runtime ${name} to refresh the runtime recipe..."
     rm -f "$dest" "$meta"
-  fi
-
-  if download_runtime_artifact "$name" "$base_image" "$runtime_version"; then
-    return
   fi
 
   need_cmd docker
@@ -1040,21 +837,15 @@ DEOF
   tar -xf "$build_dir/rootfs.tar" -C "$mnt_dir"
   umount "$mnt_dir"
 
-  write_runtime_metadata "$name" "$base_image" "$runtime_version" "$(docker_repo_digest "$base_image")"
+  write_runtime_metadata "$name" "$base_image"
 
   success "Runtime ${name} built (${image_mb} MB)"
 }
 
-RUNTIME_VERSION="$(runtime_current_version)"
-
 if command -v docker >/dev/null 2>&1; then
-  build_runtime "node22" "$NODE22_BASE_IMAGE" "$RUNTIME_VERSION"
-  build_runtime "node24" "$NODE24_BASE_IMAGE" "$RUNTIME_VERSION"
-  build_runtime "python3.13" "$PYTHON313_BASE_IMAGE" "$RUNTIME_VERSION"
-elif [ -n "$RUNTIME_ARTIFACT_BASE_URL" ]; then
-  build_runtime "node22" "$NODE22_BASE_IMAGE" "$RUNTIME_VERSION"
-  build_runtime "node24" "$NODE24_BASE_IMAGE" "$RUNTIME_VERSION"
-  build_runtime "python3.13" "$PYTHON313_BASE_IMAGE" "$RUNTIME_VERSION"
+  build_runtime "node22" "node:22"
+  build_runtime "node24" "node:24"
+  build_runtime "python3.13" "python:3.13-slim"
 else
   warn "Docker not found — skipping runtime image builds. Install Docker and re-run to build runtime images."
 fi
@@ -1071,11 +862,6 @@ source_label=$SOURCE_LABEL
 latest_release=$LATEST_TAG
 cli_version=$VMSAN_VER
 runtime_recipe_version=$RUNTIME_RECIPE_VERSION
-runtime_version=$RUNTIME_VERSION
-runtime_artifact_base_url=$RUNTIME_ARTIFACT_BASE_URL
-node22_base_image=$NODE22_BASE_IMAGE
-node24_base_image=$NODE24_BASE_IMAGE
-python313_base_image=$PYTHON313_BASE_IMAGE
 installed_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
 
