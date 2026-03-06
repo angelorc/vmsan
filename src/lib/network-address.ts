@@ -31,9 +31,28 @@ export function vmGuestIp(slot: number): string {
   return `${VM_NETWORK_PREFIX}.${slot}.2`;
 }
 
+export function slotFromVmHostIpOrNull(hostIp: string): number | null {
+  const parts = hostIp.split(".").map((part) => Number(part));
+  if (
+    parts.length !== 4 ||
+    parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
+  ) {
+    return null;
+  }
+
+  const slot = parts[2];
+  if (!Number.isInteger(slot) || slot < 0 || slot > 254) {
+    return null;
+  }
+
+  return slot;
+}
+
 export function slotFromVmHostIp(hostIp: string): number {
-  const [, , slot] = parseIpv4(hostIp);
-  assertValidSlot(slot);
+  const slot = slotFromVmHostIpOrNull(hostIp);
+  if (slot === null) {
+    throw new Error(`invalid VM host IP: ${hostIp}`);
+  }
   return slot;
 }
 
