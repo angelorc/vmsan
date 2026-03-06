@@ -651,9 +651,10 @@ build_runtime() {
 
   local build_dir
   build_dir=$(mktemp -d)
+  local mnt_dir="$build_dir/mnt"
   local build_tag="vmsan-rootfs-${name}:latest"
   local container_name="vmsan-export-${name}-$$"
-  trap 'docker rm -f "$container_name" >/dev/null 2>&1 || true; rm -rf "$build_dir"' RETURN
+  trap 'trap - RETURN; grep -qs " $mnt_dir " /proc/mounts && umount "$mnt_dir" >/dev/null 2>&1 || true; docker rm -f "$container_name" >/dev/null 2>&1 || true; rm -rf "$build_dir"' RETURN
 
   # Detect package manager and install appropriate packages
   cat > "$build_dir/Dockerfile" <<'DEOF'
@@ -712,11 +713,14 @@ DEOF
   sed -i "s|__BASE_IMAGE__|${base_image}|" "$build_dir/Dockerfile"
 
   # Build
-  docker build -t "$build_tag" -f "$build_dir/Dockerfile" "$build_dir" >/dev/null 2>&1
+  docker build -t "$build_tag" -f "$build_dir/Dockerfile" "$build_dir" >/dev/null \
+    || error "Failed to build runtime ${name} from ${base_image}"
 
   # Export
-  docker create --name "$container_name" "$build_tag" >/dev/null 2>&1
-  docker export "$container_name" -o "$build_dir/rootfs.tar" 2>/dev/null
+  docker create --name "$container_name" "$build_tag" >/dev/null \
+    || error "Failed to create export container for runtime ${name}"
+  docker export "$container_name" -o "$build_dir/rootfs.tar" \
+    || error "Failed to export rootfs tar for runtime ${name}"
 
   # Convert to ext4
   local tar_bytes
@@ -729,7 +733,6 @@ DEOF
   mkfs.ext4 -q "$dest"
   tune2fs -m 0 "$dest" >/dev/null 2>&1
 
-  local mnt_dir="$build_dir/mnt"
   mkdir -p "$mnt_dir"
   mount -o loop "$dest" "$mnt_dir"
   tar -xf "$build_dir/rootfs.tar" -C "$mnt_dir"
@@ -774,6 +777,7 @@ for rt in node22 node24 python3.13; do
     RUNTIME_STATUS="${RUNTIME_STATUS}${rt} "
   fi
 done
+RUNTIME_STATUS="${RUNTIME_STATUS% }"
 RUNTIME_STATUS="${RUNTIME_STATUS:-none}"
 
 echo ""

@@ -43,6 +43,8 @@ const RUNTIME_ROOTFS_MAP: Record<Exclude<Runtime, "base">, string> = {
   "python3.13": "python3.13.ext4",
 };
 
+const BASE_ROOTFS_FILENAMES = ["ubuntu-24.04.ext4"];
+
 export function findRuntimeRootfs(runtime: Exclude<Runtime, "base">, baseDir: string): string {
   const filename = RUNTIME_ROOTFS_MAP[runtime];
   const rootfsPath = join(baseDir, "rootfs", filename);
@@ -53,6 +55,28 @@ export function findRuntimeRootfs(runtime: Exclude<Runtime, "base">, baseDir: st
     });
   }
   return rootfsPath;
+}
+
+export function findBaseRootfs(baseDir: string): string {
+  const rootfsDir = join(baseDir, "rootfs");
+  if (!existsSync(rootfsDir)) {
+    throw noRootfsDirError();
+  }
+
+  for (const filename of BASE_ROOTFS_FILENAMES) {
+    const rootfsPath = join(rootfsDir, filename);
+    if (existsSync(rootfsPath)) {
+      return rootfsPath;
+    }
+  }
+
+  const files = readdirSync(rootfsDir).filter((fileName) => fileName.endsWith(".ext4"));
+  const runtimeFilenames = new Set(Object.values(RUNTIME_ROOTFS_MAP));
+  const baseFiles = files.filter((fileName) => !runtimeFilenames.has(fileName));
+  if (baseFiles.length === 0) {
+    throw noExt4RootfsError();
+  }
+  return join(rootfsDir, baseFiles.sort().at(-1)!);
 }
 
 export function findRootfs(baseDir: string): string {

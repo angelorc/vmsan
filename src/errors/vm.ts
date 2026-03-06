@@ -63,7 +63,7 @@ export const vmNoAgentTokenError = (vmId: string): VmError =>
     vmId,
     message: `VM ${vmId} has no agent token`,
     why: "This VM was created with --from-image (custom image mode) or the vmsan-agent binary was not found during creation.",
-    fix: "Custom image VMs do not support connect, exec, or cp. Use port forwarding to access your service.",
+    fix: "If the VM was created with --from-image, use port forwarding to access your service. Otherwise reinstall vmsan so vmsan-agent is available, then recreate the VM.",
   });
 
 export const snapshotNotFoundError = (snapshotId: string): VmError =>

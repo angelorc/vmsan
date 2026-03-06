@@ -47,13 +47,13 @@ const createCommand = defineCommand({
     const cmdLog = createCommandLogger("create");
 
     try {
-      const vmsan = await createVmsan();
-      const parsedInput = parseCreateInput(commandArgs, vmsan.paths);
-
       // --from-image is incompatible with --connect (no agent installed)
       if (commandArgs["from-image"] && commandArgs.connect) {
         throw mutuallyExclusiveFlagsError("--from-image", "--connect");
       }
+
+      const vmsan = await createVmsan();
+      const parsedInput = parseCreateInput(commandArgs, vmsan.paths);
 
       if (parsedInput.domains.length > 0) {
         consola.warn(

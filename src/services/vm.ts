@@ -12,7 +12,7 @@ import {
   getVmPid,
   validateEnvironment,
   findKernel,
-  findRootfs,
+  findBaseRootfs,
   findRuntimeRootfs,
   waitForSocket,
 } from "../commands/create/environment.ts";
@@ -179,7 +179,7 @@ export class VMService {
       } else if (runtime !== "base" && !opts.rootfsPath) {
         rootfsPath = findRuntimeRootfs(runtime as Exclude<Runtime, "base">, paths.baseDir);
       } else {
-        rootfsPath = opts.rootfsPath ?? findRootfs(paths.baseDir);
+        rootfsPath = opts.rootfsPath ?? findBaseRootfs(paths.baseDir);
       }
       logger.debug(`Rootfs resolved: ${rootfsPath}`);
 

@@ -78,6 +78,7 @@ cd agent && make install && cd ..
 bun run build
 
 # Link local build
+mkdir -p ~/.vmsan/bin
 ln -sf "$(pwd)/dist/bin/cli.mjs" ~/.vmsan/bin/vmsan
 ```
 
