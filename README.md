@@ -29,25 +29,29 @@ Create, manage, and connect to isolated [Firecracker](https://github.com/firecra
 - 📂 **File transfer** — upload and download without SSH
 - 🐳 **Docker images** — build rootfs from any OCI image with `--from-image`
 - 🏃 **Command execution** — run commands with streaming output, env injection, and sudo
-- 🧩 **Multiple runtimes** — `base`, `node22`, `python3.13`
+- 🧩 **Multiple runtimes** — `base`, `node22`, `node24`, `python3.13`
 - 📸 **VM snapshots** — save and restore VM state
 - 📊 **JSON output** — `--json` flag for scripting and automation
 
 ## 📋 Prerequisites
 
 - Linux (x86_64 or aarch64) with KVM support
-- [Bun](https://bun.sh) >= 1.2
-- [Go](https://go.dev) >= 1.22 (to build the in-VM agent)
 - Root/sudo access (required for TAP device networking and jailer)
-- `squashfs-tools` (for rootfs conversion during install)
+- Docker (for building runtime images and `--from-image`)
 
 ## 🚀 Install
-
-### 1. Install Firecracker, kernel, and rootfs
 
 ```bash
 curl -fsSL https://vmsan.dev/install | bash
 ```
+
+This downloads and installs everything into `~/.vmsan/`:
+
+- Firecracker + Jailer (latest release)
+- Linux kernel (vmlinux 6.1)
+- Ubuntu 24.04 rootfs (converted from squashfs to ext4)
+- vmsan CLI + in-VM agent
+- Runtime images (node22, node24, python3.13)
 
 <details>
 <summary>Uninstall</summary>
@@ -58,53 +62,27 @@ curl -fsSL https://vmsan.dev/install | bash -s -- --uninstall
 
 </details>
 
-This downloads and installs into `~/.vmsan/`:
+<details>
+<summary>Development setup</summary>
 
-- Firecracker + Jailer (latest release)
-- Linux kernel (vmlinux 6.1)
-- Ubuntu 24.04 rootfs (converted from squashfs to ext4)
-
-### 2. Install vmsan CLI
-
-<!-- automd:pm-install -->
-
-```sh
-# ✨ Auto-detect
-npx nypm install vmsan
-
-# npm
-npm install vmsan
-
-# yarn
-yarn add vmsan
-
-# pnpm
-pnpm add vmsan
-
-# bun
-bun install vmsan
-
-# deno
-deno install npm:vmsan
-```
-
-<!-- /automd -->
-
-### 3. Build the in-VM agent
+If you want to build from source:
 
 ```bash
-cd agent
-make install
-cd ..
+# Install dependencies
+bun install
+
+# Build the in-VM agent
+cd agent && make install && cd ..
+
+# Build the CLI
+bun run build
+
+# Link local build
+mkdir -p ~/.vmsan/bin
+ln -sf "$(pwd)/dist/bin/cli.mjs" ~/.vmsan/bin/vmsan
 ```
 
-### Link globally (optional)
-
-```bash
-bun link
-```
-
-This makes the `vmsan` command available system-wide.
+</details>
 
 ## 📖 Usage
 

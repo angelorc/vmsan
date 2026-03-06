@@ -31,13 +31,13 @@
     "lint:fix": "oxlint . --fix && oxfmt '!**/*.md' '!docs/**' .",
     "fmt": "oxfmt '!**/*.md' '!docs/**' .",
     "fmt:check": "oxfmt --check '!**/*.md' '!docs/**' .",
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit",
     "prepack": "bun run build",
     "automd": "automd",
     "changeset": "changeset",
-    "version-packages": "bash scripts/version.sh",
-    "release": "changeset publish"
+    "version-packages": "changeset version",
+    "release": "bun run build && changeset publish"
   },
   "dependencies": {
     "citty": "^0.2.1",

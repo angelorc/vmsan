@@ -9,11 +9,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import {
-  generateWelcomeHtml,
-  generateWelcomeServer,
-  generateWelcomeService,
-} from "./welcome-page.ts";
 import { generateAgentService, generateAgentEnv } from "./agent-service.ts";
 
 export interface JailerPaths {
@@ -36,10 +31,6 @@ export interface PrepareChrootConfig {
   snapshot?: {
     snapshotFile: string;
     memFile: string;
-  };
-  welcomePage?: {
-    vmId: string;
-    ports: number[];
   };
   agent?: {
     binaryPath: string;
@@ -156,31 +147,13 @@ export class Jailer {
         { stdio: "pipe" },
       );
 
-      // Inject welcome page files for node22-demo runtime.
-      if (config.welcomePage) {
-        const { vmId: welcomeVmId, ports: welcomePorts } = config.welcomePage;
-        const welcomeDir = join(tmpMount, "opt", "vmsan", "welcome");
-        mkdirSync(welcomeDir, { recursive: true });
-        writeFileSync(
-          join(welcomeDir, "index.html"),
-          generateWelcomeHtml(welcomeVmId, welcomePorts),
-        );
-        writeFileSync(join(welcomeDir, "server.js"), generateWelcomeServer(welcomePorts));
-
-        const systemdDir = join(tmpMount, "etc", "systemd", "system");
-        mkdirSync(systemdDir, { recursive: true });
-        writeFileSync(
-          join(systemdDir, "vmsan-welcome.service"),
-          generateWelcomeService(welcomePorts),
-        );
-
-        // Enable the service at boot via symlink into multi-user.target.wants
-        const wantsDir = join(systemdDir, "multi-user.target.wants");
-        mkdirSync(wantsDir, { recursive: true });
-        execSync(
-          `ln -sf /etc/systemd/system/vmsan-welcome.service "${join(wantsDir, "vmsan-welcome.service")}"`,
-          { stdio: "pipe" },
-        );
+      // Set hostname to VM ID (e.g. "vm-a1b2c3d4")
+      writeFileSync(join(tmpMount, "etc", "hostname"), `${this.vmId}\n`);
+      // Add hostname to /etc/hosts so sudo doesn't warn "unable to resolve host"
+      const hostsPath = join(tmpMount, "etc", "hosts");
+      const hostsContent = existsSync(hostsPath) ? readFileSync(hostsPath, "utf-8") : "";
+      if (!hostsContent.includes(this.vmId)) {
+        writeFileSync(hostsPath, `${hostsContent.trimEnd()}\n127.0.1.1 ${this.vmId}\n`);
       }
 
       // Inject vmsan-agent binary and systemd service.
@@ -209,12 +182,21 @@ export class Jailer {
         );
       }
 
-      // Fix /home/ubuntu ownership so the ubuntu user (uid 1000) can access
-      // their home directory. Some base rootfs images ship /home/ubuntu owned
-      // by root:root which causes EACCES when the agent runs commands as ubuntu.
+      // Fix /home/ubuntu ownership so the ubuntu user can access their home.
+      // Resolve uid/gid from the rootfs's /etc/passwd (not the host's).
       const ubuntuHome = join(tmpMount, "home", "ubuntu");
-      if (existsSync(ubuntuHome)) {
-        execSync(`sudo chown 1000:1000 "${ubuntuHome}"`, { stdio: "pipe" });
+      const rootfsPasswd = join(tmpMount, "etc", "passwd");
+      if (existsSync(ubuntuHome) && existsSync(rootfsPasswd)) {
+        const passwdContent = readFileSync(rootfsPasswd, "utf-8");
+        const ubuntuEntry = passwdContent.split("\n").find((l) => l.startsWith("ubuntu:"));
+        if (ubuntuEntry) {
+          const fields = ubuntuEntry.split(":");
+          if (fields.length >= 4 && /^\d+$/.test(fields[2]) && /^\d+$/.test(fields[3])) {
+            execFileSync("sudo", ["chown", "-R", `${fields[2]}:${fields[3]}`, ubuntuHome], {
+              stdio: "pipe",
+            });
+          }
+        }
       }
 
       execSync(`sudo umount "${tmpMount}"`, { stdio: "pipe" });

@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { connect } from "node:net";
 import { join } from "node:path";
 import type { VmsanPaths } from "../../paths.ts";
+import type { Runtime } from "./types.ts";
 import {
   missingBinaryError,
   noKernelDirError,
@@ -10,7 +11,7 @@ import {
   noExt4RootfsError,
   snapshotNotFoundError,
 } from "../../errors/index.ts";
-import { socketTimeoutError } from "../../errors/index.ts";
+import { socketTimeoutError, SetupError } from "../../errors/index.ts";
 
 export function validateEnvironment(baseDir: string): void {
   const firecrackerPath = join(baseDir, "bin", "firecracker");
@@ -34,6 +35,48 @@ export function findKernel(baseDir: string): string {
     throw noKernelError();
   }
   return join(kernelDir, files.sort().at(-1)!);
+}
+
+const RUNTIME_ROOTFS_MAP: Record<Exclude<Runtime, "base">, string> = {
+  node22: "node22.ext4",
+  node24: "node24.ext4",
+  "python3.13": "python3.13.ext4",
+};
+
+const BASE_ROOTFS_FILENAMES = ["ubuntu-24.04.ext4"];
+
+export function findRuntimeRootfs(runtime: Exclude<Runtime, "base">, baseDir: string): string {
+  const filename = RUNTIME_ROOTFS_MAP[runtime];
+  const rootfsPath = join(baseDir, "rootfs", filename);
+  if (!existsSync(rootfsPath)) {
+    throw new SetupError("ERR_SETUP_NO_EXT4_ROOTFS", {
+      message: `Runtime "${runtime}" rootfs not found at ${rootfsPath}`,
+      fix: 'Run "curl -fsSL https://vmsan.dev/install | bash" to build runtime images.',
+    });
+  }
+  return rootfsPath;
+}
+
+export function findBaseRootfs(baseDir: string): string {
+  const rootfsDir = join(baseDir, "rootfs");
+  if (!existsSync(rootfsDir)) {
+    throw noRootfsDirError();
+  }
+
+  for (const filename of BASE_ROOTFS_FILENAMES) {
+    const rootfsPath = join(rootfsDir, filename);
+    if (existsSync(rootfsPath)) {
+      return rootfsPath;
+    }
+  }
+
+  const files = readdirSync(rootfsDir).filter((fileName) => fileName.endsWith(".ext4"));
+  const runtimeFilenames = new Set(Object.values(RUNTIME_ROOTFS_MAP));
+  const baseFiles = files.filter((fileName) => !runtimeFilenames.has(fileName));
+  if (baseFiles.length === 0) {
+    throw noExt4RootfsError();
+  }
+  return join(rootfsDir, baseFiles.sort().at(-1)!);
 }
 
 export function findRootfs(baseDir: string): string {

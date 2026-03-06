@@ -4,13 +4,23 @@ set -euo pipefail
 # vmsan installer — downloads Firecracker, kernel, rootfs, and vmsan-agent.
 # Usage:
 #   Install: curl -fsSL https://vmsan.dev/install | bash
+#   Install a branch: curl -fsSL https://vmsan.dev/install | bash -s -- --ref my-branch
+#   Install a commit: curl -fsSL https://vmsan.dev/install | bash -s -- --sha <commit>
 #   Uninstall: curl -fsSL https://vmsan.dev/install | bash -s -- --uninstall
 
 VMSAN_DIR="${VMSAN_DIR:-$HOME/.vmsan}"
 VMSAN_REPO="angelorc/vmsan"
-VMSAN_REF="${VMSAN_REF:-}"
+VMSAN_INSTALL_BOOTSTRAPPED="${VMSAN_INSTALL_BOOTSTRAPPED:-}"
+VMSAN_INSTALL_SOURCE_SHA="${VMSAN_INSTALL_SOURCE_SHA:-}"
+VMSAN_INSTALL_REQUESTED_REF="${VMSAN_INSTALL_REQUESTED_REF:-}"
+VMSAN_INSTALL_REQUESTED_SHA="${VMSAN_INSTALL_REQUESTED_SHA:-}"
 ARCH="$(uname -m)"
 CLOUDFLARED_VERSION="${CLOUDFLARED_VERSION:-2026.2.0}"
+GO_REQUIRED_VERSION="${GO_REQUIRED_VERSION:-1.22.0}"
+GO_INSTALL_VERSION="${GO_INSTALL_VERSION:-1.22.0}"
+REQUESTED_REF="$VMSAN_INSTALL_REQUESTED_REF"
+REQUESTED_SHA="$VMSAN_INSTALL_REQUESTED_SHA"
+UNINSTALL=0
 
 # --- helpers ---
 
@@ -18,6 +28,16 @@ info()    { printf "\033[1;34m[info]\033[0m  %s\n" "$*"; }
 success() { printf "\033[1;32m[ok]\033[0m    %s\n" "$*"; }
 warn()    { printf "\033[1;33m[warn]\033[0m  %s\n" "$*"; }
 error()   { printf "\033[1;31m[error]\033[0m %s\n" "$*" >&2; exit 1; }
+
+print_usage() {
+  cat <<EOF
+Usage:
+  curl -fsSL https://vmsan.dev/install | bash
+  curl -fsSL https://vmsan.dev/install | bash -s -- --ref <branch>
+  curl -fsSL https://vmsan.dev/install | bash -s -- --sha <commit>
+  curl -fsSL https://vmsan.dev/install | bash -s -- --uninstall
+EOF
+}
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || error "Required command not found: $1"
@@ -37,9 +57,104 @@ go_arch() {
   esac
 }
 
+version_ge() {
+  local current="$1"
+  local minimum="$2"
+  [ "$(printf '%s\n%s\n' "$minimum" "$current" | sort -V | head -n1)" = "$minimum" ]
+}
+
+go_version_number() {
+  go version 2>/dev/null | awk '{print $3}' | sed 's/^go//'
+}
+
+resolve_commit_sha() {
+  local target="$1"
+  local sha
+  sha="$(curl -fsSL -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/$VMSAN_REPO/commits/$target" \
+    | grep -oP '"sha":\s*"\K[0-9a-f]{40}' | head -1)"
+  [ -n "$sha" ] || error "Could not resolve commit for $target"
+  printf '%s\n' "$sha"
+}
+
+bootstrap_ref_installer() {
+  local resolved_sha="$1"
+  shift
+  local script_tmp
+  script_tmp="$(mktemp)"
+  trap 'rm -f "$script_tmp"' EXIT
+
+  download "https://raw.githubusercontent.com/$VMSAN_REPO/$resolved_sha/install.sh" "$script_tmp"
+  chmod +x "$script_tmp"
+
+  info "Re-executing installer from commit $resolved_sha..."
+  local -a env_args=(
+    "VMSAN_INSTALL_BOOTSTRAPPED=1"
+    "VMSAN_INSTALL_SOURCE_SHA=$resolved_sha"
+    "VMSAN_INSTALL_REQUESTED_REF=$REQUESTED_REF"
+    "VMSAN_INSTALL_REQUESTED_SHA=$REQUESTED_SHA"
+  )
+  env "${env_args[@]}" bash "$script_tmp" "$@"
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --uninstall)
+      UNINSTALL=1
+      shift
+      ;;
+    --ref)
+      [ $# -ge 2 ] || error "--ref requires a value"
+      REQUESTED_REF="$2"
+      shift 2
+      ;;
+    --ref=*)
+      REQUESTED_REF="${1#--ref=}"
+      shift
+      ;;
+    --sha)
+      [ $# -ge 2 ] || error "--sha requires a value"
+      REQUESTED_SHA="$2"
+      shift 2
+      ;;
+    --sha=*)
+      REQUESTED_SHA="${1#--sha=}"
+      shift
+      ;;
+    --help|-h)
+      print_usage
+      exit 0
+      ;;
+    *)
+      error "Unknown argument: $1"
+      ;;
+  esac
+done
+
+[ -n "$REQUESTED_REF" ] && [ -n "$REQUESTED_SHA" ] && error "Use only one of --ref or --sha"
+
+if [ -z "$VMSAN_INSTALL_BOOTSTRAPPED" ] && { [ -n "$REQUESTED_REF" ] || [ -n "$REQUESTED_SHA" ]; }; then
+  need_cmd curl
+  INSTALL_TARGET="${REQUESTED_SHA:-$REQUESTED_REF}"
+  RESOLVED_BOOTSTRAP_SHA="$(resolve_commit_sha "$INSTALL_TARGET")"
+  FORWARD_ARGS=()
+  [ "$UNINSTALL" -eq 1 ] && FORWARD_ARGS+=(--uninstall)
+  bootstrap_ref_installer "$RESOLVED_BOOTSTRAP_SHA" "${FORWARD_ARGS[@]}"
+  exit 0
+fi
+
+INSTALL_MODE="release"
+SOURCE_LABEL=""
+SOURCE_SHA=""
+if [ -n "$VMSAN_INSTALL_SOURCE_SHA" ]; then
+  INSTALL_MODE="source"
+  SOURCE_SHA="$VMSAN_INSTALL_SOURCE_SHA"
+  SOURCE_LABEL="${REQUESTED_REF:-${REQUESTED_SHA:-$SOURCE_SHA}}"
+fi
+
 # --- uninstall ---
 
-if [ "${1:-}" = "--uninstall" ]; then
+if [ "$UNINSTALL" -eq 1 ]; then
   echo ""
   echo "  vmsan uninstaller"
   echo ""
@@ -169,6 +284,73 @@ install_pkg() {
   fi
 }
 
+ensure_go() {
+  local current_go_version=""
+
+  if command -v go >/dev/null 2>&1; then
+    current_go_version="$(go_version_number)"
+    if [ -n "$current_go_version" ] && version_ge "$current_go_version" "$GO_REQUIRED_VERSION"; then
+      return
+    fi
+    warn "Go ${current_go_version:-unknown} is too old; installing Go ${GO_INSTALL_VERSION}..."
+  else
+    info "Go not found — installing Go ${GO_INSTALL_VERSION}..."
+  fi
+
+  local go_tmp
+  go_tmp="$(mktemp -d)"
+  trap 'rm -rf "$go_tmp"' RETURN
+
+  local go_tarball="go${GO_INSTALL_VERSION}.linux-$(go_arch).tar.gz"
+  download "https://go.dev/dl/${go_tarball}" "$go_tmp/$go_tarball"
+  rm -rf /usr/local/go
+  tar -C /usr/local -xzf "$go_tmp/$go_tarball"
+  ln -sf /usr/local/go/bin/go /usr/local/bin/go
+  ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+  hash -r
+
+  current_go_version="$(go_version_number)"
+  [ -n "$current_go_version" ] || error "Go installation failed"
+  version_ge "$current_go_version" "$GO_REQUIRED_VERSION" \
+    || error "Installed Go $current_go_version is still below required version $GO_REQUIRED_VERSION"
+
+  trap - RETURN
+  rm -rf "$go_tmp"
+  success "Go $(go version | awk '{print $3}') installed"
+}
+
+ensure_node() {
+  if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+    return
+  fi
+
+  if command -v apt-get >/dev/null 2>&1; then
+    info "Node.js not found — installing Node.js 22 via NodeSource..."
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    apt-get install -y -qq nodejs >/dev/null 2>&1
+  elif command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
+    info "Node.js/npm not found — installing nodejs via the system package manager..."
+    install_pkg nodejs
+  else
+    error "Node.js and npm are required, but no supported package manager is available."
+  fi
+
+  command -v node >/dev/null 2>&1 || error "Node.js installation failed"
+  command -v npm >/dev/null 2>&1 || error "npm is required but was not installed"
+  success "Node.js $(node --version) installed"
+}
+
+download_source_tree() {
+  local sha="$1"
+  local dest="$2"
+
+  rm -rf "$dest"
+  mkdir -p "$dest"
+  info "Fetching vmsan source at $sha..."
+  curl -fsSL "https://github.com/$VMSAN_REPO/archive/${sha}.tar.gz" \
+    | tar -xz --strip-components=1 -C "$dest"
+}
+
 MISSING_PKGS=()
 command -v unzip       >/dev/null 2>&1 || MISSING_PKGS+=(unzip)
 command -v unsquashfs  >/dev/null 2>&1 || MISSING_PKGS+=(squashfs-tools)
@@ -180,12 +362,7 @@ if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
   success "Prerequisites installed"
 fi
 
-if ! command -v node >/dev/null 2>&1; then
-  info "Node.js not found — installing Node.js 22 via NodeSource..."
-  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-  apt-get install -y -qq nodejs >/dev/null 2>&1
-  success "Node.js $(node --version) installed"
-fi
+ensure_node
 
 if [ ! -e /dev/kvm ]; then
   warn "/dev/kvm not found — Firecracker requires KVM. Make sure you're on a bare-metal host or a VM with nested virtualization."
@@ -279,26 +456,29 @@ else
   success "Rootfs installed ($ROOTFS_FILE, ${IMAGE_MB} MB)"
 fi
 
-# --- latest release tag ---
+# --- source / release selection ---
 
-info "Fetching latest release tag..."
-LATEST_TAG=$(curl -fsSL "https://api.github.com/repos/$VMSAN_REPO/releases" | grep -oP '"tag_name":\s*"\K[^"]+' | head -1)
-[ -n "$LATEST_TAG" ] || error "Could not determine latest release tag"
-success "Latest release: $LATEST_TAG"
+VMSAN_SRC="$VMSAN_DIR/src"
+LATEST_TAG=""
+
+if [ "$INSTALL_MODE" = "source" ]; then
+  info "Source install mode active (${SOURCE_LABEL})"
+  download_source_tree "$SOURCE_SHA" "$VMSAN_SRC"
+else
+  info "Fetching latest release tag..."
+  LATEST_TAG=$(curl -fsSL "https://api.github.com/repos/$VMSAN_REPO/releases" | grep -oP '"tag_name":\s*"\K[^"]+' | head -1)
+  [ -n "$LATEST_TAG" ] || error "Could not determine latest release tag"
+  success "Latest release: $LATEST_TAG"
+fi
 
 # --- vmsan CLI ---
 
-if [ -n "$VMSAN_REF" ]; then
-  info "Installing vmsan CLI from branch/ref: $VMSAN_REF..."
-  VMSAN_SRC="$VMSAN_DIR/src"
-  rm -rf "$VMSAN_SRC"
-  mkdir -p "$VMSAN_SRC"
-  curl -fsSL "https://github.com/$VMSAN_REPO/archive/refs/heads/${VMSAN_REF}.tar.gz" \
-    | tar -xz --strip-components=1 -C "$VMSAN_SRC"
+if [ "$INSTALL_MODE" = "source" ]; then
+  info "Installing vmsan CLI from source (${SOURCE_SHA})..."
   (cd "$VMSAN_SRC" && npm install --ignore-scripts && npx obuild)
   npm install -g "$VMSAN_SRC"
   VMSAN_VER=$(vmsan --version 2>/dev/null || echo "unknown")
-  success "vmsan CLI installed from $VMSAN_REF ($VMSAN_VER)"
+  success "vmsan CLI installed from ${SOURCE_LABEL} ($VMSAN_VER)"
 elif command -v vmsan >/dev/null 2>&1; then
   VMSAN_VER=$(vmsan --version 2>/dev/null || echo "unknown")
   success "vmsan CLI already installed ($VMSAN_VER)"
@@ -313,7 +493,13 @@ fi
 
 AGENT_PATH="$VMSAN_DIR/bin/vmsan-agent"
 
-if [ -x "$AGENT_PATH" ]; then
+if [ "$INSTALL_MODE" = "source" ]; then
+  ensure_go
+  info "Building vmsan-agent from source (${SOURCE_SHA})..."
+  (cd "$VMSAN_SRC/agent" && CGO_ENABLED=0 GOOS=linux GOARCH="$(go_arch)" go build -ldflags="-s -w" -o "$AGENT_PATH" .)
+  chmod +x "$AGENT_PATH"
+  success "vmsan-agent built from ${SOURCE_LABEL}"
+elif [ -x "$AGENT_PATH" ]; then
   success "vmsan-agent already installed"
 else
   AGENT_URL="https://github.com/$VMSAN_REPO/releases/download/${LATEST_TAG}/vmsan-agent-${ARCH}"
@@ -346,11 +532,11 @@ else
   if (exec </dev/tty) 2>/dev/null; then
     echo ""
     echo "  ┌─────────────────────────────────────────────────────────────┐"
-    echo "  │  Cloudflare Tunnel (optional)                              │"
-    echo "  │                                                            │"
-    echo "  │  vmsan can expose VMs via Cloudflare Tunnels.              │"
-    echo "  │  You need a Cloudflare API token and a domain managed      │"
-    echo "  │  by Cloudflare.                                            │"
+    echo "  │  Cloudflare Tunnel (optional)                               │"
+    echo "  │                                                             │"
+    echo "  │  vmsan can expose VMs via Cloudflare Tunnels.               │"
+    echo "  │  You need a Cloudflare API token and a domain managed       │"
+    echo "  │  by Cloudflare.                                             │"
     echo "  └─────────────────────────────────────────────────────────────┘"
     echo ""
     printf "  Configure Cloudflare now? [y/N] "
@@ -404,10 +590,195 @@ EOF
   fi
 fi
 
+# --- runtime images ---
+
+RUNTIME_RECIPE_VERSION="2"
+
+runtime_metadata_path() {
+  local name="$1"
+  echo "$VMSAN_DIR/rootfs/${name}.meta"
+}
+
+runtime_metadata_matches() {
+  local name="$1"
+  local base_image="$2"
+  local meta
+  meta="$(runtime_metadata_path "$name")"
+
+  [ -f "$meta" ] || return 1
+
+  local recipe_version
+  local recorded_base_image
+  recipe_version="$(sed -n 's/^recipe_version=//p' "$meta" | head -n1)"
+  recorded_base_image="$(sed -n 's/^base_image=//p' "$meta" | head -n1)"
+
+  [ "$recipe_version" = "$RUNTIME_RECIPE_VERSION" ] && [ "$recorded_base_image" = "$base_image" ]
+}
+
+write_runtime_metadata() {
+  local name="$1"
+  local base_image="$2"
+  local meta
+  meta="$(runtime_metadata_path "$name")"
+
+  cat > "$meta" <<EOF
+recipe_version=$RUNTIME_RECIPE_VERSION
+base_image=$base_image
+built_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+EOF
+}
+
+build_runtime() {
+  local name="$1"
+  local base_image="$2"
+  local dest="$VMSAN_DIR/rootfs/${name}.ext4"
+  local meta
+  meta="$(runtime_metadata_path "$name")"
+
+  if [ -f "$dest" ] && runtime_metadata_matches "$name" "$base_image"; then
+    success "Runtime ${name} already built"
+    return
+  fi
+
+  if [ -f "$dest" ]; then
+    info "Rebuilding runtime ${name} to refresh the runtime recipe..."
+    rm -f "$dest" "$meta"
+  fi
+
+  need_cmd docker
+
+  info "Building runtime ${name} from ${base_image}..."
+
+  local build_dir
+  build_dir=$(mktemp -d)
+  local mnt_dir="$build_dir/mnt"
+  local build_tag="vmsan-rootfs-${name}:latest"
+  local container_name="vmsan-export-${name}-$$"
+  trap 'trap - RETURN; grep -qs " $mnt_dir " /proc/mounts && umount "$mnt_dir" >/dev/null 2>&1 || true; docker rm -f "$container_name" >/dev/null 2>&1 || true; rm -rf "$build_dir"' RETURN
+
+  # Detect package manager and install appropriate packages
+  cat > "$build_dir/Dockerfile" <<'DEOF'
+FROM __BASE_IMAGE__
+RUN if command -v apt-get >/dev/null 2>&1; then \
+      apt-get update && apt-get install -y --no-install-recommends \
+        bind9-utils bzip2 findutils git gzip iptables iputils-ping libicu-dev libjpeg-dev \
+        libpng-dev ncurses-base libssl-dev openssl procps sudo \
+        systemd systemd-sysv tar unzip debianutils whois zstd \
+      && rm -rf /var/lib/apt/lists/*; \
+    elif command -v dnf >/dev/null 2>&1; then \
+      dnf install -y bind-utils bzip2 findutils git gzip iptables iputils libicu libjpeg \
+        libpng ncurses-libs openssl openssl-libs procps sudo \
+        systemd tar unzip which whois zstd \
+      && dnf clean all; \
+    elif command -v apk >/dev/null 2>&1; then \
+      apk add --no-cache bash bind-tools bzip2 findutils git gzip iptables iputils \
+        icu-libs libjpeg-turbo libpng ncurses-libs openrc openssl \
+        procps sudo tar unzip whois zstd; \
+    fi
+RUN if command -v apk >/dev/null 2>&1; then \
+      id -u ubuntu >/dev/null 2>&1 || adduser -D -s /bin/bash ubuntu; \
+    else \
+      id -u ubuntu >/dev/null 2>&1 || useradd -m -s /bin/bash ubuntu; \
+    fi; \
+    echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/ubuntu; \
+    chmod 440 /etc/sudoers.d/ubuntu; \
+    chown -R ubuntu:ubuntu /home/ubuntu
+RUN EXTRA=""; \
+    if command -v npm >/dev/null 2>&1; then \
+      su -c 'mkdir -p /home/ubuntu/.npm-global && npm config set prefix /home/ubuntu/.npm-global' ubuntu; \
+      EXTRA="${EXTRA}export PATH=\"/home/ubuntu/.npm-global/bin:\$PATH\"\n"; \
+    fi; \
+    if command -v pip3 >/dev/null 2>&1 || command -v pip >/dev/null 2>&1; then \
+      EXTRA="${EXTRA}export PATH=\"/home/ubuntu/.local/bin:\$PATH\"\n"; \
+    fi; \
+    if [ -n "$EXTRA" ]; then \
+      printf '%b' "$EXTRA" >> /home/ubuntu/.profile; \
+      { printf '%b' "$EXTRA"; cat /home/ubuntu/.bashrc; } > /home/ubuntu/.bashrc.tmp \
+        && mv /home/ubuntu/.bashrc.tmp /home/ubuntu/.bashrc; \
+    fi; \
+    chown -R ubuntu:ubuntu /home/ubuntu
+RUN if command -v rc-update >/dev/null 2>&1; then \
+      rc-update add devfs sysinit 2>/dev/null || true; \
+      rc-update add mdev sysinit 2>/dev/null || true; \
+      rc-update add hwdrivers sysinit 2>/dev/null || true; \
+      rc-update add modules boot 2>/dev/null || true; \
+      rc-update add sysctl boot 2>/dev/null || true; \
+      rc-update add hostname boot 2>/dev/null || true; \
+      rc-update add bootmisc boot 2>/dev/null || true; \
+      rc-update add networking boot 2>/dev/null || true; \
+      printf '%s\n' '::sysinit:/sbin/openrc sysinit' '::sysinit:/sbin/openrc boot' '::wait:/sbin/openrc default' '::shutdown:/sbin/openrc shutdown' 'ttyS0::respawn:/sbin/getty 115200 ttyS0' > /etc/inittab; \
+    fi
+DEOF
+
+  sed -i "s|__BASE_IMAGE__|${base_image}|" "$build_dir/Dockerfile"
+
+  # Build
+  docker build -t "$build_tag" -f "$build_dir/Dockerfile" "$build_dir" >/dev/null \
+    || error "Failed to build runtime ${name} from ${base_image}"
+
+  # Export
+  docker create --name "$container_name" "$build_tag" >/dev/null \
+    || error "Failed to create export container for runtime ${name}"
+  docker export "$container_name" -o "$build_dir/rootfs.tar" \
+    || error "Failed to export rootfs tar for runtime ${name}"
+
+  # Convert to ext4
+  local tar_bytes
+  tar_bytes=$(stat -c %s "$build_dir/rootfs.tar")
+  local tar_mb=$(( tar_bytes / 1024 / 1024 ))
+  local image_mb=$(( tar_mb + 512 ))
+  [ "$image_mb" -lt 1024 ] && image_mb=1024
+
+  dd if=/dev/zero of="$dest" bs=1M count="$image_mb" status=none
+  mkfs.ext4 -q "$dest"
+  tune2fs -m 0 "$dest" >/dev/null 2>&1
+
+  mkdir -p "$mnt_dir"
+  mount -o loop "$dest" "$mnt_dir"
+  tar -xf "$build_dir/rootfs.tar" -C "$mnt_dir"
+  umount "$mnt_dir"
+
+  write_runtime_metadata "$name" "$base_image"
+
+  success "Runtime ${name} built (${image_mb} MB)"
+}
+
+if command -v docker >/dev/null 2>&1; then
+  build_runtime "node22" "node:22"
+  build_runtime "node24" "node:24"
+  build_runtime "python3.13" "python:3.13-slim"
+else
+  warn "Docker not found — skipping runtime image builds. Install Docker and re-run to build runtime images."
+fi
+
+# --- install metadata ---
+
+INSTALL_METADATA="$VMSAN_DIR/install.meta"
+cat > "$INSTALL_METADATA" <<EOF
+mode=$INSTALL_MODE
+requested_ref=$REQUESTED_REF
+requested_sha=$REQUESTED_SHA
+resolved_sha=$SOURCE_SHA
+source_label=$SOURCE_LABEL
+latest_release=$LATEST_TAG
+cli_version=$VMSAN_VER
+runtime_recipe_version=$RUNTIME_RECIPE_VERSION
+installed_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+EOF
+
 # --- summary ---
 
 CF_STATUS="not configured"
 [ -f "$VMSAN_DIR/cloudflare/cloudflare.json" ] && CF_STATUS="configured"
+
+RUNTIME_STATUS=""
+for rt in node22 node24 python3.13; do
+  if [ -f "$VMSAN_DIR/rootfs/${rt}.ext4" ]; then
+    RUNTIME_STATUS="${RUNTIME_STATUS}${rt} "
+  fi
+done
+RUNTIME_STATUS="${RUNTIME_STATUS% }"
+RUNTIME_STATUS="${RUNTIME_STATUS:-none}"
 
 echo ""
 success "vmsan environment ready at $VMSAN_DIR"
@@ -416,9 +787,16 @@ echo "  Firecracker  $VMSAN_DIR/bin/firecracker"
 echo "  Jailer       $VMSAN_DIR/bin/jailer"
 echo "  Kernel       $VMSAN_DIR/kernels/$KERNEL_FILE"
 echo "  Rootfs       $VMSAN_DIR/rootfs/$ROOTFS_FILE"
+echo "  Runtimes     $RUNTIME_STATUS"
 echo "  Agent        $AGENT_PATH"
 echo "  cloudflared  $CLOUDFLARED_PATH ($CF_STATUS)"
 echo "  CLI          $(command -v vmsan 2>/dev/null || echo 'vmsan (npm global)')"
+if [ "$INSTALL_MODE" = "source" ]; then
+  echo "  Source       $SOURCE_SHA ($SOURCE_LABEL)"
+else
+  echo "  Release      ${LATEST_TAG:-unknown}"
+fi
+echo "  Metadata     $INSTALL_METADATA"
 echo ""
 if [ "$CF_STATUS" = "configured" ]; then
   echo "  Tunnel mode active — VMs exposed via Cloudflare (no DNAT)."

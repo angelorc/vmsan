@@ -1,7 +1,7 @@
 import type { NetworkConfig } from "../../lib/network.ts";
 import type { VmState } from "../../lib/vm-state.ts";
 
-export const VALID_RUNTIMES = ["base", "node22", "node22-demo", "python3.13"] as const;
+export const VALID_RUNTIMES = ["base", "node22", "node24", "python3.13"] as const;
 export type Runtime = (typeof VALID_RUNTIMES)[number];
 
 export const VALID_NETWORK_POLICIES = ["allow-all", "deny-all", "custom"] as const;

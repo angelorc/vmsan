@@ -57,7 +57,7 @@ Firecracker made simple. Spin up secure microVMs in milliseconds, from install t
 
 #default
   ```bash [Terminal]
-  $ curl -fsSL https://vmsan.dev/install | bash
+  curl -fsSL https://vmsan.dev/install | bash
   ```
 ::
 
@@ -83,9 +83,9 @@ title: One command is all it takes
     description: Install the CLI in seconds with a single command.
     ---
     ```bash [Terminal]
-    $ curl -fsSL https://vmsan.dev/install | bash
+    curl -fsSL https://vmsan.dev/install | bash
     ✔ vmsan installed successfully
-    $ vmsan --version
+    vmsan --version
     vmsan 0.1.0
     ```
     ::::
@@ -97,7 +97,7 @@ title: One command is all it takes
     description: Add --connect to land in a shell instantly.
     ---
     ```bash [Terminal]
-    $ vmsan create --connect
+    vmsan create --connect
     ✔ VM created: vm-f91c4e0
     ✔ Connected to vm-f91c4e0
     root@vm-f91c4e0:~#
@@ -185,7 +185,7 @@ description: Powerful isolation primitives wrapped in an intuitive developer exp
     description: Enforce strict allow-all or deny-all rules. Route traffic via custom domain and CIDR policies. Throttle bandwidth instantly.
     ---
     ```bash [Network Isolation]
-    $ vmsan create \
+    vmsan create \
         --network-policy custom \
         --allowed-domain "*.github.com" \
         --denied-cidr "10.0.0.0/8" \
@@ -202,9 +202,9 @@ description: Powerful isolation primitives wrapped in an intuitive developer exp
     description: Run any Docker or OCI image natively. Boot it as a secure Firecracker microVM. Cached locally for instant reuse.
     ---
     ```bash [Docker Support]
-    $ vmsan create --from-image python:3.13-slim
-    $ vmsan create --from-image node:22-alpine
-    $ vmsan create --from-image myorg/app:latest
+    vmsan create --from-image python:3.13-slim
+    vmsan create --from-image node:22-alpine
+    vmsan create --from-image myorg/app:latest
     ```
     ::::
 
@@ -217,9 +217,9 @@ description: Powerful isolation primitives wrapped in an intuitive developer exp
     description: Access your VMs with a full WebSocket PTY terminal. Upload and download files effortlessly. No SSH keys required.
     ---
     ```bash [Shell & Files]
-    $ vmsan connect vm-a3f7b2c
-    $ vmsan upload vm-a3f7b2c ./app.js /app.js
-    $ vmsan download vm-a3f7b2c /app.log ./
+    vmsan connect vm-a3f7b2c
+    vmsan upload vm-a3f7b2c ./app.js /app.js
+    vmsan download vm-a3f7b2c /app.log ./
     ```
     ::::
 
@@ -232,7 +232,7 @@ description: Powerful isolation primitives wrapped in an intuitive developer exp
     description: Every single command supports structured --json output. Script your infrastructure. Automate your workflows.
     ---
     ```bash [JSON Output]
-    $ vmsan list --json
+    vmsan list --json
     [{"id":"vm-a3f7b2c","status":"running",
       "runtime":"node22","memory":128,
       "cpus":1,"ip":"172.16.1.2",

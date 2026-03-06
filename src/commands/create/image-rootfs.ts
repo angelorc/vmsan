@@ -11,16 +11,18 @@ const APT_PACKAGES = [
   "findutils",
   "git",
   "gzip",
+  "iptables",
   "iputils-ping",
   "libicu-dev",
   "libjpeg-dev",
   "libpng-dev",
   "ncurses-base",
   "libssl-dev",
-  "openssh-server",
   "openssl",
   "procps",
   "sudo",
+  "systemd",
+  "systemd-sysv",
   "tar",
   "unzip",
   "debianutils",
@@ -34,12 +36,12 @@ const DNF_PACKAGES = [
   "findutils",
   "git",
   "gzip",
+  "iptables",
   "iputils",
   "libicu",
   "libjpeg",
   "libpng",
   "ncurses-libs",
-  "openssh-server",
   "openssl",
   "openssl-libs",
   "procps",
@@ -58,13 +60,13 @@ const APK_PACKAGES = [
   "findutils",
   "git",
   "gzip",
+  "iptables",
   "iputils",
   "icu-libs",
   "libjpeg-turbo",
   "libpng",
   "ncurses-libs",
   "openrc",
-  "openssh",
   "openssl",
   "procps",
   "sudo",
@@ -74,7 +76,9 @@ const APK_PACKAGES = [
   "zstd",
 ];
 
-function generateDockerfile(baseImage: string): string {
+function generateDockerfile(baseImage: string, minimal = false): string {
+  if (minimal) return `FROM ${baseImage}\n`;
+
   const aptInstall = `apt-get update && apt-get install -y --no-install-recommends ${APT_PACKAGES.join(" ")} && rm -rf /var/lib/apt/lists/*`;
   const dnfInstall = `dnf install -y ${DNF_PACKAGES.join(" ")} && dnf clean all`;
   const yumInstall = `yum install -y ${DNF_PACKAGES.join(" ")} && yum clean all`;
@@ -93,13 +97,22 @@ RUN if command -v apk >/dev/null 2>&1; then \\
     fi; \\
     echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/ubuntu; \\
     chmod 440 /etc/sudoers.d/ubuntu; \\
-    mkdir -p /home/ubuntu/.ssh && chown -R ubuntu:ubuntu /home/ubuntu
-RUN ssh-keygen -A 2>/dev/null || true; \\
-    mkdir -p /root/.ssh && chmod 700 /root/.ssh; \\
-    if [ -f /etc/ssh/sshd_config ]; then \\
-      sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config; \\
+    chown -R ubuntu:ubuntu /home/ubuntu
+RUN EXTRA=""; \\
+    if command -v npm >/dev/null 2>&1; then \\
+      su -c 'mkdir -p /home/ubuntu/.npm-global && npm config set prefix /home/ubuntu/.npm-global' ubuntu; \\
+      EXTRA="\${EXTRA}export PATH=\\"/home/ubuntu/.npm-global/bin:\\$PATH\\"\\n"; \\
     fi; \\
-    if command -v rc-update >/dev/null 2>&1; then \\
+    if command -v pip3 >/dev/null 2>&1 || command -v pip >/dev/null 2>&1; then \\
+      EXTRA="\${EXTRA}export PATH=\\"/home/ubuntu/.local/bin:\\$PATH\\"\\n"; \\
+    fi; \\
+    if [ -n "$EXTRA" ]; then \\
+      printf '%b' "$EXTRA" >> /home/ubuntu/.profile; \\
+      { printf '%b' "$EXTRA"; cat /home/ubuntu/.bashrc; } > /home/ubuntu/.bashrc.tmp \\
+        && mv /home/ubuntu/.bashrc.tmp /home/ubuntu/.bashrc; \\
+    fi; \\
+    chown -R ubuntu:ubuntu /home/ubuntu
+RUN if command -v rc-update >/dev/null 2>&1; then \\
       rc-update add devfs sysinit 2>/dev/null || true; \\
       rc-update add mdev sysinit 2>/dev/null || true; \\
       rc-update add hwdrivers sysinit 2>/dev/null || true; \\
@@ -108,10 +121,8 @@ RUN ssh-keygen -A 2>/dev/null || true; \\
       rc-update add hostname boot 2>/dev/null || true; \\
       rc-update add bootmisc boot 2>/dev/null || true; \\
       rc-update add networking boot 2>/dev/null || true; \\
-      rc-update add sshd default 2>/dev/null || true; \\
       printf '%s\\n' '::sysinit:/sbin/openrc sysinit' '::sysinit:/sbin/openrc boot' '::wait:/sbin/openrc default' '::shutdown:/sbin/openrc shutdown' 'ttyS0::respawn:/sbin/getty 115200 ttyS0' > /etc/inittab; \\
-    fi; \\
-    if command -v systemctl >/dev/null 2>&1; then systemctl enable sshd 2>/dev/null || systemctl enable ssh 2>/dev/null || true; fi
+    fi
 `;
 }
 
@@ -123,7 +134,7 @@ function verifyDocker(): void {
   }
 }
 
-function buildImageRootfs(imageRef: ImageReference, cacheDir: string): string {
+function buildImageRootfs(imageRef: ImageReference, cacheDir: string, minimal = false): string {
   const ext4Path = join(cacheDir, "rootfs.ext4");
 
   verifyDocker();
@@ -136,7 +147,7 @@ function buildImageRootfs(imageRef: ImageReference, cacheDir: string): string {
 
   try {
     consola.start(`Building image from ${imageRef.full}...`);
-    const dockerfile = generateDockerfile(imageRef.full);
+    const dockerfile = generateDockerfile(imageRef.full, minimal);
     execSync(`docker build -t "${buildTag}" -f - . <<'DOCKERFILE'\n${dockerfile}\nDOCKERFILE`, {
       stdio: "pipe",
       shell: "/bin/bash",
@@ -190,8 +201,13 @@ function buildImageRootfs(imageRef: ImageReference, cacheDir: string): string {
   }
 }
 
-export function resolveImageRootfs(imageRef: ImageReference, registryDir: string): string {
-  const cacheDir = join(registryDir, imageRef.cacheKey);
+export function resolveImageRootfs(
+  imageRef: ImageReference,
+  registryDir: string,
+  minimal = false,
+): string {
+  const cacheSuffix = minimal ? "-minimal" : "";
+  const cacheDir = join(registryDir, `${imageRef.cacheKey}${cacheSuffix}`);
   const ext4Path = join(cacheDir, "rootfs.ext4");
 
   if (existsSync(ext4Path)) {
@@ -199,5 +215,5 @@ export function resolveImageRootfs(imageRef: ImageReference, registryDir: string
     return ext4Path;
   }
 
-  return buildImageRootfs(imageRef, cacheDir);
+  return buildImageRootfs(imageRef, cacheDir, minimal);
 }

@@ -12,6 +12,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v6
         with:
@@ -21,10 +23,33 @@ jobs:
 
       - run: bun install
 
+      - name: Require changeset
+        if: github.event_name == 'pull_request'
+        run: |
+          CHANGED_FILES="$(git diff --name-only origin/main...HEAD)"
+          [ -n "$CHANGED_FILES" ] || exit 0
+
+          EXEMPT_REGEX='^(README\.md|CHANGELOG\.md|LICENSE|docs/|\.github/|\.changeset/README\.md|\.changeset/config\.json|\.changeset/pre\.json)$'
+          REQUIRES_CHANGESET=0
+
+          while IFS= read -r file; do
+            [ -n "$file" ] || continue
+            if ! printf '%s\n' "$file" | grep -Eq "$EXEMPT_REGEX"; then
+              REQUIRES_CHANGESET=1
+              break
+            fi
+          done <<< "$CHANGED_FILES"
+
+          if [ "$REQUIRES_CHANGESET" -eq 1 ]; then
+            bunx changeset status --since=origin/main
+          else
+            echo "Only exempt files changed; skipping changeset requirement."
+          fi
+
       - run: bun run lint
 
       - run: bun run typecheck
 
       - run: bun run build
 
-      - run: bun run test || true
+      - run: bun run test

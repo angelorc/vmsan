@@ -62,8 +62,8 @@ export const vmNoAgentTokenError = (vmId: string): VmError =>
   new VmError("ERR_VM_NO_AGENT_TOKEN", {
     vmId,
     message: `VM ${vmId} has no agent token`,
-    why: "The vmsan-agent binary was not found at ~/.vmsan/bin/vmsan-agent when this VM was created.",
-    fix: "Install the agent binary into ~/.vmsan/bin/vmsan-agent and recreate the VM with 'vmsan create'.",
+    why: "This VM was created with --from-image (custom image mode) or the vmsan-agent binary was not found during creation.",
+    fix: "If the VM was created with --from-image, use port forwarding to access your service. Otherwise reinstall vmsan so vmsan-agent is available, then recreate the VM.",
   });
 
 export const snapshotNotFoundError = (snapshotId: string): VmError =>

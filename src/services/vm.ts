@@ -12,7 +12,8 @@ import {
   getVmPid,
   validateEnvironment,
   findKernel,
-  findRootfs,
+  findBaseRootfs,
+  findRuntimeRootfs,
   waitForSocket,
 } from "../commands/create/environment.ts";
 import { killOrphanVmProcess, cleanupNetwork, cleanupChroot } from "../commands/create/cleanup.ts";
@@ -34,6 +35,8 @@ import {
 } from "../errors/index.ts";
 import { generateVmId, safeKill, toError } from "../lib/utils.ts";
 import { spawnTimeoutKiller } from "../lib/timeout-killer.ts";
+import { waitForAgent } from "../lib/vm-context.ts";
+import { AgentClient } from "./agent.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -172,14 +175,17 @@ export class VMService {
       // Resolve rootfs
       let rootfsPath: string;
       if (opts.fromImage) {
-        rootfsPath = resolveImageRootfs(opts.fromImage, paths.registryDir);
+        rootfsPath = resolveImageRootfs(opts.fromImage, paths.registryDir, true);
+      } else if (runtime !== "base" && !opts.rootfsPath) {
+        rootfsPath = findRuntimeRootfs(runtime as Exclude<Runtime, "base">, paths.baseDir);
       } else {
-        rootfsPath = opts.rootfsPath ?? findRootfs(paths.baseDir);
+        rootfsPath = opts.rootfsPath ?? findBaseRootfs(paths.baseDir);
       }
       logger.debug(`Rootfs resolved: ${rootfsPath}`);
 
       const netnsName = opts.disableNetns ? undefined : `vmsan-${vmId}`;
-      const agentToken = existsSync(paths.agentBin) ? randomBytes(32).toString("hex") : null;
+      const agentToken =
+        !opts.fromImage && existsSync(paths.agentBin) ? randomBytes(32).toString("hex") : null;
 
       log.start(`Creating VM ${vmId}...`);
 
@@ -260,8 +266,6 @@ export class VMService {
         : undefined;
 
       const jailer = new Jailer(vmId, paths.jailerBaseDir);
-      const welcomePage =
-        runtime === "node22-demo" && ports.length > 0 ? { vmId, ports } : undefined;
 
       const agentConfig = agentToken
         ? {
@@ -277,7 +281,6 @@ export class VMService {
         rootfsSrc: rootfsPath,
         diskSizeGb,
         snapshot: snapshotConfig,
-        welcomePage,
         agent: agentConfig,
       });
       chrootDir = jailerPaths.chrootDir;
@@ -342,6 +345,16 @@ export class VMService {
           timeoutMs,
           stateFile: join(paths.vmsDir, `${vmId}.json`),
         });
+      }
+
+      // Forward published ports to localhost inside the VM
+      if (agentToken && opts.ports?.length) {
+        await this.setupLocalhostPortForwarding(
+          netCfg.guestIp,
+          paths.agentPort,
+          agentToken,
+          opts.ports,
+        );
       }
 
       const finalState = this.store.load(vmId)!;
@@ -562,6 +575,16 @@ export class VMService {
       const pid = getVmPid(vmId);
       this.store.update(vmId, { status: "running", pid });
       log.success(`VM ${vmId} is running (PID: ${pid || "unknown"})`);
+
+      // Re-apply localhost port forwarding after restart
+      if (state.agentToken && state.network.publishedPorts?.length) {
+        await this.setupLocalhostPortForwarding(
+          state.network.guestIp,
+          state.agentPort,
+          state.agentToken,
+          state.network.publishedPorts,
+        );
+      }
 
       const finalState = this.store.load(vmId)!;
 
@@ -805,6 +828,37 @@ export class VMService {
     await vm.addDrive("rootfs", "rootfs/rootfs.ext4", true, false);
     await vm.configure(vcpus, memMib);
     await vm.addNetwork("eth0", netCfg.tapDevice, netCfg.macAddress);
+  }
+
+  /**
+   * Set up iptables DNAT rules inside the VM so that traffic arriving on
+   * published ports is forwarded to 127.0.0.1. Many services bind to
+   * localhost only; this lets the Cloudflare tunnel (which connects to the
+   * guest IP) reach them.
+   */
+  private async setupLocalhostPortForwarding(
+    guestIp: string,
+    agentPort: number,
+    agentToken: string,
+    ports: number[],
+  ): Promise<void> {
+    try {
+      await waitForAgent(guestIp, agentPort);
+      const agent = new AgentClient(`http://${guestIp}:${agentPort}`, agentToken);
+      const iptablesRules = ports
+        .map(
+          (p) =>
+            `sudo iptables-legacy -t nat -A PREROUTING -i eth0 -p tcp --dport ${p} -j DNAT --to-destination 127.0.0.1:${p}`,
+        )
+        .join(" && ");
+      await agent.runCommand({
+        cmd: "/bin/bash",
+        args: ["-c", `sudo sysctl -w net.ipv4.conf.all.route_localnet=1 && ${iptablesRules}`],
+      });
+      this.logger.debug(`Localhost port forwarding set up for ports: ${ports.join(", ")}`);
+    } catch (err) {
+      this.logger.warn(`Failed to set up localhost port forwarding: ${toError(err).message}`);
+    }
   }
 
   private markAsError(vmId: string, error: unknown): void {
