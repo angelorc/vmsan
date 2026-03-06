@@ -57,7 +57,7 @@ export interface VmStateStore {
 export function findFreeNetworkSlot(states: VmState[]): number {
   const usedSlots = new Set<number>();
   for (const state of states) {
-    if (state.status !== "running" && state.status !== "creating") continue;
+    if (state.status === "error") continue;
     const slot = slotFromVmHostIpOrNull(state.network.hostIp);
     if (slot !== null) {
       usedSlots.add(slot);

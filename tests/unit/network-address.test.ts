@@ -28,6 +28,8 @@ describe("network-address", () => {
 
   it("returns null for malformed host IPs when the caller wants to skip them explicitly", () => {
     expect(slotFromVmHostIpOrNull("invalid")).toBeNull();
+    expect(slotFromVmHostIpOrNull("198.19..1")).toBeNull();
+    expect(slotFromVmHostIpOrNull("198.19.1e2.1")).toBeNull();
     expect(slotFromVmHostIpOrNull("198.19.999.1")).toBeNull();
     expect(slotFromVmHostIpOrNull("198.19.255.1")).toBeNull();
   });

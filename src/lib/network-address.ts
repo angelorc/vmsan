@@ -3,6 +3,7 @@ const VM_NETWORK_SECOND_OCTET = 19;
 
 export const VM_SUBNET_MASK: string = "255.255.255.252";
 export const VM_NETWORK_PREFIX: string = `${VM_NETWORK_FIRST_OCTET}.${VM_NETWORK_SECOND_OCTET}`;
+export const SUPPORTED_VM_ADDRESS_BLOCKS: readonly string[] = ["198.19.0.0/16", "172.16.0.0/16"];
 
 function assertValidSlot(slot: number): void {
   if (!Number.isInteger(slot) || slot < 0 || slot > 254) {
@@ -10,15 +11,26 @@ function assertValidSlot(slot: number): void {
   }
 }
 
+function parseIpv4OrNull(ip: string): [number, number, number, number] | null {
+  const octets = ip.split(".");
+  if (octets.length !== 4 || octets.some((part) => !/^\d+$/.test(part))) {
+    return null;
+  }
+
+  const parts = octets.map((part) => Number.parseInt(part, 10));
+  if (parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return null;
+  }
+
+  return parts as [number, number, number, number];
+}
+
 function parseIpv4(ip: string): [number, number, number, number] {
-  const parts = ip.split(".").map((part) => Number(part));
-  if (
-    parts.length !== 4 ||
-    parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
-  ) {
+  const parts = parseIpv4OrNull(ip);
+  if (!parts) {
     throw new Error(`invalid IPv4 address: ${ip}`);
   }
-  return parts as [number, number, number, number];
+  return parts;
 }
 
 export function vmHostIp(slot: number): string {
@@ -32,11 +44,8 @@ export function vmGuestIp(slot: number): string {
 }
 
 export function slotFromVmHostIpOrNull(hostIp: string): number | null {
-  const parts = hostIp.split(".").map((part) => Number(part));
-  if (
-    parts.length !== 4 ||
-    parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
-  ) {
+  const parts = parseIpv4OrNull(hostIp);
+  if (!parts) {
     return null;
   }
 

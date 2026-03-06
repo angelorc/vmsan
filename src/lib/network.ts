@@ -6,10 +6,10 @@ import { toError } from "./utils.ts";
 import type { VmNetwork } from "./vm-state.ts";
 import {
   slotFromVmHostIp,
-  vmAddressBlockCidrFromIp,
   vmGuestIp,
   vmHostIp,
   vmLinkCidrFromIp,
+  SUPPORTED_VM_ADDRESS_BLOCKS,
   VM_SUBNET_MASK,
 } from "./network-address.ts";
 
@@ -262,12 +262,16 @@ export class NetworkManager {
   }
 
   setupRules(): void {
-    const { tapDevice, hostIp, guestIp, publishedPorts } = this.config;
+    const { tapDevice, guestIp, publishedPorts } = this.config;
     const policy = effectivePolicy(this.config);
-    const vmAddressBlock = vmAddressBlockCidrFromIp(hostIp);
     const vethGuest = this.config.netnsName ? `veth-g-${this.config.slot}` : undefined;
     // FORWARD/filtering rules go inside netns when enabled; NAT/DNAT stay on host
     const fwd = this.nsRun.bind(this);
+
+    // Host-originated traffic to the guest agent and services must bypass
+    // host firewalls that deny special-purpose/private ranges by default.
+    sudo(["iptables", "-I", "OUTPUT", "1", "-d", guestIp, "-j", "ACCEPT"]);
+    sudo(["iptables", "-I", "INPUT", "1", "-s", guestIp, "-j", "ACCEPT"]);
 
     if (policy === "deny-all") {
       if (vethGuest) {
@@ -310,11 +314,6 @@ export class NetworkManager {
       "-j",
       "MASQUERADE",
     ]);
-
-    // Host-originated traffic to the guest agent and services must bypass
-    // host firewalls that deny special-purpose/private ranges by default.
-    sudo(["iptables", "-I", "OUTPUT", "1", "-d", guestIp, "-j", "ACCEPT"]);
-    sudo(["iptables", "-I", "INPUT", "1", "-s", guestIp, "-j", "ACCEPT"]);
 
     // When netns is enabled, traffic exits via veth pair — host needs FORWARD rules
     if (this.config.netnsName) {
@@ -480,7 +479,9 @@ export class NetworkManager {
       }
 
       // 5. Cross-VM isolation
-      fwd(["iptables", "-A", "FORWARD", "-i", tapDevice, "-d", vmAddressBlock, "-j", "DROP"]);
+      for (const vmAddressBlock of SUPPORTED_VM_ADDRESS_BLOCKS) {
+        fwd(["iptables", "-A", "FORWARD", "-i", tapDevice, "-d", vmAddressBlock, "-j", "DROP"]);
+      }
 
       // 6. Allowed CIDRs
       for (const cidr of this.config.allowedCidrs) {
@@ -609,7 +610,9 @@ export class NetworkManager {
         ]);
       }
 
-      fwd(["iptables", "-A", "FORWARD", "-i", tapDevice, "-d", vmAddressBlock, "-j", "DROP"]);
+      for (const vmAddressBlock of SUPPORTED_VM_ADDRESS_BLOCKS) {
+        fwd(["iptables", "-A", "FORWARD", "-i", tapDevice, "-d", vmAddressBlock, "-j", "DROP"]);
+      }
       fwd(["iptables", "-A", "FORWARD", "-i", tapDevice, "-j", "ACCEPT"]);
     }
 
@@ -717,8 +720,7 @@ export class NetworkManager {
   }
 
   teardownRules(): void {
-    const { tapDevice, hostIp, guestIp, publishedPorts, netnsName } = this.config;
-    const vmAddressBlock = vmAddressBlockCidrFromIp(hostIp);
+    const { tapDevice, guestIp, publishedPorts, netnsName } = this.config;
     const vethGuest = netnsName ? `veth-g-${this.config.slot}` : undefined;
 
     let defaultIface: string | undefined;
@@ -918,7 +920,9 @@ export class NetworkManager {
         ]);
       }
 
-      tryFwd(["iptables", "-D", "FORWARD", "-i", tapDevice, "-d", vmAddressBlock, "-j", "DROP"]);
+      for (const vmAddressBlock of SUPPORTED_VM_ADDRESS_BLOCKS) {
+        tryFwd(["iptables", "-D", "FORWARD", "-i", tapDevice, "-d", vmAddressBlock, "-j", "DROP"]);
+      }
       tryFwd(["iptables", "-D", "FORWARD", "-i", tapDevice, "-j", "ACCEPT"]);
       tryFwd([
         "iptables",

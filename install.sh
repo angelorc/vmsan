@@ -93,6 +93,16 @@ iptables_delete_rule() {
   iptables "$@" 2>/dev/null || true
 }
 
+delete_iptables_rule_spec() {
+  local rule="$1"
+  local -a rule_parts
+  read -r -a rule_parts <<<"$rule"
+  [ "${#rule_parts[@]}" -gt 0 ] || return 0
+  [ "${rule_parts[0]}" = "-A" ] || return 0
+  rule_parts[0]="-D"
+  iptables_delete_rule "${rule_parts[@]}"
+}
+
 cleanup_iptables_rules_for_vm() {
   local state_file="$1" default_iface_name="$2"
   local tap_device guest_ip skip_dnat slot veth_host guest_cidr
@@ -127,14 +137,14 @@ cleanup_iptables_rules_for_vm() {
 
   if [ -n "$tap_device" ]; then
     iptables -S 2>/dev/null | grep -E "(^-A .* -i ${tap_device}( |$)|^-A .* -o ${tap_device}( |$))" | while IFS= read -r rule; do
-      eval "iptables $(echo "$rule" | sed 's/^-A/-D/')" 2>/dev/null || true
+      delete_iptables_rule_spec "$rule"
     done || true
   fi
 
   if [ -n "$slot" ]; then
     veth_host="veth-h-$slot"
     iptables -S 2>/dev/null | grep -E "(^-A .* -i ${veth_host}( |$)|^-A .* -o ${veth_host}( |$))" | while IFS= read -r rule; do
-      eval "iptables $(echo "$rule" | sed 's/^-A/-D/')" 2>/dev/null || true
+      delete_iptables_rule_spec "$rule"
     done || true
   fi
 }
