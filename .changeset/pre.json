@@ -4,7 +4,5 @@
   "initialVersions": {
     "vmsan": "0.1.0-alpha.24"
   },
-  "changesets": [
-    "tidy-chairs-juggle"
-  ]
+  "changesets": ["tidy-chairs-juggle"]
 }
