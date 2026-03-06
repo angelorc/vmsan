@@ -16,6 +16,8 @@ VMSAN_INSTALL_REQUESTED_REF="${VMSAN_INSTALL_REQUESTED_REF:-}"
 VMSAN_INSTALL_REQUESTED_SHA="${VMSAN_INSTALL_REQUESTED_SHA:-}"
 ARCH="$(uname -m)"
 CLOUDFLARED_VERSION="${CLOUDFLARED_VERSION:-2026.2.0}"
+GO_REQUIRED_VERSION="${GO_REQUIRED_VERSION:-1.22.0}"
+GO_INSTALL_VERSION="${GO_INSTALL_VERSION:-1.22.0}"
 REQUESTED_REF="$VMSAN_INSTALL_REQUESTED_REF"
 REQUESTED_SHA="$VMSAN_INSTALL_REQUESTED_SHA"
 UNINSTALL=0
@@ -53,6 +55,16 @@ go_arch() {
     aarch64) echo "arm64" ;;
     *)       error "Unsupported architecture: $ARCH" ;;
   esac
+}
+
+version_ge() {
+  local current="$1"
+  local minimum="$2"
+  [ "$(printf '%s\n%s\n' "$minimum" "$current" | sort -V | head -n1)" = "$minimum" ]
+}
+
+go_version_number() {
+  go version 2>/dev/null | awk '{print $3}' | sed 's/^go//'
 }
 
 resolve_commit_sha() {
@@ -273,23 +285,42 @@ install_pkg() {
 }
 
 ensure_go() {
+  local current_go_version=""
+
   if command -v go >/dev/null 2>&1; then
-    return
+    current_go_version="$(go_version_number)"
+    if [ -n "$current_go_version" ] && version_ge "$current_go_version" "$GO_REQUIRED_VERSION"; then
+      return
+    fi
+    warn "Go ${current_go_version:-unknown} is too old; installing Go ${GO_INSTALL_VERSION}..."
+  else
+    info "Go not found — installing Go ${GO_INSTALL_VERSION}..."
   fi
 
-  info "Go not found — installing Go toolchain..."
-  if command -v apt-get >/dev/null 2>&1; then
-    install_pkg golang-go
-  elif command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
-    install_pkg golang
-  else
-    error "Go is required in source install mode, but no supported package manager is available."
-  fi
+  local go_tmp
+  go_tmp="$(mktemp -d)"
+  trap 'rm -rf "$go_tmp"' RETURN
+
+  local go_tarball="go${GO_INSTALL_VERSION}.linux-$(go_arch).tar.gz"
+  download "https://go.dev/dl/${go_tarball}" "$go_tmp/$go_tarball"
+  rm -rf /usr/local/go
+  tar -C /usr/local -xzf "$go_tmp/$go_tarball"
+  ln -sf /usr/local/go/bin/go /usr/local/bin/go
+  ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+  hash -r
+
+  current_go_version="$(go_version_number)"
+  [ -n "$current_go_version" ] || error "Go installation failed"
+  version_ge "$current_go_version" "$GO_REQUIRED_VERSION" \
+    || error "Installed Go $current_go_version is still below required version $GO_REQUIRED_VERSION"
+
+  trap - RETURN
+  rm -rf "$go_tmp"
   success "Go $(go version | awk '{print $3}') installed"
 }
 
 ensure_node() {
-  if command -v node >/dev/null 2>&1; then
+  if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
     return
   fi
 
@@ -298,12 +329,14 @@ ensure_node() {
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
     apt-get install -y -qq nodejs >/dev/null 2>&1
   elif command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
-    info "Node.js not found — installing nodejs via the system package manager..."
+    info "Node.js/npm not found — installing nodejs via the system package manager..."
     install_pkg nodejs
   else
-    error "Node.js is required, but no supported package manager is available."
+    error "Node.js and npm are required, but no supported package manager is available."
   fi
 
+  command -v node >/dev/null 2>&1 || error "Node.js installation failed"
+  command -v npm >/dev/null 2>&1 || error "npm is required but was not installed"
   success "Node.js $(node --version) installed"
 }
 
