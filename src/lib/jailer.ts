@@ -136,6 +136,7 @@ export class Jailer {
     // Mount rootfs to configure DNS and inject services
     const tmpMount = join(paths.rootDir, "tmp-mount");
     mkdirSync(tmpMount, { recursive: true });
+    let prepareError: unknown;
     try {
       execSync(`sudo mount -o loop "${paths.rootfsPath}" "${tmpMount}"`, {
         stdio: "pipe",
@@ -200,7 +201,8 @@ export class Jailer {
       }
 
       execSync(`sudo umount "${tmpMount}"`, { stdio: "pipe" });
-    } catch {
+    } catch (error) {
+      prepareError = error;
       // Mount point may already be unmounted or directory removed
       try {
         execSync(`sudo umount "${tmpMount}" 2>/dev/null`, { stdio: "pipe" });
@@ -212,6 +214,9 @@ export class Jailer {
       execSync(`rm -rf "${tmpMount}"`, { stdio: "pipe" });
     } catch {
       // Temp mount directory may already be removed
+    }
+    if (prepareError) {
+      throw prepareError;
     }
 
     // If restoring from snapshot, copy snapshot files into chroot

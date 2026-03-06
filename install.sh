@@ -8,7 +8,7 @@ set -euo pipefail
 #   Install a commit: curl -fsSL https://vmsan.dev/install | bash -s -- --sha <commit>
 #   Uninstall: curl -fsSL https://vmsan.dev/install | bash -s -- --uninstall
 
-VMSAN_DIR="${VMSAN_DIR:-$HOME/.vmsan}"
+VMSAN_DIR="${VMSAN_DIR:-}"
 VMSAN_REPO="angelorc/vmsan"
 VMSAN_INSTALL_BOOTSTRAPPED="${VMSAN_INSTALL_BOOTSTRAPPED:-}"
 VMSAN_INSTALL_SOURCE_SHA="${VMSAN_INSTALL_SOURCE_SHA:-}"
@@ -29,6 +29,24 @@ success() { printf "\033[1;32m[ok]\033[0m    %s\n" "$*"; }
 warn()    { printf "\033[1;33m[warn]\033[0m  %s\n" "$*"; }
 error()   { printf "\033[1;31m[error]\033[0m %s\n" "$*" >&2; exit 1; }
 
+resolve_vmsan_dir() {
+  if [ -n "$VMSAN_DIR" ]; then
+    printf '%s\n' "$VMSAN_DIR"
+    return
+  fi
+
+  if [ -n "${SUDO_USER:-}" ] && command -v getent >/dev/null 2>&1; then
+    local sudo_home
+    sudo_home="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)"
+    if [ -n "$sudo_home" ]; then
+      printf '%s/.vmsan\n' "$sudo_home"
+      return
+    fi
+  fi
+
+  printf '%s/.vmsan\n' "$HOME"
+}
+
 print_usage() {
   cat <<EOF
 Usage:
@@ -42,6 +60,96 @@ EOF
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || error "Required command not found: $1"
 }
+
+default_iface() {
+  ip route show default 2>/dev/null | awk '/default/ {print $5; exit}'
+}
+
+json_string_field() {
+  local key="$1" file="$2"
+  grep -oP "\"$key\"\\s*:\\s*\"\\K[^\"]+" "$file" 2>/dev/null | head -n1 || true
+}
+
+json_bool_field() {
+  local key="$1" file="$2"
+  grep -oP "\"$key\"\\s*:\\s*\\K(true|false)" "$file" 2>/dev/null | head -n1 || true
+}
+
+json_ports_field() {
+  local file="$1"
+  sed -n '/"publishedPorts"\s*:/,/\]/p' "$file" 2>/dev/null | grep -oP '\d+' || true
+}
+
+cidr30_from_ip() {
+  local ip="$1"
+  IFS=. read -r a b c _ <<EOF
+$ip
+EOF
+  [ -n "${a:-}" ] && [ -n "${b:-}" ] && [ -n "${c:-}" ] || return 1
+  printf '%s.%s.%s.0/30\n' "$a" "$b" "$c"
+}
+
+iptables_delete_rule() {
+  iptables "$@" 2>/dev/null || true
+}
+
+delete_iptables_rule_spec() {
+  local rule="$1"
+  local -a rule_parts
+  read -r -a rule_parts <<<"$rule"
+  [ "${#rule_parts[@]}" -gt 0 ] || return 0
+  [ "${rule_parts[0]}" = "-A" ] || return 0
+  rule_parts[0]="-D"
+  iptables_delete_rule "${rule_parts[@]}"
+}
+
+cleanup_iptables_rules_for_vm() {
+  local state_file="$1" default_iface_name="$2"
+  local tap_device guest_ip skip_dnat slot veth_host guest_cidr
+
+  tap_device="$(json_string_field tapDevice "$state_file")"
+  guest_ip="$(json_string_field guestIp "$state_file")"
+  skip_dnat="$(json_bool_field skipDnat "$state_file")"
+
+  [ -n "$guest_ip" ] || return
+  guest_cidr="$(cidr30_from_ip "$guest_ip" || true)"
+
+  if [ -n "$default_iface_name" ] && [ -n "$guest_cidr" ]; then
+    iptables_delete_rule -t nat -D POSTROUTING -s "$guest_cidr" -o "$default_iface_name" -j MASQUERADE
+    iptables_delete_rule -D OUTPUT -d "$guest_ip" -j ACCEPT
+    iptables_delete_rule -D INPUT -s "$guest_ip" -j ACCEPT
+
+    if [ "$skip_dnat" != "true" ]; then
+      while IFS= read -r port; do
+        [ -n "$port" ] || continue
+        iptables_delete_rule -t nat -D PREROUTING -i "$default_iface_name" -p tcp --dport "$port" -j DNAT --to-destination "${guest_ip}:${port}"
+        iptables_delete_rule -D FORWARD -p tcp -d "$guest_ip" --dport "$port" -j ACCEPT
+      done < <(json_ports_field "$state_file")
+    fi
+  fi
+
+  slot="$(printf '%s\n' "$tap_device" | sed -n 's/^fhvm//p')"
+  if [ -n "$default_iface_name" ] && [ -n "$slot" ] && [ -n "$guest_cidr" ]; then
+    veth_host="veth-h-$slot"
+    iptables_delete_rule -D FORWARD -i "$veth_host" -o "$default_iface_name" -s "$guest_cidr" -j ACCEPT
+    iptables_delete_rule -D FORWARD -i "$default_iface_name" -o "$veth_host" -d "$guest_cidr" -m state --state RELATED,ESTABLISHED -j ACCEPT
+  fi
+
+  if [ -n "$tap_device" ]; then
+    iptables -S 2>/dev/null | grep -E "(^-A .* -i ${tap_device}( |$)|^-A .* -o ${tap_device}( |$))" | while IFS= read -r rule; do
+      delete_iptables_rule_spec "$rule"
+    done || true
+  fi
+
+  if [ -n "$slot" ]; then
+    veth_host="veth-h-$slot"
+    iptables -S 2>/dev/null | grep -E "(^-A .* -i ${veth_host}( |$)|^-A .* -o ${veth_host}( |$))" | while IFS= read -r rule; do
+      delete_iptables_rule_spec "$rule"
+    done || true
+  fi
+}
+
+VMSAN_DIR="$(resolve_vmsan_dir)"
 
 download() {
   local url="$1" dest="$2"
@@ -82,7 +190,6 @@ bootstrap_ref_installer() {
   shift
   local script_tmp
   script_tmp="$(mktemp)"
-  trap 'rm -f "$script_tmp"' EXIT
 
   download "https://raw.githubusercontent.com/$VMSAN_REPO/$resolved_sha/install.sh" "$script_tmp"
   chmod +x "$script_tmp"
@@ -94,7 +201,10 @@ bootstrap_ref_installer() {
     "VMSAN_INSTALL_REQUESTED_REF=$REQUESTED_REF"
     "VMSAN_INSTALL_REQUESTED_SHA=$REQUESTED_SHA"
   )
-  env "${env_args[@]}" bash "$script_tmp" "$@"
+
+  exec 3<"$script_tmp"
+  rm -f -- "$script_tmp"
+  exec env "${env_args[@]}" bash -s -- "$@" <&3
 }
 
 while [ $# -gt 0 ]; do
@@ -191,6 +301,19 @@ if [ "$UNINSTALL" -eq 1 ]; then
     success "vmsan CLI not installed"
   fi
 
+  # Clean up iptables rules owned by vmsan using per-VM state instead of broad 172.16.* matching.
+  DEFAULT_IFACE="$(default_iface || true)"
+  IPTABLES_CLEANED=0
+  if [ -d "$VMSAN_DIR/vms" ]; then
+    for state_file in "$VMSAN_DIR"/vms/*.json; do
+      [ -f "$state_file" ] || continue
+      [ "$IPTABLES_CLEANED" -eq 0 ] && info "Cleaning vmsan iptables rules..."
+      cleanup_iptables_rules_for_vm "$state_file" "$DEFAULT_IFACE"
+      IPTABLES_CLEANED=1
+    done
+  fi
+  [ "$IPTABLES_CLEANED" -eq 1 ] && success "iptables rules cleaned"
+
   # Clean up TAP and veth interfaces (host namespace)
   NET_COUNT=0
   for iface_path in /sys/class/net/fhvm* /sys/class/net/veth-h-* /sys/class/net/veth-g-*; do
@@ -200,23 +323,11 @@ if [ "$UNINSTALL" -eq 1 ]; then
   done
 
   # Clean up network namespaces created by vmsan
-  for ns in $(ip netns list 2>/dev/null | awk '{print $1}' | grep '^vmsan-'); do
+  for ns in $(ip netns list 2>/dev/null | awk '{print $1}' | grep '^vmsan-' || true); do
     ip netns delete "$ns" 2>/dev/null && NET_COUNT=$((NET_COUNT + 1))
   done
 
   [ "$NET_COUNT" -gt 0 ] && success "Cleaned up $NET_COUNT network resources"
-
-  # Clean up iptables rules referencing vmsan
-  iptables-save 2>/dev/null | grep -cE 'fhvm|172\.16\.' >/dev/null 2>&1 && {
-    info "Cleaning iptables rules..."
-    iptables -t nat -S 2>/dev/null | grep -E 'fhvm|172\.16\.' | while IFS= read -r rule; do
-      eval "iptables -t nat $(echo "$rule" | sed 's/^-A/-D/')" 2>/dev/null || true
-    done
-    iptables -S FORWARD 2>/dev/null | grep -E 'fhvm|172\.16\.' | while IFS= read -r rule; do
-      eval "iptables $(echo "$rule" | sed 's/^-A/-D/')" 2>/dev/null || true
-    done
-    success "iptables rules cleaned"
-  }
 
   # Delete Cloudflare tunnel via API before removing local files
   if [ -f "$VMSAN_DIR/cloudflare/cloudflare.json" ]; then

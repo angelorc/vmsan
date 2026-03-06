@@ -180,7 +180,7 @@ docs/           Documentation site (vmsan.dev)
 ### How it works
 
 1. **vmsan** uses [Firecracker](https://github.com/firecracker-microvm/firecracker) to create lightweight microVMs with a jailer for security isolation
-2. Each VM gets a TAP network device with its own `/30` subnet (`172.16.{slot}.0/30`)
+2. Each VM gets a TAP network device with its own `/30` subnet (`198.19.{slot}.0/30`)
 3. A Go-based **agent** runs inside the VM, exposing an HTTP API for command execution, file operations, and shell access
 4. The CLI communicates with the agent over the host-guest network
 

@@ -4,6 +4,14 @@ import { consola } from "consola";
 import { defaultInterfaceNotFoundError } from "../errors/index.ts";
 import { toError } from "./utils.ts";
 import type { VmNetwork } from "./vm-state.ts";
+import {
+  slotFromVmHostIp,
+  vmGuestIp,
+  vmHostIp,
+  vmLinkCidrFromIp,
+  SUPPORTED_VM_ADDRESS_BLOCKS,
+  VM_SUBNET_MASK,
+} from "./network-address.ts";
 
 export interface NetworkConfig {
   slot: number;
@@ -98,9 +106,9 @@ export class NetworkManager {
     this.config = {
       slot,
       tapDevice: `fhvm${slot}`,
-      hostIp: `172.16.${slot}.1`,
-      guestIp: `172.16.${slot}.2`,
-      subnetMask: "255.255.255.252",
+      hostIp: vmHostIp(slot),
+      guestIp: vmGuestIp(slot),
+      subnetMask: VM_SUBNET_MASK,
       macAddress: `AA:FC:00:00:00:${(slot + 1).toString(16).padStart(2, "0").toUpperCase()}`,
       networkPolicy,
       allowedDomains,
@@ -113,9 +121,8 @@ export class NetworkManager {
     };
   }
 
-  static bootArgs(slot: number): string {
-    const hostIp = `172.16.${slot}.1`;
-    return `console=ttyS0 reboot=k panic=1 pci=off ip=172.16.${slot}.2::${hostIp}:255.255.255.252::eth0:off:${DNS_RESOLVERS[0]}`;
+  static bootArgs(config: Pick<NetworkConfig, "guestIp" | "hostIp" | "subnetMask">): string {
+    return `console=ttyS0 reboot=k panic=1 pci=off ip=${config.guestIp}::${config.hostIp}:${config.subnetMask}::eth0:off:${DNS_RESOLVERS[0]}`;
   }
 
   static fromConfig(config: NetworkConfig): NetworkManager {
@@ -125,8 +132,10 @@ export class NetworkManager {
   }
 
   static fromVmNetwork(network: VmNetwork): NetworkManager {
-    const slot = Number(network.hostIp.split(".")[2]);
-    if (!Number.isInteger(slot)) {
+    let slot: number;
+    try {
+      slot = slotFromVmHostIp(network.hostIp);
+    } catch {
       throw new Error(`invalid network slot derived from hostIp: ${network.hostIp}`);
     }
     return NetworkManager.fromConfig({
@@ -157,8 +166,9 @@ export class NetworkManager {
   }
 
   setupNamespace(): void {
-    const { slot, netnsName } = this.config;
+    const { guestIp, netnsName } = this.config;
     if (!netnsName) return;
+    const slot = this.config.slot;
 
     const vethHost = `veth-h-${slot}`;
     const vethGuest = `veth-g-${slot}`;
@@ -199,14 +209,14 @@ export class NetworkManager {
     sudoNetns(netnsName, ["sysctl", "-w", "net.ipv4.ip_forward=1"]);
 
     // Host: route VM subnet via netns veth
-    sudo(["ip", "route", "add", `172.16.${slot}.0/30`, "via", transitGuestIp]);
+    sudo(["ip", "route", "add", vmLinkCidrFromIp(guestIp), "via", transitGuestIp]);
 
     // Host: enable IP forwarding
     sudo(["sysctl", "-w", "net.ipv4.ip_forward=1"]);
   }
 
   teardownNamespace(): void {
-    const { slot, netnsName } = this.config;
+    const { guestIp, netnsName } = this.config;
     if (!netnsName) return;
 
     const tryRun = (args: string[]): void => {
@@ -220,7 +230,7 @@ export class NetworkManager {
     };
 
     // Remove host route
-    tryRun(["ip", "route", "del", `172.16.${slot}.0/30`]);
+    tryRun(["ip", "route", "del", vmLinkCidrFromIp(guestIp)]);
 
     // Delete namespace — auto-cleans veth pair, TAP device, and iptables inside
     tryRun(["ip", "netns", "delete", netnsName]);
@@ -252,12 +262,37 @@ export class NetworkManager {
   }
 
   setupRules(): void {
-    const { tapDevice, hostIp, guestIp, publishedPorts } = this.config;
+    const { tapDevice, guestIp, publishedPorts } = this.config;
     const policy = effectivePolicy(this.config);
+    const vethGuest = this.config.netnsName ? `veth-g-${this.config.slot}` : undefined;
     // FORWARD/filtering rules go inside netns when enabled; NAT/DNAT stay on host
     const fwd = this.nsRun.bind(this);
 
+    // Host-originated traffic to the guest agent and services must bypass
+    // host firewalls that deny special-purpose/private ranges by default.
+    sudo(["iptables", "-I", "OUTPUT", "1", "-d", guestIp, "-j", "ACCEPT"]);
+    sudo(["iptables", "-I", "INPUT", "1", "-s", guestIp, "-j", "ACCEPT"]);
+
     if (policy === "deny-all") {
+      if (vethGuest) {
+        // Host-originated traffic to the guest must not depend on the namespace
+        // FORWARD default policy. This keeps agent/PTy/tunnel access consistent
+        // across hosts with different iptables defaults.
+        fwd([
+          "iptables",
+          "-I",
+          "FORWARD",
+          "1",
+          "-i",
+          vethGuest,
+          "-o",
+          tapDevice,
+          "-d",
+          guestIp,
+          "-j",
+          "ACCEPT",
+        ]);
+      }
       fwd(["iptables", "-I", "FORWARD", "-i", tapDevice, "-j", "DROP"]);
       fwd(["iptables", "-I", "FORWARD", "-o", tapDevice, "-j", "DROP"]);
       return;
@@ -444,7 +479,9 @@ export class NetworkManager {
       }
 
       // 5. Cross-VM isolation
-      fwd(["iptables", "-A", "FORWARD", "-i", tapDevice, "-d", "172.16.0.0/16", "-j", "DROP"]);
+      for (const vmAddressBlock of SUPPORTED_VM_ADDRESS_BLOCKS) {
+        fwd(["iptables", "-A", "FORWARD", "-i", tapDevice, "-d", vmAddressBlock, "-j", "DROP"]);
+      }
 
       // 6. Allowed CIDRs
       for (const cidr of this.config.allowedCidrs) {
@@ -573,7 +610,9 @@ export class NetworkManager {
         ]);
       }
 
-      fwd(["iptables", "-A", "FORWARD", "-i", tapDevice, "-d", "172.16.0.0/16", "-j", "DROP"]);
+      for (const vmAddressBlock of SUPPORTED_VM_ADDRESS_BLOCKS) {
+        fwd(["iptables", "-A", "FORWARD", "-i", tapDevice, "-d", vmAddressBlock, "-j", "DROP"]);
+      }
       fwd(["iptables", "-A", "FORWARD", "-i", tapDevice, "-j", "ACCEPT"]);
     }
 
@@ -628,6 +667,25 @@ export class NetworkManager {
         ]);
       }
     }
+
+    if (vethGuest) {
+      // Explicitly allow host namespace -> guest namespace traffic. Without
+      // this, agent reachability depends on the netns FORWARD default policy.
+      fwd([
+        "iptables",
+        "-I",
+        "FORWARD",
+        "1",
+        "-i",
+        vethGuest,
+        "-o",
+        tapDevice,
+        "-d",
+        guestIp,
+        "-j",
+        "ACCEPT",
+      ]);
+    }
   }
 
   setupThrottle(): void {
@@ -662,7 +720,8 @@ export class NetworkManager {
   }
 
   teardownRules(): void {
-    const { tapDevice, hostIp, guestIp, publishedPorts, netnsName } = this.config;
+    const { tapDevice, guestIp, publishedPorts, netnsName } = this.config;
+    const vethGuest = netnsName ? `veth-g-${this.config.slot}` : undefined;
 
     let defaultIface: string | undefined;
     try {
@@ -680,6 +739,9 @@ export class NetworkManager {
         );
       }
     };
+
+    tryRun(["iptables", "-D", "OUTPUT", "-d", guestIp, "-j", "ACCEPT"]);
+    tryRun(["iptables", "-D", "INPUT", "-s", guestIp, "-j", "ACCEPT"]);
 
     const tryFwd = (args: string[]): void => {
       try {
@@ -858,7 +920,9 @@ export class NetworkManager {
         ]);
       }
 
-      tryFwd(["iptables", "-D", "FORWARD", "-i", tapDevice, "-d", "172.16.0.0/16", "-j", "DROP"]);
+      for (const vmAddressBlock of SUPPORTED_VM_ADDRESS_BLOCKS) {
+        tryFwd(["iptables", "-D", "FORWARD", "-i", tapDevice, "-d", vmAddressBlock, "-j", "DROP"]);
+      }
       tryFwd(["iptables", "-D", "FORWARD", "-i", tapDevice, "-j", "ACCEPT"]);
       tryFwd([
         "iptables",
@@ -875,6 +939,22 @@ export class NetworkManager {
       ]);
       tryFwd(["iptables", "-D", "FORWARD", "-i", tapDevice, "-j", "DROP"]);
       tryFwd(["iptables", "-D", "FORWARD", "-o", tapDevice, "-j", "DROP"]);
+    }
+
+    if (vethGuest) {
+      tryFwd([
+        "iptables",
+        "-D",
+        "FORWARD",
+        "-i",
+        vethGuest,
+        "-o",
+        tapDevice,
+        "-d",
+        guestIp,
+        "-j",
+        "ACCEPT",
+      ]);
     }
 
     // Remove host-side veth FORWARD rules (netns mode)
