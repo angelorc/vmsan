@@ -4,13 +4,21 @@ set -euo pipefail
 # vmsan installer — downloads Firecracker, kernel, rootfs, and vmsan-agent.
 # Usage:
 #   Install: curl -fsSL https://vmsan.dev/install | bash
+#   Install a branch: curl -fsSL https://vmsan.dev/install | bash -s -- --ref my-branch
+#   Install a commit: curl -fsSL https://vmsan.dev/install | bash -s -- --sha <commit>
 #   Uninstall: curl -fsSL https://vmsan.dev/install | bash -s -- --uninstall
 
 VMSAN_DIR="${VMSAN_DIR:-$HOME/.vmsan}"
 VMSAN_REPO="angelorc/vmsan"
-VMSAN_REF="${VMSAN_REF:-}"
+VMSAN_INSTALL_BOOTSTRAPPED="${VMSAN_INSTALL_BOOTSTRAPPED:-}"
+VMSAN_INSTALL_SOURCE_SHA="${VMSAN_INSTALL_SOURCE_SHA:-}"
+VMSAN_INSTALL_REQUESTED_REF="${VMSAN_INSTALL_REQUESTED_REF:-}"
+VMSAN_INSTALL_REQUESTED_SHA="${VMSAN_INSTALL_REQUESTED_SHA:-}"
 ARCH="$(uname -m)"
 CLOUDFLARED_VERSION="${CLOUDFLARED_VERSION:-2026.2.0}"
+REQUESTED_REF="$VMSAN_INSTALL_REQUESTED_REF"
+REQUESTED_SHA="$VMSAN_INSTALL_REQUESTED_SHA"
+UNINSTALL=0
 
 # --- helpers ---
 
@@ -18,6 +26,16 @@ info()    { printf "\033[1;34m[info]\033[0m  %s\n" "$*"; }
 success() { printf "\033[1;32m[ok]\033[0m    %s\n" "$*"; }
 warn()    { printf "\033[1;33m[warn]\033[0m  %s\n" "$*"; }
 error()   { printf "\033[1;31m[error]\033[0m %s\n" "$*" >&2; exit 1; }
+
+print_usage() {
+  cat <<EOF
+Usage:
+  curl -fsSL https://vmsan.dev/install | bash
+  curl -fsSL https://vmsan.dev/install | bash -s -- --ref <branch>
+  curl -fsSL https://vmsan.dev/install | bash -s -- --sha <commit>
+  curl -fsSL https://vmsan.dev/install | bash -s -- --uninstall
+EOF
+}
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || error "Required command not found: $1"
@@ -37,9 +55,94 @@ go_arch() {
   esac
 }
 
+resolve_commit_sha() {
+  local target="$1"
+  local sha
+  sha="$(curl -fsSL -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/$VMSAN_REPO/commits/$target" \
+    | grep -oP '"sha":\s*"\K[0-9a-f]{40}' | head -1)"
+  [ -n "$sha" ] || error "Could not resolve commit for $target"
+  printf '%s\n' "$sha"
+}
+
+bootstrap_ref_installer() {
+  local resolved_sha="$1"
+  shift
+  local script_tmp
+  script_tmp="$(mktemp)"
+  trap 'rm -f "$script_tmp"' EXIT
+
+  download "https://raw.githubusercontent.com/$VMSAN_REPO/$resolved_sha/install.sh" "$script_tmp"
+  chmod +x "$script_tmp"
+
+  info "Re-executing installer from commit $resolved_sha..."
+  local -a env_args=(
+    "VMSAN_INSTALL_BOOTSTRAPPED=1"
+    "VMSAN_INSTALL_SOURCE_SHA=$resolved_sha"
+    "VMSAN_INSTALL_REQUESTED_REF=$REQUESTED_REF"
+    "VMSAN_INSTALL_REQUESTED_SHA=$REQUESTED_SHA"
+  )
+  env "${env_args[@]}" bash "$script_tmp" "$@"
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --uninstall)
+      UNINSTALL=1
+      shift
+      ;;
+    --ref)
+      [ $# -ge 2 ] || error "--ref requires a value"
+      REQUESTED_REF="$2"
+      shift 2
+      ;;
+    --ref=*)
+      REQUESTED_REF="${1#--ref=}"
+      shift
+      ;;
+    --sha)
+      [ $# -ge 2 ] || error "--sha requires a value"
+      REQUESTED_SHA="$2"
+      shift 2
+      ;;
+    --sha=*)
+      REQUESTED_SHA="${1#--sha=}"
+      shift
+      ;;
+    --help|-h)
+      print_usage
+      exit 0
+      ;;
+    *)
+      error "Unknown argument: $1"
+      ;;
+  esac
+done
+
+[ -n "$REQUESTED_REF" ] && [ -n "$REQUESTED_SHA" ] && error "Use only one of --ref or --sha"
+
+if [ -z "$VMSAN_INSTALL_BOOTSTRAPPED" ] && { [ -n "$REQUESTED_REF" ] || [ -n "$REQUESTED_SHA" ]; }; then
+  need_cmd curl
+  INSTALL_TARGET="${REQUESTED_SHA:-$REQUESTED_REF}"
+  RESOLVED_BOOTSTRAP_SHA="$(resolve_commit_sha "$INSTALL_TARGET")"
+  FORWARD_ARGS=()
+  [ "$UNINSTALL" -eq 1 ] && FORWARD_ARGS+=(--uninstall)
+  bootstrap_ref_installer "$RESOLVED_BOOTSTRAP_SHA" "${FORWARD_ARGS[@]}"
+  exit 0
+fi
+
+INSTALL_MODE="release"
+SOURCE_LABEL=""
+SOURCE_SHA=""
+if [ -n "$VMSAN_INSTALL_SOURCE_SHA" ]; then
+  INSTALL_MODE="source"
+  SOURCE_SHA="$VMSAN_INSTALL_SOURCE_SHA"
+  SOURCE_LABEL="${REQUESTED_REF:-${REQUESTED_SHA:-$SOURCE_SHA}}"
+fi
+
 # --- uninstall ---
 
-if [ "${1:-}" = "--uninstall" ]; then
+if [ "$UNINSTALL" -eq 1 ]; then
   echo ""
   echo "  vmsan uninstaller"
   echo ""
@@ -169,6 +272,52 @@ install_pkg() {
   fi
 }
 
+ensure_go() {
+  if command -v go >/dev/null 2>&1; then
+    return
+  fi
+
+  info "Go not found — installing Go toolchain..."
+  if command -v apt-get >/dev/null 2>&1; then
+    install_pkg golang-go
+  elif command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
+    install_pkg golang
+  else
+    error "Go is required in source install mode, but no supported package manager is available."
+  fi
+  success "Go $(go version | awk '{print $3}') installed"
+}
+
+ensure_node() {
+  if command -v node >/dev/null 2>&1; then
+    return
+  fi
+
+  if command -v apt-get >/dev/null 2>&1; then
+    info "Node.js not found — installing Node.js 22 via NodeSource..."
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    apt-get install -y -qq nodejs >/dev/null 2>&1
+  elif command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
+    info "Node.js not found — installing nodejs via the system package manager..."
+    install_pkg nodejs
+  else
+    error "Node.js is required, but no supported package manager is available."
+  fi
+
+  success "Node.js $(node --version) installed"
+}
+
+download_source_tree() {
+  local sha="$1"
+  local dest="$2"
+
+  rm -rf "$dest"
+  mkdir -p "$dest"
+  info "Fetching vmsan source at $sha..."
+  curl -fsSL "https://github.com/$VMSAN_REPO/archive/${sha}.tar.gz" \
+    | tar -xz --strip-components=1 -C "$dest"
+}
+
 MISSING_PKGS=()
 command -v unzip       >/dev/null 2>&1 || MISSING_PKGS+=(unzip)
 command -v unsquashfs  >/dev/null 2>&1 || MISSING_PKGS+=(squashfs-tools)
@@ -180,12 +329,7 @@ if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
   success "Prerequisites installed"
 fi
 
-if ! command -v node >/dev/null 2>&1; then
-  info "Node.js not found — installing Node.js 22 via NodeSource..."
-  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-  apt-get install -y -qq nodejs >/dev/null 2>&1
-  success "Node.js $(node --version) installed"
-fi
+ensure_node
 
 if [ ! -e /dev/kvm ]; then
   warn "/dev/kvm not found — Firecracker requires KVM. Make sure you're on a bare-metal host or a VM with nested virtualization."
@@ -279,26 +423,29 @@ else
   success "Rootfs installed ($ROOTFS_FILE, ${IMAGE_MB} MB)"
 fi
 
-# --- latest release tag ---
+# --- source / release selection ---
 
-info "Fetching latest release tag..."
-LATEST_TAG=$(curl -fsSL "https://api.github.com/repos/$VMSAN_REPO/releases" | grep -oP '"tag_name":\s*"\K[^"]+' | head -1)
-[ -n "$LATEST_TAG" ] || error "Could not determine latest release tag"
-success "Latest release: $LATEST_TAG"
+VMSAN_SRC="$VMSAN_DIR/src"
+LATEST_TAG=""
+
+if [ "$INSTALL_MODE" = "source" ]; then
+  info "Source install mode active (${SOURCE_LABEL})"
+  download_source_tree "$SOURCE_SHA" "$VMSAN_SRC"
+else
+  info "Fetching latest release tag..."
+  LATEST_TAG=$(curl -fsSL "https://api.github.com/repos/$VMSAN_REPO/releases" | grep -oP '"tag_name":\s*"\K[^"]+' | head -1)
+  [ -n "$LATEST_TAG" ] || error "Could not determine latest release tag"
+  success "Latest release: $LATEST_TAG"
+fi
 
 # --- vmsan CLI ---
 
-if [ -n "$VMSAN_REF" ]; then
-  info "Installing vmsan CLI from branch/ref: $VMSAN_REF..."
-  VMSAN_SRC="$VMSAN_DIR/src"
-  rm -rf "$VMSAN_SRC"
-  mkdir -p "$VMSAN_SRC"
-  curl -fsSL "https://github.com/$VMSAN_REPO/archive/refs/heads/${VMSAN_REF}.tar.gz" \
-    | tar -xz --strip-components=1 -C "$VMSAN_SRC"
+if [ "$INSTALL_MODE" = "source" ]; then
+  info "Installing vmsan CLI from source (${SOURCE_SHA})..."
   (cd "$VMSAN_SRC" && npm install --ignore-scripts && npx obuild)
   npm install -g "$VMSAN_SRC"
   VMSAN_VER=$(vmsan --version 2>/dev/null || echo "unknown")
-  success "vmsan CLI installed from $VMSAN_REF ($VMSAN_VER)"
+  success "vmsan CLI installed from ${SOURCE_LABEL} ($VMSAN_VER)"
 elif command -v vmsan >/dev/null 2>&1; then
   VMSAN_VER=$(vmsan --version 2>/dev/null || echo "unknown")
   success "vmsan CLI already installed ($VMSAN_VER)"
@@ -313,7 +460,13 @@ fi
 
 AGENT_PATH="$VMSAN_DIR/bin/vmsan-agent"
 
-if [ -x "$AGENT_PATH" ]; then
+if [ "$INSTALL_MODE" = "source" ]; then
+  ensure_go
+  info "Building vmsan-agent from source (${SOURCE_SHA})..."
+  (cd "$VMSAN_SRC/agent" && CGO_ENABLED=0 GOOS=linux GOARCH="$(go_arch)" go build -ldflags="-s -w" -o "$AGENT_PATH" .)
+  chmod +x "$AGENT_PATH"
+  success "vmsan-agent built from ${SOURCE_LABEL}"
+elif [ -x "$AGENT_PATH" ]; then
   success "vmsan-agent already installed"
 else
   AGENT_URL="https://github.com/$VMSAN_REPO/releases/download/${LATEST_TAG}/vmsan-agent-${ARCH}"
@@ -406,14 +559,57 @@ fi
 
 # --- runtime images ---
 
+RUNTIME_RECIPE_VERSION="2"
+
+runtime_metadata_path() {
+  local name="$1"
+  echo "$VMSAN_DIR/rootfs/${name}.meta"
+}
+
+runtime_metadata_matches() {
+  local name="$1"
+  local base_image="$2"
+  local meta
+  meta="$(runtime_metadata_path "$name")"
+
+  [ -f "$meta" ] || return 1
+
+  local recipe_version
+  local recorded_base_image
+  recipe_version="$(sed -n 's/^recipe_version=//p' "$meta" | head -n1)"
+  recorded_base_image="$(sed -n 's/^base_image=//p' "$meta" | head -n1)"
+
+  [ "$recipe_version" = "$RUNTIME_RECIPE_VERSION" ] && [ "$recorded_base_image" = "$base_image" ]
+}
+
+write_runtime_metadata() {
+  local name="$1"
+  local base_image="$2"
+  local meta
+  meta="$(runtime_metadata_path "$name")"
+
+  cat > "$meta" <<EOF
+recipe_version=$RUNTIME_RECIPE_VERSION
+base_image=$base_image
+built_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+EOF
+}
+
 build_runtime() {
   local name="$1"
   local base_image="$2"
   local dest="$VMSAN_DIR/rootfs/${name}.ext4"
+  local meta
+  meta="$(runtime_metadata_path "$name")"
 
-  if [ -f "$dest" ]; then
+  if [ -f "$dest" ] && runtime_metadata_matches "$name" "$base_image"; then
     success "Runtime ${name} already built"
     return
+  fi
+
+  if [ -f "$dest" ]; then
+    info "Rebuilding runtime ${name} to refresh the runtime recipe..."
+    rm -f "$dest" "$meta"
   fi
 
   need_cmd docker
@@ -506,6 +702,8 @@ DEOF
   tar -xf "$build_dir/rootfs.tar" -C "$mnt_dir"
   umount "$mnt_dir"
 
+  write_runtime_metadata "$name" "$base_image"
+
   success "Runtime ${name} built (${image_mb} MB)"
 }
 
@@ -516,6 +714,21 @@ if command -v docker >/dev/null 2>&1; then
 else
   warn "Docker not found — skipping runtime image builds. Install Docker and re-run to build runtime images."
 fi
+
+# --- install metadata ---
+
+INSTALL_METADATA="$VMSAN_DIR/install.meta"
+cat > "$INSTALL_METADATA" <<EOF
+mode=$INSTALL_MODE
+requested_ref=$REQUESTED_REF
+requested_sha=$REQUESTED_SHA
+resolved_sha=$SOURCE_SHA
+source_label=$SOURCE_LABEL
+latest_release=$LATEST_TAG
+cli_version=$VMSAN_VER
+runtime_recipe_version=$RUNTIME_RECIPE_VERSION
+installed_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+EOF
 
 # --- summary ---
 
@@ -541,6 +754,12 @@ echo "  Runtimes     $RUNTIME_STATUS"
 echo "  Agent        $AGENT_PATH"
 echo "  cloudflared  $CLOUDFLARED_PATH ($CF_STATUS)"
 echo "  CLI          $(command -v vmsan 2>/dev/null || echo 'vmsan (npm global)')"
+if [ "$INSTALL_MODE" = "source" ]; then
+  echo "  Source       $SOURCE_SHA ($SOURCE_LABEL)"
+else
+  echo "  Release      ${LATEST_TAG:-unknown}"
+fi
+echo "  Metadata     $INSTALL_METADATA"
 echo ""
 if [ "$CF_STATUS" = "configured" ]; then
   echo "  Tunnel mode active — VMs exposed via Cloudflare (no DNAT)."

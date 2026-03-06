@@ -7,7 +7,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -42,6 +44,29 @@ type ndjsonEvent struct {
 
 func now() string {
 	return time.Now().UTC().Format(time.RFC3339Nano)
+}
+
+func findEnvBinary() string {
+	for _, candidate := range []string{"/usr/bin/env", "/bin/env"} {
+		info, err := os.Stat(candidate)
+		if err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func buildCommand(name string, args []string) *exec.Cmd {
+	if strings.ContainsRune(name, os.PathSeparator) {
+		return exec.Command(name, args...)
+	}
+
+	if envBinary := findEnvBinary(); envBinary != "" {
+		envArgs := append([]string{"--", name}, args...)
+		return exec.Command(envBinary, envArgs...)
+	}
+
+	return exec.Command(name, args...)
 }
 
 func writeEvent(w io.Writer, mu *sync.Mutex, evt ndjsonEvent) {
@@ -93,7 +118,7 @@ func handleRun(w http.ResponseWriter, r *http.Request, logger *slog.Logger, defa
 
 	start := time.Now()
 
-	cmd := exec.Command(req.Cmd, req.Args...)
+	cmd := buildCommand(req.Cmd, req.Args)
 	if req.Cwd != "" {
 		cmd.Dir = req.Cwd
 	}
