@@ -5,7 +5,6 @@
 export function generateAgentService(): string {
   return `[Unit]
 Description=Vmsan VM Agent
-After=network.target
 
 [Service]
 Type=simple
