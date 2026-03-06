@@ -177,10 +177,7 @@ bootstrap_ref_installer() {
   local resolved_sha="$1"
   shift
   local script_tmp
-  local script_tmp_quoted
   script_tmp="$(mktemp)"
-  script_tmp_quoted="$(printf '%q' "$script_tmp")"
-  trap "rm -f -- $script_tmp_quoted" EXIT
 
   download "https://raw.githubusercontent.com/$VMSAN_REPO/$resolved_sha/install.sh" "$script_tmp"
   chmod +x "$script_tmp"
@@ -192,7 +189,14 @@ bootstrap_ref_installer() {
     "VMSAN_INSTALL_REQUESTED_REF=$REQUESTED_REF"
     "VMSAN_INSTALL_REQUESTED_SHA=$REQUESTED_SHA"
   )
-  env "${env_args[@]}" bash "$script_tmp" "$@"
+  local status
+  if env "${env_args[@]}" bash "$script_tmp" "$@"; then
+    status=0
+  else
+    status=$?
+  fi
+  rm -f -- "$script_tmp"
+  return "$status"
 }
 
 while [ $# -gt 0 ]; do
