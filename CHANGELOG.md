@@ -1,5 +1,15 @@
 # vmsan
 
+## 0.1.0-alpha.25
+
+### Patch Changes
+
+- [#36](https://github.com/angelorc/vmsan/pull/36) [`b9a5d9c`](https://github.com/angelorc/vmsan/commit/b9a5d9c595301e07419cefb9af6a355fe4ca686b) Thanks [@angelorc](https://github.com/angelorc)! - Improve runtime VM usability and the release lifecycle.
+
+  - fix PATH handling for agent exec and PTY shells so Node/npm and user-global installs work reliably inside runtime VMs
+  - improve source installs in `install.sh` with branch/commit bootstrap support and modern Go enforcement
+  - switch the project to a real Changesets workflow with authored changesets, release PRs, and npm/agent publishing from reviewed version commits
+
 ## 0.1.0
 
 ### Patch Changes
