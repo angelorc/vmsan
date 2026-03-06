@@ -189,14 +189,10 @@ bootstrap_ref_installer() {
     "VMSAN_INSTALL_REQUESTED_REF=$REQUESTED_REF"
     "VMSAN_INSTALL_REQUESTED_SHA=$REQUESTED_SHA"
   )
-  local status
-  if env "${env_args[@]}" bash "$script_tmp" "$@"; then
-    status=0
-  else
-    status=$?
-  fi
+
+  exec 3<"$script_tmp"
   rm -f -- "$script_tmp"
-  return "$status"
+  exec env "${env_args[@]}" bash -s -- "$@" <&3
 }
 
 while [ $# -gt 0 ]; do
