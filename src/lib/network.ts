@@ -265,10 +265,30 @@ export class NetworkManager {
     const { tapDevice, hostIp, guestIp, publishedPorts } = this.config;
     const policy = effectivePolicy(this.config);
     const vmAddressBlock = vmAddressBlockCidrFromIp(hostIp);
+    const vethGuest = this.config.netnsName ? `veth-g-${this.config.slot}` : undefined;
     // FORWARD/filtering rules go inside netns when enabled; NAT/DNAT stay on host
     const fwd = this.nsRun.bind(this);
 
     if (policy === "deny-all") {
+      if (vethGuest) {
+        // Host-originated traffic to the guest must not depend on the namespace
+        // FORWARD default policy. This keeps agent/PTy/tunnel access consistent
+        // across hosts with different iptables defaults.
+        fwd([
+          "iptables",
+          "-I",
+          "FORWARD",
+          "1",
+          "-i",
+          vethGuest,
+          "-o",
+          tapDevice,
+          "-d",
+          guestIp,
+          "-j",
+          "ACCEPT",
+        ]);
+      }
       fwd(["iptables", "-I", "FORWARD", "-i", tapDevice, "-j", "DROP"]);
       fwd(["iptables", "-I", "FORWARD", "-o", tapDevice, "-j", "DROP"]);
       return;
@@ -639,6 +659,25 @@ export class NetworkManager {
         ]);
       }
     }
+
+    if (vethGuest) {
+      // Explicitly allow host namespace -> guest namespace traffic. Without
+      // this, agent reachability depends on the netns FORWARD default policy.
+      fwd([
+        "iptables",
+        "-I",
+        "FORWARD",
+        "1",
+        "-i",
+        vethGuest,
+        "-o",
+        tapDevice,
+        "-d",
+        guestIp,
+        "-j",
+        "ACCEPT",
+      ]);
+    }
   }
 
   setupThrottle(): void {
@@ -675,6 +714,7 @@ export class NetworkManager {
   teardownRules(): void {
     const { tapDevice, hostIp, guestIp, publishedPorts, netnsName } = this.config;
     const vmAddressBlock = vmAddressBlockCidrFromIp(hostIp);
+    const vethGuest = netnsName ? `veth-g-${this.config.slot}` : undefined;
 
     let defaultIface: string | undefined;
     try {
@@ -887,6 +927,22 @@ export class NetworkManager {
       ]);
       tryFwd(["iptables", "-D", "FORWARD", "-i", tapDevice, "-j", "DROP"]);
       tryFwd(["iptables", "-D", "FORWARD", "-o", tapDevice, "-j", "DROP"]);
+    }
+
+    if (vethGuest) {
+      tryFwd([
+        "iptables",
+        "-D",
+        "FORWARD",
+        "-i",
+        vethGuest,
+        "-o",
+        tapDevice,
+        "-d",
+        guestIp,
+        "-j",
+        "ACCEPT",
+      ]);
     }
 
     // Remove host-side veth FORWARD rules (netns mode)
