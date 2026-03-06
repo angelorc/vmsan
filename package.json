@@ -33,6 +33,7 @@
     "fmt:check": "oxfmt --check '!**/*.md' '!docs/**' .",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit",
+    "publish:runtimes:r2": "node scripts/publish-runtimes-r2.mjs",
     "prepack": "bun run build",
     "automd": "automd",
     "changeset": "changeset",
