@@ -4,7 +4,7 @@ import { lockSync, lock, type LockOptions } from "proper-lockfile";
 import { lockTimeoutError } from "../errors/index.ts";
 import { sleepSync } from "./utils.ts";
 
-const STALE_MS = 300_000;
+const STALE_MS = Number(process.env.VMSAN_LOCK_STALE_MS ?? "30000");
 const RETRY_MS = 50;
 const MAX_RETRIES = 600;
 
