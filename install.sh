@@ -552,15 +552,8 @@ else
   IMAGE_MB=$(( EXTRACTED_MB + 512 ))
   [ "$IMAGE_MB" -lt 1024 ] && IMAGE_MB=1024
 
-  dd if=/dev/zero of="$ROOTFS_PATH" bs=1M count="$IMAGE_MB" status=none
-  mkfs.ext4 -q "$ROOTFS_PATH"
+  mkfs.ext4 -q -d "$SQUASHFS_TMP/rootfs" "$ROOTFS_PATH" "${IMAGE_MB}M"
   tune2fs -m 0 "$ROOTFS_PATH" >/dev/null 2>&1
-
-  MOUNT_TMP=$(mktemp -d)
-  mount -o loop "$ROOTFS_PATH" "$MOUNT_TMP"
-  cp -a "$SQUASHFS_TMP/rootfs/." "$MOUNT_TMP/"
-  umount "$MOUNT_TMP"
-  rmdir "$MOUNT_TMP"
 
   rm -rf "$SQUASHFS_TMP"
   trap - EXIT
@@ -762,10 +755,9 @@ build_runtime() {
 
   local build_dir
   build_dir=$(mktemp -d)
-  local mnt_dir="$build_dir/mnt"
   local build_tag="vmsan-rootfs-${name}:latest"
   local container_name="vmsan-export-${name}-$$"
-  trap 'trap - RETURN; grep -qs " $mnt_dir " /proc/mounts && umount "$mnt_dir" >/dev/null 2>&1 || true; docker rm -f "$container_name" >/dev/null 2>&1 || true; rm -rf "$build_dir"' RETURN
+  trap 'trap - RETURN; docker rm -f "$container_name" >/dev/null 2>&1 || true; rm -rf "$build_dir"' RETURN
 
   # Detect package manager and install appropriate packages
   cat > "$build_dir/Dockerfile" <<'DEOF'
@@ -840,14 +832,12 @@ DEOF
   local image_mb=$(( tar_mb + 512 ))
   [ "$image_mb" -lt 1024 ] && image_mb=1024
 
-  dd if=/dev/zero of="$dest" bs=1M count="$image_mb" status=none
-  mkfs.ext4 -q "$dest"
-  tune2fs -m 0 "$dest" >/dev/null 2>&1
+  local tar_extract_dir="$build_dir/rootfs-extracted"
+  mkdir -p "$tar_extract_dir"
+  tar -xf "$build_dir/rootfs.tar" -C "$tar_extract_dir"
 
-  mkdir -p "$mnt_dir"
-  mount -o loop "$dest" "$mnt_dir"
-  tar -xf "$build_dir/rootfs.tar" -C "$mnt_dir"
-  umount "$mnt_dir"
+  mkfs.ext4 -q -d "$tar_extract_dir" "$dest" "${image_mb}M"
+  tune2fs -m 0 "$dest" >/dev/null 2>&1
 
   write_runtime_metadata "$name" "$base_image"
 

@@ -163,22 +163,15 @@ function buildImageRootfs(imageRef: ImageReference, cacheDir: string, minimal = 
     const tarMb = tarBytes / 1024 / 1024;
     const imageSizeMb = Math.max(1024, Math.ceil(tarMb + 512));
 
-    execSync(`dd if=/dev/zero of="${ext4Path}" bs=1M count=${imageSizeMb} 2>/dev/null`, {
+    const tmpExtract = join(cacheDir, "rootfs-extracted");
+    mkdirSync(tmpExtract, { recursive: true });
+    execSync(`tar -xf "${tmpTar}" -C "${tmpExtract}"`, { stdio: "pipe" });
+
+    execSync(`mkfs.ext4 -q -d "${tmpExtract}" "${ext4Path}" "${imageSizeMb}M"`, {
       stdio: "pipe",
     });
-    execSync(`mkfs.ext4 -q "${ext4Path}"`, { stdio: "pipe" });
     execSync(`tune2fs -m 0 "${ext4Path}"`, { stdio: "pipe" });
-
-    const tmpMount = join(cacheDir, "mnt");
-    mkdirSync(tmpMount, { recursive: true });
-    execSync(`mount -o loop "${ext4Path}" "${tmpMount}"`, { stdio: "pipe" });
-
-    try {
-      execSync(`tar -xf "${tmpTar}" -C "${tmpMount}"`, { stdio: "pipe" });
-    } finally {
-      execSync(`umount "${tmpMount}"`, { stdio: "pipe" });
-      execSync(`rm -rf "${tmpMount}"`, { stdio: "pipe" });
-    }
+    execSync(`rm -rf "${tmpExtract}"`, { stdio: "pipe" });
 
     writeFileSync(
       join(cacheDir, "metadata.json"),
