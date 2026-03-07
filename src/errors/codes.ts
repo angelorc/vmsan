@@ -33,7 +33,8 @@ export type SetupErrorCode =
   | "ERR_SETUP_NO_KERNEL_DIR"
   | "ERR_SETUP_NO_KERNEL"
   | "ERR_SETUP_NO_ROOTFS_DIR"
-  | "ERR_SETUP_NO_EXT4_ROOTFS";
+  | "ERR_SETUP_NO_EXT4_ROOTFS"
+  | "ERR_SETUP_KVM_UNAVAILABLE";
 
 export type CloudflareErrorCode =
   | "ERR_CLOUDFLARE_NOT_CONFIGURED"

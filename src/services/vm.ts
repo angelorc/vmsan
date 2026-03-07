@@ -3,7 +3,7 @@ import { existsSync, rmSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import type { VmsanContext } from "../context.ts";
 import type { VmState, VmStateStore } from "../lib/vm-state.ts";
-import { NetworkManager, type NetworkConfig } from "../lib/network.ts";
+import { NetworkManager, verifyCleanup, type NetworkConfig } from "../lib/network.ts";
 import { FileLock } from "../lib/file-lock.ts";
 import { FirecrackerClient } from "./firecracker.ts";
 import { Jailer, type CgroupConfig, CGROUP_VMM_OVERHEAD_MIB } from "../lib/jailer.ts";
@@ -656,6 +656,11 @@ export class VMService {
           this.logger.debug(`Network teardown failed for VM ${vmId}: ${toError(err).message}`);
         }
 
+        const leaks = verifyCleanup(state.network);
+        for (const leak of leaks) {
+          this.logger.warn(`[${vmId}] cleanup leak: ${leak}`);
+        }
+
         // Hook: network:afterTeardown
         await this.hooks.callHook("network:afterTeardown", {
           vmId,
@@ -780,6 +785,14 @@ export class VMService {
         const stopResult = await this.stop(vmId);
         if (!stopResult.success) {
           return stopResult;
+        }
+      }
+
+      // Verify network cleanup
+      if (state.network) {
+        const leaks = verifyCleanup(state.network);
+        for (const leak of leaks) {
+          this.logger.warn(`[${vmId}] cleanup leak: ${leak}`);
         }
       }
 

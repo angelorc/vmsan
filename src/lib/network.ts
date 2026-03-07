@@ -6,6 +6,7 @@ import { toError } from "./utils.ts";
 import type { VmNetwork } from "./vm-state.ts";
 import {
   slotFromVmHostIp,
+  slotFromVmHostIpOrNull,
   vmGuestIp,
   vmHostIp,
   vmLinkCidrFromIp,
@@ -1071,4 +1072,22 @@ export class NetworkManager {
       throw err;
     }
   }
+}
+
+export function verifyCleanup(network: VmNetwork): string[] {
+  const leaks: string[] = [];
+  if (existsSync(`/sys/class/net/${network.tapDevice}`)) {
+    leaks.push(`TAP device ${network.tapDevice} still exists`);
+  }
+  if (network.netnsName && existsSync(`/var/run/netns/${network.netnsName}`)) {
+    leaks.push(`Namespace ${network.netnsName} still exists`);
+  }
+  const slot = slotFromVmHostIpOrNull(network.hostIp);
+  if (slot !== null && network.netnsName) {
+    const vethHost = `veth-h-${slot}`;
+    if (existsSync(`/sys/class/net/${vethHost}`)) {
+      leaks.push(`Veth ${vethHost} still exists`);
+    }
+  }
+  return leaks;
 }

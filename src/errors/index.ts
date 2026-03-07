@@ -60,6 +60,7 @@ export {
   noKernelError,
   noRootfsDirError,
   noExt4RootfsError,
+  kvmUnavailableError,
 } from "./setup.ts";
 
 export { handleCommandError } from "./display.ts";
