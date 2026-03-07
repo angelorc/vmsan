@@ -1079,11 +1079,14 @@ export function verifyCleanup(network: VmNetwork): string[] {
   if (existsSync(`/sys/class/net/${network.tapDevice}`)) {
     leaks.push(`TAP device ${network.tapDevice} still exists`);
   }
-  if (network.netnsName && existsSync(`/var/run/netns/${network.netnsName}`)) {
+  const nsExists = network.netnsName && existsSync(`/var/run/netns/${network.netnsName}`);
+  if (nsExists) {
     leaks.push(`Namespace ${network.netnsName} still exists`);
   }
+  // Only check veth if namespace still exists — when the namespace is deleted,
+  // the kernel auto-destroys the veth pair asynchronously
   const slot = slotFromVmHostIpOrNull(network.hostIp);
-  if (slot !== null && network.netnsName) {
+  if (slot !== null && nsExists) {
     const vethHost = `veth-h-${slot}`;
     if (existsSync(`/sys/class/net/${vethHost}`)) {
       leaks.push(`Veth ${vethHost} still exists`);
