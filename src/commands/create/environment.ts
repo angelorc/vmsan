@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync, readdirSync } from "node:fs";
 import { connect } from "node:net";
 import { join } from "node:path";
 import type { VmsanPaths } from "../../paths.ts";
@@ -10,6 +10,7 @@ import {
   noRootfsDirError,
   noExt4RootfsError,
   snapshotNotFoundError,
+  kvmUnavailableError,
 } from "../../errors/index.ts";
 import { socketTimeoutError, SetupError } from "../../errors/index.ts";
 
@@ -22,6 +23,12 @@ export function validateEnvironment(baseDir: string): void {
   }
   if (!existsSync(jailerPath)) {
     throw missingBinaryError("Jailer", jailerPath);
+  }
+
+  try {
+    accessSync("/dev/kvm", constants.R_OK | constants.W_OK);
+  } catch {
+    throw kvmUnavailableError();
   }
 }
 

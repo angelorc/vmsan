@@ -39,3 +39,9 @@ export const noExt4RootfsError = (): SetupError =>
     message: "No ext4 rootfs found in ~/.vmsan/rootfs/.",
     fix: INSTALL_FIX,
   });
+
+export const kvmUnavailableError = (): SetupError =>
+  new SetupError("ERR_SETUP_KVM_UNAVAILABLE", {
+    message: "/dev/kvm is not accessible — KVM virtualization is required.",
+    fix: "Ensure you're running on a KVM-capable host. Check: (1) CPU supports virtualization (grep -c vmx /proc/cpuinfo), (2) KVM module loaded (lsmod | grep kvm), (3) /dev/kvm is accessible",
+  });
