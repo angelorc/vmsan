@@ -20,7 +20,7 @@ export const createCommandArgs = {
   "from-image": {
     type: "string",
     description:
-      "Build rootfs from a Docker/OCI image (e.g. ubuntu:latest). Agent is not installed; connect, exec, upload/download unavailable.",
+      "Build rootfs from a Docker/OCI image (e.g. ubuntu:latest). Requires Docker. Agent is not installed; connect, exec, upload/download unavailable.",
   },
   runtime: {
     type: "string",
@@ -40,7 +40,7 @@ export const createCommandArgs = {
   },
   timeout: {
     type: "string",
-    description: "Auto-shutdown timeout (e.g. 1h, 30m, 2h30m)",
+    description: "Auto-shutdown timeout (e.g. 30s, 5m, 1h, 2h30m)",
   },
   "publish-port": {
     type: "string",
