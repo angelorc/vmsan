@@ -39,4 +39,4 @@ coverage/
 .env.*
 !.env.example
 
-TEST_REPORT.md
+.internal
