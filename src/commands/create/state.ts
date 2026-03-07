@@ -1,4 +1,4 @@
-import type { VmState } from "../../lib/vm-state.ts";
+import { CURRENT_STATE_VERSION, type VmState } from "../../lib/vm-state.ts";
 import type { InitialVmStateInput } from "./types.ts";
 
 export function buildInitialVmState(input: InitialVmStateInput): VmState {
@@ -41,5 +41,6 @@ export function buildInitialVmState(input: InitialVmStateInput): VmState {
     error: null,
     agentToken: input.agentToken,
     agentPort: input.agentPort,
+    stateVersion: CURRENT_STATE_VERSION,
   };
 }

@@ -1,8 +1,11 @@
 import { existsSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+import consola from "consola";
 import { vmStateNotFoundError, networkSlotsExhaustedError } from "../errors/index.ts";
 import { slotFromVmHostIpOrNull } from "./network-address.ts";
 import { mkdirSecure, writeSecure } from "./utils.ts";
+
+export const CURRENT_STATE_VERSION = 1;
 
 export interface VmNetwork {
   tapDevice: string;
@@ -43,6 +46,7 @@ export interface VmState {
   error: string | null;
   agentToken: string | null;
   agentPort: number;
+  stateVersion: number;
 }
 
 export interface VmStateStore {
@@ -83,19 +87,29 @@ export class FileVmStateStore implements VmStateStore {
 
   save(state: VmState): void {
     this.ensureDir();
+    state.stateVersion = CURRENT_STATE_VERSION;
     writeSecure(join(this.dir, `${state.id}.json`), JSON.stringify(state, null, 2));
   }
 
   load(id: string): VmState | null {
     const filePath = join(this.dir, `${id}.json`);
     if (!existsSync(filePath)) return null;
-    return JSON.parse(readFileSync(filePath, "utf-8")) as VmState;
+    const state = JSON.parse(readFileSync(filePath, "utf-8")) as VmState;
+    if (!state.stateVersion) {
+      consola.debug(`Migrated state file for VM ${id} from v0 to v1`);
+      state.stateVersion = CURRENT_STATE_VERSION;
+      this.save(state);
+    }
+    return state;
   }
 
   list(): VmState[] {
     this.ensureDir();
     const files = readdirSync(this.dir).filter((f) => f.endsWith(".json"));
-    return files.map((f) => JSON.parse(readFileSync(join(this.dir, f), "utf-8")) as VmState);
+    return files.map((f) => {
+      const id = f.replace(/\.json$/, "");
+      return this.load(id)!;
+    });
   }
 
   update(id: string, updates: Partial<VmState>): void {

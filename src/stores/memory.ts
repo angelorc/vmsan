@@ -1,10 +1,16 @@
-import { findFreeNetworkSlot, type VmState, type VmStateStore } from "../lib/vm-state.ts";
+import {
+  CURRENT_STATE_VERSION,
+  findFreeNetworkSlot,
+  type VmState,
+  type VmStateStore,
+} from "../lib/vm-state.ts";
 import { vmStateNotFoundError } from "../errors/index.ts";
 
 export class MemoryVmStateStore implements VmStateStore {
   private states = new Map<string, VmState>();
 
   save(state: VmState): void {
+    state.stateVersion = CURRENT_STATE_VERSION;
     this.states.set(state.id, structuredClone(state));
   }
 
