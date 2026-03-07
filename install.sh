@@ -451,6 +451,17 @@ ensure_node() {
   success "Node.js $(node --version) installed"
 }
 
+ensure_docker() {
+  if command -v docker >/dev/null 2>&1; then
+    return
+  fi
+
+  info "Docker not found — installing Docker via get.docker.com..."
+  curl -fsSL https://get.docker.com | sh
+  command -v docker >/dev/null 2>&1 || error "Docker installation failed"
+  success "Docker $(docker --version | awk '{print $3}' | tr -d ',') installed"
+}
+
 download_source_tree() {
   local sha="$1"
   local dest="$2"
@@ -844,13 +855,10 @@ DEOF
   success "Runtime ${name} built (${image_mb} MB)"
 }
 
-if command -v docker >/dev/null 2>&1; then
-  build_runtime "node22" "node:22"
-  build_runtime "node24" "node:24"
-  build_runtime "python3.13" "python:3.13-slim"
-else
-  warn "Docker not found — skipping runtime image builds. Install Docker and re-run to build runtime images."
-fi
+ensure_docker
+build_runtime "node22" "node:22"
+build_runtime "node24" "node:24"
+build_runtime "python3.13" "python:3.13-slim"
 
 # --- install metadata ---
 
