@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ImageReference } from "./validation.ts";
 import { dockerUnavailableError } from "./docker-errors.ts";
+import { toError } from "../../lib/utils.ts";
 
 const APT_PACKAGES = [
   "bind9-utils",
@@ -171,7 +172,6 @@ function buildImageRootfs(imageRef: ImageReference, cacheDir: string, minimal = 
       stdio: "pipe",
     });
     execSync(`tune2fs -m 0 "${ext4Path}"`, { stdio: "pipe" });
-    execSync(`rm -rf "${tmpExtract}"`, { stdio: "pipe" });
 
     writeFileSync(
       join(cacheDir, "metadata.json"),
@@ -183,13 +183,18 @@ function buildImageRootfs(imageRef: ImageReference, cacheDir: string, minimal = 
   } finally {
     try {
       execSync(`docker rm -f "${containerName}" 2>/dev/null`, { stdio: "pipe" });
-    } catch {
-      // Container may already be removed
+    } catch (err) {
+      consola.debug(`Failed to remove docker container ${containerName}: ${toError(err).message}`);
     }
     try {
       execSync(`rm -f "${tmpTar}"`, { stdio: "pipe" });
-    } catch {
-      // Temp file may already be cleaned
+    } catch (err) {
+      consola.debug(`Failed to remove temp tar ${tmpTar}: ${toError(err).message}`);
+    }
+    try {
+      execSync(`rm -rf "${join(cacheDir, "rootfs-extracted")}"`, { stdio: "pipe" });
+    } catch (err) {
+      consola.debug(`Failed to remove extraction dir: ${toError(err).message}`);
     }
   }
 }
