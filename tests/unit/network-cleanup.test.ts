@@ -61,14 +61,28 @@ describe("verifyCleanup", () => {
     expect(leaks).toContain("Namespace vmsan-test still exists");
   });
 
-  test("detects orphaned veth host device", () => {
+  test("detects orphaned veth when namespace also still exists", () => {
     vi.mocked(existsSync).mockImplementation((p) => {
+      const s = String(p);
+      if (s === "/var/run/netns/vmsan-test") return true;
+      if (s === "/sys/class/net/veth-h-0") return true;
+      return false;
+    });
+
+    const leaks = verifyCleanup(makeNetwork());
+    expect(leaks).toContain("Namespace vmsan-test still exists");
+    expect(leaks).toContain("Veth veth-h-0 still exists");
+  });
+
+  test("skips veth check when namespace is already gone (kernel auto-cleans)", () => {
+    vi.mocked(existsSync).mockImplementation((p) => {
+      // Namespace gone, but veth-h still briefly visible (kernel race)
       if (String(p) === "/sys/class/net/veth-h-0") return true;
       return false;
     });
 
     const leaks = verifyCleanup(makeNetwork());
-    expect(leaks).toContain("Veth veth-h-0 still exists");
+    expect(leaks).not.toContainEqual(expect.stringContaining("Veth"));
   });
 
   test("skips veth check when netnsName is absent", () => {
