@@ -1,5 +1,11 @@
 # vmsan
 
+## 0.1.0-alpha.27
+
+### Patch Changes
+
+- [#44](https://github.com/angelorc/vmsan/pull/44) [`725924c`](https://github.com/angelorc/vmsan/commit/725924c0eb05ac09649a1dfd593258c9ba0f719d) Thanks [@angelorc](https://github.com/angelorc)! - Fix install failure on systems without loop devices by replacing `mount -o loop` with `mkfs.ext4 -d` for rootfs creation, and auto-install Docker when not found instead of skipping runtime builds.
+
 ## 0.1.0-alpha.26
 
 ### Patch Changes
