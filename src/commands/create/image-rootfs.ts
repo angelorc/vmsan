@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ImageReference } from "./validation.ts";
 import { dockerUnavailableError } from "./docker-errors.ts";
+import { toError } from "../../lib/utils.ts";
 
 const APT_PACKAGES = [
   "bind9-utils",
@@ -163,22 +164,14 @@ function buildImageRootfs(imageRef: ImageReference, cacheDir: string, minimal = 
     const tarMb = tarBytes / 1024 / 1024;
     const imageSizeMb = Math.max(1024, Math.ceil(tarMb + 512));
 
-    execSync(`dd if=/dev/zero of="${ext4Path}" bs=1M count=${imageSizeMb} 2>/dev/null`, {
+    const tmpExtract = join(cacheDir, "rootfs-extracted");
+    mkdirSync(tmpExtract, { recursive: true });
+    execSync(`tar -xf "${tmpTar}" -C "${tmpExtract}"`, { stdio: "pipe" });
+
+    execSync(`mkfs.ext4 -q -d "${tmpExtract}" "${ext4Path}" "${imageSizeMb}M"`, {
       stdio: "pipe",
     });
-    execSync(`mkfs.ext4 -q "${ext4Path}"`, { stdio: "pipe" });
     execSync(`tune2fs -m 0 "${ext4Path}"`, { stdio: "pipe" });
-
-    const tmpMount = join(cacheDir, "mnt");
-    mkdirSync(tmpMount, { recursive: true });
-    execSync(`mount -o loop "${ext4Path}" "${tmpMount}"`, { stdio: "pipe" });
-
-    try {
-      execSync(`tar -xf "${tmpTar}" -C "${tmpMount}"`, { stdio: "pipe" });
-    } finally {
-      execSync(`umount "${tmpMount}"`, { stdio: "pipe" });
-      execSync(`rm -rf "${tmpMount}"`, { stdio: "pipe" });
-    }
 
     writeFileSync(
       join(cacheDir, "metadata.json"),
@@ -190,13 +183,18 @@ function buildImageRootfs(imageRef: ImageReference, cacheDir: string, minimal = 
   } finally {
     try {
       execSync(`docker rm -f "${containerName}" 2>/dev/null`, { stdio: "pipe" });
-    } catch {
-      // Container may already be removed
+    } catch (err) {
+      consola.debug(`Failed to remove docker container ${containerName}: ${toError(err).message}`);
     }
     try {
       execSync(`rm -f "${tmpTar}"`, { stdio: "pipe" });
-    } catch {
-      // Temp file may already be cleaned
+    } catch (err) {
+      consola.debug(`Failed to remove temp tar ${tmpTar}: ${toError(err).message}`);
+    }
+    try {
+      execSync(`rm -rf "${join(cacheDir, "rootfs-extracted")}"`, { stdio: "pipe" });
+    } catch (err) {
+      consola.debug(`Failed to remove extraction dir: ${toError(err).message}`);
     }
   }
 }
