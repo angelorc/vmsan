@@ -1,12 +1,16 @@
 {
   "mode": "pre",
-  "tag": "alpha",
+  "tag": "beta",
   "initialVersions": {
-    "vmsan": "0.1.0-alpha.24"
+    "vmsan": "0.1.0-alpha.27"
   },
   "changesets": [
+    "cli-help-audit",
     "fix-loop-device-install",
+    "kvm-preflight-cleanup",
     "late-pianos-help",
-    "tidy-chairs-juggle"
+    "state-versioning",
+    "tidy-chairs-juggle",
+    "unit-tests-slot-hardening"
   ]
 }
