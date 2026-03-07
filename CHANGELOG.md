@@ -1,5 +1,19 @@
 # vmsan
 
+## 0.1.0-alpha.28
+
+### Minor Changes
+
+- [#47](https://github.com/angelorc/vmsan/pull/47) [`bfc12a7`](https://github.com/angelorc/vmsan/commit/bfc12a795ff2c4024b60a2df624c140e86c3806a) Thanks [@angelorc](https://github.com/angelorc)! - Add KVM pre-flight check to `vmsan create` and cleanup verification after `vmsan stop`/`vmsan remove`
+
+- [#46](https://github.com/angelorc/vmsan/pull/46) [`913e721`](https://github.com/angelorc/vmsan/commit/913e72150acbb449ba8be345f580f78fd11c563f) Thanks [@angelorc](https://github.com/angelorc)! - Add state file versioning to VM state store for future migration support
+
+### Patch Changes
+
+- [#48](https://github.com/angelorc/vmsan/pull/48) [`c824d44`](https://github.com/angelorc/vmsan/commit/c824d44c7961808ec08c965cfa87f94a5fb164c6) Thanks [@angelorc](https://github.com/angelorc)! - Audit and fix CLI help text for all commands
+
+- [#49](https://github.com/angelorc/vmsan/pull/49) [`cab910a`](https://github.com/angelorc/vmsan/commit/cab910a2a07f374892362af4f227e1c8d9d2f245) Thanks [@angelorc](https://github.com/angelorc)! - Add comprehensive unit test suite and reduce stale lock timeout from 5m to 30s
+
 ## 0.1.0-alpha.27
 
 ### Patch Changes
