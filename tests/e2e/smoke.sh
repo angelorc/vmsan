@@ -70,7 +70,7 @@ if out=$(vmsan create --runtime base --vcpus 1 --memory 256 --json 2>&1); then
   if [ -n "$VM_ID" ]; then
     VM_IDS+=("$VM_ID")
     if vmsan upload "$VM_ID" /tmp/vmsan-test-upload.txt 2>&1; then
-      if vmsan exec "$VM_ID" cat /root/vmsan-test-upload.txt 2>/dev/null | grep -q "test-content"; then
+      if vmsan exec "$VM_ID" --sudo cat /root/vmsan-test-upload.txt 2>/dev/null | grep -q "test-content"; then
         pass "I2: file transfer (upload + verify)"
       else
         fail "I2" "uploaded file content mismatch"
