@@ -1,0 +1,190 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"syscall"
+	"time"
+
+	types "github.com/angelorc/vmsan/nftables"
+	"github.com/angelorc/vmsan/nftables/internal/compat"
+	"github.com/angelorc/vmsan/nftables/internal/firewall"
+)
+
+const stdinTimeout = 5 * time.Second
+
+// Exit codes per the vmsan-nftables interface contract.
+const (
+	exitSuccess    = 0
+	exitNftError   = 1
+	exitParseError = 2
+	exitPermDenied = 3
+)
+
+func main() {
+	os.Exit(run())
+}
+
+func run() int {
+	if len(os.Args) < 2 {
+		writeResult(&types.NftResult{OK: false, Error: "usage: vmsan-nftables <setup|teardown|verify|cleanup-iptables>", Code: "MISSING_COMMAND"})
+		return exitParseError
+	}
+
+	input, err := readStdin()
+	if err != nil {
+		writeResult(&types.NftResult{OK: false, Error: fmt.Sprintf("read stdin: %v", err), Code: "STDIN_ERROR"})
+		return exitParseError
+	}
+
+	switch os.Args[1] {
+	case "setup":
+		return handleSetup(input)
+	case "teardown":
+		return handleTeardown(input)
+	case "verify":
+		return handleVerify(input)
+	case "cleanup-iptables":
+		return handleCleanupIptables(input)
+	default:
+		writeResult(&types.NftResult{OK: false, Error: fmt.Sprintf("unknown command: %s", os.Args[1]), Code: "UNKNOWN_COMMAND"})
+		return exitParseError
+	}
+}
+
+func handleSetup(input []byte) int {
+	var cfg types.SetupConfig
+	if err := json.Unmarshal(input, &cfg); err != nil {
+		return writeParseError(fmt.Errorf("parse config: %w", err))
+	}
+	if err := cfg.Validate(); err != nil {
+		return writeValidationError(err)
+	}
+	if err := firewall.Setup(cfg); err != nil {
+		return writeNftError(err)
+	}
+	writeResult(&types.NftResult{OK: true})
+	return exitSuccess
+}
+
+func handleTeardown(input []byte) int {
+	var cfg types.TeardownConfig
+	if err := json.Unmarshal(input, &cfg); err != nil {
+		return writeParseError(fmt.Errorf("parse config: %w", err))
+	}
+	if err := cfg.Validate(); err != nil {
+		return writeValidationError(err)
+	}
+	if err := firewall.Teardown(cfg); err != nil {
+		return writeNftError(err)
+	}
+	writeResult(&types.NftResult{OK: true})
+	return exitSuccess
+}
+
+func handleVerify(input []byte) int {
+	var cfg types.VerifyConfig
+	if err := json.Unmarshal(input, &cfg); err != nil {
+		return writeParseError(fmt.Errorf("parse config: %w", err))
+	}
+	if err := cfg.Validate(); err != nil {
+		return writeValidationError(err)
+	}
+	result, err := firewall.Verify(cfg)
+	if err != nil {
+		return writeNftError(err)
+	}
+	writeResult(result)
+	return exitSuccess
+}
+
+func handleCleanupIptables(input []byte) int {
+	var cfg types.CleanupConfig
+	if err := json.Unmarshal(input, &cfg); err != nil {
+		return writeParseError(fmt.Errorf("parse config: %w", err))
+	}
+	if err := cfg.Validate(); err != nil {
+		return writeValidationError(err)
+	}
+	if err := compat.CleanupLegacyIptables(cfg); err != nil {
+		return writeNftError(err)
+	}
+	writeResult(&types.NftResult{OK: true})
+	return exitSuccess
+}
+
+// --- Output helpers ---
+
+// writeParseError writes a JSON parse error response and returns the parse error exit code.
+func writeParseError(err error) int {
+	writeResult(&types.NftResult{OK: false, Error: err.Error(), Code: "JSON_PARSE_ERROR"})
+	return exitParseError
+}
+
+// writeValidationError writes a validation error response and returns the parse error exit code.
+func writeValidationError(err error) int {
+	writeResult(&types.NftResult{OK: false, Error: err.Error(), Code: "VALIDATION_ERROR"})
+	return exitParseError
+}
+
+// writeNftError classifies an nftables error and writes the appropriate response.
+func writeNftError(err error) int {
+	if isPermissionError(err) {
+		writeResult(&types.NftResult{OK: false, Error: err.Error(), Code: "PERMISSION_DENIED"})
+		return exitPermDenied
+	}
+	writeResult(&types.NftResult{OK: false, Error: err.Error(), Code: "NFTABLES_ERROR"})
+	return exitNftError
+}
+
+// isPermissionError checks both standard file permission errors and
+// netlink EPERM errors (which manifest as syscall.EPERM).
+func isPermissionError(err error) bool {
+	if os.IsPermission(err) {
+		return true
+	}
+	var errno syscall.Errno
+	return errors.As(err, &errno) && errno == syscall.EPERM
+}
+
+// --- I/O helpers ---
+
+// readStdin reads all of stdin with a timeout.
+func readStdin() ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), stdinTimeout)
+	defer cancel()
+
+	type result struct {
+		data []byte
+		err  error
+	}
+	ch := make(chan result, 1)
+
+	go func() {
+		data, err := io.ReadAll(os.Stdin)
+		ch <- result{data, err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("timeout reading stdin after %v", stdinTimeout)
+	case r := <-ch:
+		return r.data, r.err
+	}
+}
+
+// writeResult encodes a value as JSON to stdout.
+func writeResult(v any) {
+	if r, ok := v.(*types.NftResult); ok && !r.OK {
+		fmt.Fprintf(os.Stderr, "vmsan-nftables: %s\n", r.Error)
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		fmt.Fprintf(os.Stderr, "vmsan-nftables: encode JSON: %v\n", err)
+	}
+}
