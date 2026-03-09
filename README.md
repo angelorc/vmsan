@@ -139,6 +139,17 @@ vmsan remove <vm-id>
 | `upload`   |       | Upload files to a VM                  |
 | `download` |       | Download files from a VM              |
 | `network`  |       | Update network policy on a running VM |
+| `doctor`   |       | Check system prerequisites and installation health |
+
+## ⚠️ Known Limitations
+
+- No inter-VM networking (planned for 0.4.0)
+- No declarative config / `vmsan.toml` (planned for 0.5.0)
+- No multi-host support (planned for 0.7.0)
+- Uses `iptables`, not `nftables` (migration planned for 0.2.0)
+- No DNS or SNI filtering (planned for 0.3.0)
+- Linux only — requires KVM support
+- Primary platform: Ubuntu 24.04 LTS
 
 ## 🛠️ Development
 
