@@ -22,6 +22,7 @@ import {
   invalidDiskSizeFormatError,
   invalidDiskSizeRangeError,
 } from "../../errors/index.ts";
+import { isReservedPort } from "../../lib/network-address.ts";
 
 function parseIntegerFlag(
   flagName: string,
@@ -145,6 +146,13 @@ export function validateCidr(cidr: string): void {
 
 export function validatePublishedPortsAvailable(ports: number[], paths: VmsanPaths): void {
   if (ports.length === 0) return;
+
+  // Check reserved port ranges (DNS/SNI/HTTP proxy ports for 0.3.0)
+  for (const port of ports) {
+    if (isReservedPort(port)) {
+      throw portConflictError(`${port} (reserved for vmsan internal use)`);
+    }
+  }
 
   const collisions = new Map<number, string[]>();
   const store = new FileVmStateStore(paths.vmsDir);

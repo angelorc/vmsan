@@ -134,6 +134,68 @@ function checkAgent(agentBin: string): CheckResult {
   return { category: "Binaries", name: "Agent", status: "pass", detail: "Found" };
 }
 
+function checkNftablesBinary(nftablesBin: string): CheckResult {
+  if (!existsSync(nftablesBin)) {
+    return {
+      category: "Binaries",
+      name: "vmsan-nftables",
+      status: "fail",
+      detail: "Not found",
+      fix: 'Run "curl -fsSL https://vmsan.dev/install | bash" to install.',
+    };
+  }
+  return { category: "Binaries", name: "vmsan-nftables", status: "pass", detail: "Found" };
+}
+
+function checkNftablesKernel(): CheckResult {
+  try {
+    execSync("nft list tables", { encoding: "utf-8", stdio: "pipe" });
+    return {
+      category: "System",
+      name: "nftables kernel",
+      status: "pass",
+      detail: "nft available",
+    };
+  } catch {
+    return {
+      category: "System",
+      name: "nftables kernel",
+      status: "fail",
+      detail: "nft not available",
+      fix: "Install nftables and load the kernel module: sudo modprobe nf_tables",
+    };
+  }
+}
+
+function checkHostFirewall(): CheckResult {
+  const active: string[] = [];
+  try {
+    const ufwOutput = execSync("ufw status", { encoding: "utf-8", stdio: "pipe" }).trim();
+    if (ufwOutput.includes("Status: active")) {
+      active.push("ufw");
+    }
+  } catch {
+    // ufw not installed or not accessible
+  }
+  try {
+    execSync("systemctl is-active firewalld", { encoding: "utf-8", stdio: "pipe" });
+    active.push("firewalld");
+  } catch {
+    // firewalld not active or not installed
+  }
+
+  if (active.length > 0) {
+    return {
+      category: "System",
+      name: "Host firewall",
+      status: "fail",
+      detail: `${active.join(", ")} active`,
+      fix: `Disable ${active.join(" and ")} or add rules to allow vmsan traffic. Host firewalls can conflict with vmsan's nftables rules.`,
+    };
+  }
+  return { category: "System", name: "Host firewall", status: "pass", detail: "No conflicts" };
+}
+
 function checkKernel(kernelsDir: string): CheckResult {
   try {
     if (!existsSync(kernelsDir)) {
@@ -193,9 +255,12 @@ export function runDoctorChecks(paths?: VmsanPaths): CheckResult[] {
     checkKvm(),
     checkDiskSpace(p.baseDir),
     checkDefaultInterface(),
+    checkNftablesKernel(),
+    checkHostFirewall(),
     checkFirecracker(p.binDir),
     checkJailer(p.binDir),
     checkAgent(p.agentBin),
+    checkNftablesBinary(p.nftablesBin),
     checkKernel(p.kernelsDir),
     checkRootfs(p.rootfsDir),
   ];

@@ -48,7 +48,13 @@ export { FirecrackerApiError } from "./firecracker.ts";
 export { firecrackerApiError } from "./firecracker.ts";
 
 export { NetworkError } from "./network.ts";
-export { defaultInterfaceNotFoundError } from "./network.ts";
+export {
+  defaultInterfaceNotFoundError,
+  nftSetupFailedError,
+  nftTeardownFailedError,
+  nftBinaryMissingError,
+  nftTableMissingError,
+} from "./network.ts";
 
 export { TimeoutError } from "./timeout.ts";
 export { socketTimeoutError, lockTimeoutError, agentTimeoutError } from "./timeout.ts";

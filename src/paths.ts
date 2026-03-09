@@ -8,6 +8,7 @@ export interface VmsanPaths {
   jailerBaseDir: string;
   binDir: string;
   agentBin: string;
+  nftablesBin: string;
   kernelsDir: string;
   rootfsDir: string;
   registryDir: string;
@@ -48,6 +49,7 @@ export function vmsanPaths(baseDir?: string): VmsanPaths {
     jailerBaseDir: join(base, "jailer"),
     binDir: join(base, "bin"),
     agentBin: join(base, "bin", "vmsan-agent"),
+    nftablesBin: join(base, "bin", "vmsan-nftables"),
     kernelsDir: join(base, "kernels"),
     rootfsDir: join(base, "rootfs"),
     registryDir: join(base, "registry", "rootfs"),
