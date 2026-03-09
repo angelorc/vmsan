@@ -30,6 +30,7 @@ const fakePaths: VmsanPaths = {
   jailerBaseDir: "/fake/.vmsan/jailer",
   binDir: "/fake/.vmsan/bin",
   agentBin: "/fake/.vmsan/bin/vmsan-agent",
+  nftablesBin: "/fake/.vmsan/bin/vmsan-nftables",
   kernelsDir: "/fake/.vmsan/kernels",
   rootfsDir: "/fake/.vmsan/rootfs",
   registryDir: "/fake/.vmsan/registry/rootfs",
@@ -58,7 +59,7 @@ describe("runDoctorChecks", () => {
       bsize: 4096,
     } as ReturnType<typeof statfsSync>);
 
-    // Default interface
+    // Default interface + nft + firewall checks
     vi.mocked(execSync).mockImplementation((cmd: string | URL) => {
       const cmdStr = String(cmd);
       if (cmdStr.includes("ip route show default")) {
@@ -67,14 +68,19 @@ describe("runDoctorChecks", () => {
       if (cmdStr.includes("--version")) {
         return "firecracker v1.14.2\n";
       }
-      return "";
+      if (cmdStr.includes("nft list tables")) {
+        return "";
+      }
+      // ufw/firewalld not active
+      throw new Error("Command failed");
     });
 
-    // existsSync: firecracker, jailer, agent, rootfs all exist
+    // existsSync: firecracker, jailer, agent, vmsan-nftables, rootfs all exist
     vi.mocked(existsSync).mockImplementation((p) => {
       const path = String(p);
       if (path.includes("firecracker")) return true;
       if (path.includes("jailer")) return true;
+      if (path.includes("vmsan-nftables")) return true;
       if (path.includes("vmsan-agent")) return true;
       if (path.includes("kernels")) return true;
       if (path.includes("ubuntu-24.04.ext4")) return true;
@@ -91,14 +97,14 @@ describe("runDoctorChecks", () => {
     setupAllPassing();
     const checks = runDoctorChecks(fakePaths);
 
-    expect(checks).toHaveLength(8);
+    expect(checks).toHaveLength(11);
     expect(checks.every((c) => c.status === "pass")).toBe(true);
 
     const summary = {
       passed: checks.filter((c) => c.status === "pass").length,
       failed: checks.filter((c) => c.status === "fail").length,
     };
-    expect(summary).toEqual({ passed: 8, failed: 0 });
+    expect(summary).toEqual({ passed: 11, failed: 0 });
   });
 
   test("KVM check fails when /dev/kvm is not accessible", () => {
@@ -151,6 +157,7 @@ describe("runDoctorChecks", () => {
       const path = String(p);
       if (path.includes("firecracker")) return false;
       if (path.includes("jailer")) return true;
+      if (path.includes("vmsan-nftables")) return true;
       if (path.includes("vmsan-agent")) return true;
       if (path.includes("kernels")) return true;
       if (path.includes("ubuntu-24.04.ext4")) return true;
@@ -169,6 +176,7 @@ describe("runDoctorChecks", () => {
       const path = String(p);
       if (path.includes("firecracker") && !path.includes("jailer")) return true;
       if (path.includes("jailer")) return false;
+      if (path.includes("vmsan-nftables")) return true;
       if (path.includes("vmsan-agent")) return true;
       if (path.includes("kernels")) return true;
       if (path.includes("ubuntu-24.04.ext4")) return true;
@@ -187,6 +195,7 @@ describe("runDoctorChecks", () => {
       const path = String(p);
       if (path.includes("firecracker")) return true;
       if (path.includes("jailer")) return true;
+      if (path.includes("vmsan-nftables")) return true;
       if (path.includes("vmsan-agent")) return false;
       if (path.includes("kernels")) return true;
       if (path.includes("ubuntu-24.04.ext4")) return true;
@@ -216,6 +225,7 @@ describe("runDoctorChecks", () => {
       if (path.includes("ubuntu-24.04.ext4")) return false;
       if (path.includes("firecracker")) return true;
       if (path.includes("jailer")) return true;
+      if (path.includes("vmsan-nftables")) return true;
       if (path.includes("vmsan-agent")) return true;
       if (path.includes("kernels")) return true;
       return false;
@@ -243,15 +253,13 @@ describe("runDoctorChecks", () => {
 
     const checks = runDoctorChecks(fakePaths);
 
-    // All 8 checks should still run
-    expect(checks).toHaveLength(8);
-    expect(checks.every((c) => c.status === "fail")).toBe(true);
-
-    const summary = {
-      passed: checks.filter((c) => c.status === "pass").length,
-      failed: checks.filter((c) => c.status === "fail").length,
-    };
-    expect(summary).toEqual({ passed: 0, failed: 8 });
+    // All 11 checks should still run
+    expect(checks).toHaveLength(11);
+    // Host firewall check passes when ufw/firewalld are not installed (exec throws)
+    const hostFw = checks.find((c) => c.name === "Host firewall")!;
+    expect(hostFw.status).toBe("pass");
+    const failed = checks.filter((c) => c.status === "fail").length;
+    expect(failed).toBe(10);
   });
 
   test("summary counts are correct with mixed results", () => {
@@ -269,9 +277,9 @@ describe("runDoctorChecks", () => {
     const passed = checks.filter((c) => c.status === "pass").length;
     const failed = checks.filter((c) => c.status === "fail").length;
 
-    expect(passed).toBe(6);
+    expect(passed).toBe(9);
     expect(failed).toBe(2);
-    expect(passed + failed).toBe(8);
+    expect(passed + failed).toBe(11);
   });
 
   test("checks are categorized correctly", () => {
@@ -282,8 +290,8 @@ describe("runDoctorChecks", () => {
     const binaryChecks = checks.filter((c) => c.category === "Binaries");
     const imageChecks = checks.filter((c) => c.category === "Images");
 
-    expect(systemChecks).toHaveLength(3);
-    expect(binaryChecks).toHaveLength(3);
+    expect(systemChecks).toHaveLength(5);
+    expect(binaryChecks).toHaveLength(4);
     expect(imageChecks).toHaveLength(2);
   });
 
@@ -317,5 +325,136 @@ describe("runDoctorChecks", () => {
     const ifaceCheck = checks.find((c) => c.name === "Default interface")!;
     expect(ifaceCheck.status).toBe("pass");
     expect(ifaceCheck.detail).toBe("eth0");
+  });
+
+  // ---------- vmsan-nftables binary check ----------
+
+  test("vmsan-nftables check fails when binary missing", () => {
+    setupAllPassing();
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path.includes("vmsan-nftables")) return false;
+      if (path.includes("firecracker")) return true;
+      if (path.includes("jailer")) return true;
+      if (path.includes("vmsan-agent")) return true;
+      if (path.includes("kernels")) return true;
+      if (path.includes("ubuntu-24.04.ext4")) return true;
+      return false;
+    });
+
+    const checks = runDoctorChecks(fakePaths);
+    const nftCheck = checks.find((c) => c.name === "vmsan-nftables")!;
+    expect(nftCheck.status).toBe("fail");
+    expect(nftCheck.detail).toBe("Not found");
+    expect(nftCheck.fix).toContain("install");
+  });
+
+  test("vmsan-nftables check passes when binary exists", () => {
+    setupAllPassing();
+    const checks = runDoctorChecks(fakePaths);
+    const nftCheck = checks.find((c) => c.name === "vmsan-nftables")!;
+    expect(nftCheck.status).toBe("pass");
+    expect(nftCheck.detail).toBe("Found");
+  });
+
+  // ---------- nftables kernel check ----------
+
+  test("nftables kernel check fails when nft command fails", () => {
+    setupAllPassing();
+    vi.mocked(execSync).mockImplementation((cmd: string | URL) => {
+      const cmdStr = String(cmd);
+      if (cmdStr.includes("nft list tables")) {
+        throw new Error("nft: command not found");
+      }
+      if (cmdStr.includes("ip route show default")) {
+        return "default via 192.168.1.1 dev eth0 proto dhcp metric 100\n";
+      }
+      if (cmdStr.includes("--version")) {
+        return "firecracker v1.14.2\n";
+      }
+      // ufw/firewalld not active
+      throw new Error("Command failed");
+    });
+
+    const checks = runDoctorChecks(fakePaths);
+    const nftKernelCheck = checks.find((c) => c.name === "nftables kernel")!;
+    expect(nftKernelCheck.status).toBe("fail");
+    expect(nftKernelCheck.detail).toBe("nft not available");
+    expect(nftKernelCheck.fix).toContain("nf_tables");
+  });
+
+  test("nftables kernel check passes when nft command succeeds", () => {
+    setupAllPassing();
+    const checks = runDoctorChecks(fakePaths);
+    const nftKernelCheck = checks.find((c) => c.name === "nftables kernel")!;
+    expect(nftKernelCheck.status).toBe("pass");
+    expect(nftKernelCheck.detail).toBe("nft available");
+  });
+
+  // ---------- host firewall check ----------
+
+  test("host firewall check fails when ufw is active", () => {
+    setupAllPassing();
+    vi.mocked(execSync).mockImplementation((cmd: string | URL) => {
+      const cmdStr = String(cmd);
+      if (cmdStr.includes("ufw status")) {
+        return "Status: active\n";
+      }
+      if (cmdStr.includes("systemctl is-active firewalld")) {
+        throw new Error("inactive");
+      }
+      if (cmdStr.includes("ip route show default")) {
+        return "default via 192.168.1.1 dev eth0 proto dhcp metric 100\n";
+      }
+      if (cmdStr.includes("--version")) {
+        return "firecracker v1.14.2\n";
+      }
+      if (cmdStr.includes("nft list tables")) {
+        return "";
+      }
+      throw new Error("Command failed");
+    });
+
+    const checks = runDoctorChecks(fakePaths);
+    const fwCheck = checks.find((c) => c.name === "Host firewall")!;
+    expect(fwCheck.status).toBe("fail");
+    expect(fwCheck.detail).toContain("ufw");
+    expect(fwCheck.fix).toContain("ufw");
+  });
+
+  test("host firewall check fails when firewalld is active", () => {
+    setupAllPassing();
+    vi.mocked(execSync).mockImplementation((cmd: string | URL) => {
+      const cmdStr = String(cmd);
+      if (cmdStr.includes("ufw status")) {
+        throw new Error("ufw not found");
+      }
+      if (cmdStr.includes("systemctl is-active firewalld")) {
+        return "active\n";
+      }
+      if (cmdStr.includes("ip route show default")) {
+        return "default via 192.168.1.1 dev eth0 proto dhcp metric 100\n";
+      }
+      if (cmdStr.includes("--version")) {
+        return "firecracker v1.14.2\n";
+      }
+      if (cmdStr.includes("nft list tables")) {
+        return "";
+      }
+      throw new Error("Command failed");
+    });
+
+    const checks = runDoctorChecks(fakePaths);
+    const fwCheck = checks.find((c) => c.name === "Host firewall")!;
+    expect(fwCheck.status).toBe("fail");
+    expect(fwCheck.detail).toContain("firewalld");
+  });
+
+  test("host firewall check passes when neither ufw nor firewalld is active", () => {
+    setupAllPassing();
+    const checks = runDoctorChecks(fakePaths);
+    const fwCheck = checks.find((c) => c.name === "Host firewall")!;
+    expect(fwCheck.status).toBe("pass");
+    expect(fwCheck.detail).toBe("No conflicts");
   });
 });

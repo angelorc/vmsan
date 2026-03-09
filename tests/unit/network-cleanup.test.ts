@@ -1,7 +1,7 @@
 import { describe, test, expect, vi, beforeEach } from "vitest";
 import { existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import type { VmNetwork } from "../../src/lib/vm-state.ts";
-import { verifyCleanup } from "../../src/lib/network.ts";
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
@@ -10,6 +10,34 @@ vi.mock("node:fs", async (importOriginal) => {
     existsSync: vi.fn(),
   };
 });
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    execFileSync: vi.fn(),
+  };
+});
+
+vi.mock("../../src/paths.ts", () => ({
+  vmsanPaths: () => ({
+    baseDir: "/fake/.vmsan",
+    vmsDir: "/fake/.vmsan/vms",
+    jailerBaseDir: "/fake/.vmsan/jailer",
+    binDir: "/fake/.vmsan/bin",
+    agentBin: "/fake/.vmsan/bin/vmsan-agent",
+    nftablesBin: "/fake/.vmsan/bin/vmsan-nftables",
+    kernelsDir: "/fake/.vmsan/kernels",
+    rootfsDir: "/fake/.vmsan/rootfs",
+    registryDir: "/fake/.vmsan/registry/rootfs",
+    snapshotsDir: "/fake/.vmsan/snapshots",
+    seccompDir: "/fake/.vmsan/seccomp",
+    seccompFilter: "/fake/.vmsan/seccomp/default.json",
+    agentPort: 9119,
+  }),
+}));
+
+import { verifyCleanup } from "../../src/lib/network.ts";
 
 function makeNetwork(overrides?: Partial<VmNetwork>): VmNetwork {
   return {
@@ -32,6 +60,7 @@ function makeNetwork(overrides?: Partial<VmNetwork>): VmNetwork {
 describe("verifyCleanup", () => {
   beforeEach(() => {
     vi.mocked(existsSync).mockReset();
+    vi.mocked(execFileSync).mockReset();
   });
 
   test("detects orphaned TAP device", () => {
@@ -93,5 +122,96 @@ describe("verifyCleanup", () => {
     expect(leaks).toContain("TAP device fhvm0 still exists");
     expect(leaks).not.toContainEqual(expect.stringContaining("Veth"));
     expect(leaks).not.toContainEqual(expect.stringContaining("Namespace"));
+  });
+
+  // ---------- nftables table leak detection ----------
+
+  test("detects nftables table leak when verify returns tableExists:true", () => {
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const s = String(p);
+      // Binary exists
+      if (s === "/fake/.vmsan/bin/vmsan-nftables") return true;
+      return false;
+    });
+
+    vi.mocked(execFileSync).mockReturnValue(
+      JSON.stringify({ ok: true, tableExists: true }) as unknown as Buffer,
+    );
+
+    const leaks = verifyCleanup(makeNetwork(), "my-vm");
+    expect(leaks).toContain("nftables table vmsan_my-vm still exists");
+  });
+
+  test("skips nftables check when binary is missing", () => {
+    vi.mocked(existsSync).mockReturnValue(false);
+
+    const leaks = verifyCleanup(makeNetwork(), "my-vm");
+    // No error thrown, no nftables leak reported
+    expect(leaks).not.toContainEqual(expect.stringContaining("nftables"));
+  });
+
+  test("no nftables leak when verify returns tableExists:false", () => {
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const s = String(p);
+      if (s === "/fake/.vmsan/bin/vmsan-nftables") return true;
+      return false;
+    });
+
+    vi.mocked(execFileSync).mockReturnValue(
+      JSON.stringify({ ok: true, tableExists: false }) as unknown as Buffer,
+    );
+
+    const leaks = verifyCleanup(makeNetwork(), "my-vm");
+    expect(leaks).not.toContainEqual(expect.stringContaining("nftables"));
+  });
+
+  test("includes nftables table leak alongside other leaks", () => {
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const s = String(p);
+      if (s === "/sys/class/net/fhvm0") return true; // TAP leak
+      if (s === "/fake/.vmsan/bin/vmsan-nftables") return true; // binary exists
+      return false;
+    });
+
+    vi.mocked(execFileSync).mockReturnValue(
+      JSON.stringify({ ok: true, tableExists: true }) as unknown as Buffer,
+    );
+
+    const leaks = verifyCleanup(makeNetwork(), "my-vm");
+    expect(leaks).toContain("TAP device fhvm0 still exists");
+    expect(leaks).toContain("nftables table vmsan_my-vm still exists");
+    expect(leaks).toHaveLength(2);
+  });
+
+  test("resolves vmId from netnsName when vmId not provided", () => {
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const s = String(p);
+      if (s === "/fake/.vmsan/bin/vmsan-nftables") return true;
+      return false;
+    });
+
+    vi.mocked(execFileSync).mockReturnValue(
+      JSON.stringify({ ok: true, tableExists: true }) as unknown as Buffer,
+    );
+
+    // netnsName is "vmsan-test" -> resolves to vmId "test"
+    const leaks = verifyCleanup(makeNetwork());
+    expect(leaks).toContain("nftables table vmsan_test still exists");
+  });
+
+  test("silently skips nftables check when execFileSync throws", () => {
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const s = String(p);
+      if (s === "/fake/.vmsan/bin/vmsan-nftables") return true;
+      return false;
+    });
+
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw new Error("binary crashed");
+    });
+
+    // Should not throw, should just skip the nftables check
+    const leaks = verifyCleanup(makeNetwork(), "my-vm");
+    expect(leaks).not.toContainEqual(expect.stringContaining("nftables"));
   });
 });
