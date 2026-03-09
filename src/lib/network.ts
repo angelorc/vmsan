@@ -371,6 +371,93 @@ export class NetworkManager {
         `nftables setup failed: ${result.error || "unknown error"} (code: ${result.code || "none"})`,
       );
     }
+
+    // Host-side iptables FORWARD + MASQUERADE — required because nftables
+    // chains are independent and cannot bypass Docker's iptables-nft FORWARD
+    // DROP policy. These rules go into the shared iptables FORWARD chain.
+    if (policy !== "deny-all") {
+      const fwdDevice = netnsName ? `veth-h-${slot}` : tapDevice;
+      sudo([
+        "iptables",
+        "-t",
+        "nat",
+        "-A",
+        "POSTROUTING",
+        "-s",
+        `${guestIp}/30`,
+        "-o",
+        defaultInterface,
+        "-j",
+        "MASQUERADE",
+      ]);
+      sudo([
+        "iptables",
+        "-A",
+        "FORWARD",
+        "-i",
+        fwdDevice,
+        "-o",
+        defaultInterface,
+        "-s",
+        `${guestIp}/30`,
+        "-j",
+        "ACCEPT",
+      ]);
+      sudo([
+        "iptables",
+        "-A",
+        "FORWARD",
+        "-i",
+        defaultInterface,
+        "-o",
+        fwdDevice,
+        "-d",
+        `${guestIp}/30`,
+        "-m",
+        "state",
+        "--state",
+        "RELATED,ESTABLISHED",
+        "-j",
+        "ACCEPT",
+      ]);
+    }
+
+    // Host-side DNAT + FORWARD accept for published ports
+    if (!this.config.skipDnat && policy !== "deny-all") {
+      for (const port of publishedPorts) {
+        const portStr = String(port);
+        sudo([
+          "iptables",
+          "-t",
+          "nat",
+          "-A",
+          "PREROUTING",
+          "-i",
+          defaultInterface,
+          "-p",
+          "tcp",
+          "--dport",
+          portStr,
+          "-j",
+          "DNAT",
+          "--to-destination",
+          `${guestIp}:${portStr}`,
+        ]);
+        sudo([
+          "iptables",
+          "-A",
+          "FORWARD",
+          "-p",
+          "tcp",
+          "-d",
+          guestIp,
+          "--dport",
+          portStr,
+          "-j",
+          "ACCEPT",
+        ]);
+      }
+    }
   }
 
   /** Legacy iptables-based setupRules, gated behind VMSAN_LEGACY_IPTABLES=1 */
@@ -841,42 +928,151 @@ export class NetworkManager {
     const { tapDevice, hostIp, guestIp, netnsName, slot } = this.config;
     const vmId = resolveVmId(this.config);
 
-    // 1. Try nftables teardown first
+    // 1. Try nftables teardown first (namespace table + host bypass chains)
     const teardownResult = execNftables("teardown", {
       vmId,
       netnsName: netnsName || "",
     });
 
-    if (teardownResult.ok) {
-      return;
-    }
-
-    // 2. If nftables table not found, try cleanup-iptables as fallback (0.1.0 VMs)
-    if (teardownResult.code === "NFTABLES_ERROR") {
-      consola.debug(
-        `nftables teardown returned NFTABLES_ERROR for ${vmId}, trying iptables cleanup fallback`,
-      );
-      const cleanupResult = execNftables("cleanup-iptables", {
-        vmId,
-        tapDevice,
-        vethHost: netnsName ? `veth-h-${slot}` : "",
-        vethGuest: netnsName ? `veth-g-${slot}` : "",
-        netnsName: netnsName || "",
-        hostIp,
-        guestIp,
-      });
-      if (!cleanupResult.ok) {
+    if (!teardownResult.ok) {
+      // 2. If nftables table not found, try cleanup-iptables as fallback (0.1.0 VMs)
+      if (teardownResult.code === "NFTABLES_ERROR") {
+        consola.debug(
+          `nftables teardown returned NFTABLES_ERROR for ${vmId}, trying iptables cleanup fallback`,
+        );
+        const cleanupResult = execNftables("cleanup-iptables", {
+          vmId,
+          tapDevice,
+          vethHost: netnsName ? `veth-h-${slot}` : "",
+          vethGuest: netnsName ? `veth-g-${slot}` : "",
+          netnsName: netnsName || "",
+          hostIp,
+          guestIp,
+        });
+        if (!cleanupResult.ok) {
+          consola.warn(
+            `iptables cleanup fallback failed for ${vmId}: ${cleanupResult.error || "unknown"} (code: ${cleanupResult.code || "none"})`,
+          );
+        }
+      } else {
+        // 3. Other errors — log warning, don't throw
         consola.warn(
-          `iptables cleanup fallback failed for ${vmId}: ${cleanupResult.error || "unknown"} (code: ${cleanupResult.code || "none"})`,
+          `nftables teardown failed for ${vmId}: ${teardownResult.error || "unknown"} (code: ${teardownResult.code || "none"})`,
         );
       }
+    }
+
+    // 4. Clean up host-side iptables FORWARD + MASQUERADE (best-effort)
+    this.teardownHostIptablesRules();
+  }
+
+  /** Remove host-side iptables FORWARD, MASQUERADE, and DNAT rules (best-effort). */
+  private teardownHostIptablesRules(): void {
+    const { tapDevice, guestIp, publishedPorts, netnsName, slot } = this.config;
+
+    let defaultIface: string | undefined;
+    try {
+      defaultIface = getDefaultInterface();
+    } catch (err) {
+      consola.debug(`Default interface detection skipped during teardown: ${toError(err).message}`);
       return;
     }
 
-    // 3. Other errors — log warning, don't throw
-    consola.warn(
-      `nftables teardown failed for ${vmId}: ${teardownResult.error || "unknown"} (code: ${teardownResult.code || "none"})`,
-    );
+    const fwdDevice = netnsName ? `veth-h-${slot}` : tapDevice;
+
+    const tryRun = (args: string[]): void => {
+      try {
+        sudo(args);
+      } catch (err) {
+        consola.debug(
+          `Host iptables cleanup (${args.slice(0, 4).join(" ")}): ${toError(err).message}`,
+        );
+      }
+    };
+
+    // FORWARD rules
+    tryRun([
+      "iptables",
+      "-D",
+      "FORWARD",
+      "-i",
+      fwdDevice,
+      "-o",
+      defaultIface,
+      "-s",
+      `${guestIp}/30`,
+      "-j",
+      "ACCEPT",
+    ]);
+    tryRun([
+      "iptables",
+      "-D",
+      "FORWARD",
+      "-i",
+      defaultIface,
+      "-o",
+      fwdDevice,
+      "-d",
+      `${guestIp}/30`,
+      "-m",
+      "state",
+      "--state",
+      "RELATED,ESTABLISHED",
+      "-j",
+      "ACCEPT",
+    ]);
+
+    // MASQUERADE
+    tryRun([
+      "iptables",
+      "-t",
+      "nat",
+      "-D",
+      "POSTROUTING",
+      "-s",
+      `${guestIp}/30`,
+      "-o",
+      defaultIface,
+      "-j",
+      "MASQUERADE",
+    ]);
+
+    // Published port DNAT + FORWARD
+    if (!this.config.skipDnat) {
+      for (const port of publishedPorts) {
+        const portStr = String(port);
+        tryRun([
+          "iptables",
+          "-t",
+          "nat",
+          "-D",
+          "PREROUTING",
+          "-i",
+          defaultIface,
+          "-p",
+          "tcp",
+          "--dport",
+          portStr,
+          "-j",
+          "DNAT",
+          "--to-destination",
+          `${guestIp}:${portStr}`,
+        ]);
+        tryRun([
+          "iptables",
+          "-D",
+          "FORWARD",
+          "-p",
+          "tcp",
+          "-d",
+          guestIp,
+          "--dport",
+          portStr,
+          "-j",
+          "ACCEPT",
+        ]);
+      }
+    }
   }
 
   /** Legacy iptables-based teardownRules, gated behind VMSAN_LEGACY_IPTABLES=1 */

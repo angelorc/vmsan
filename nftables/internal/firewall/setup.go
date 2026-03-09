@@ -103,8 +103,11 @@ func setupVMTable(config types.SetupConfig) error {
 		}
 	}
 
-	// Postrouting chain
-	rules.NewBuilder(c, table, postrouting).Masquerade()
+	// Postrouting chain — intentionally empty.
+	// Masquerade is handled on the HOST via iptables to coexist with Docker's
+	// FORWARD chain (nftables chains are independent, so a separate nftables
+	// FORWARD accept doesn't bypass Docker's iptables-nft DROP policy).
+	_ = postrouting
 
 	return c.Flush()
 }
