@@ -9,6 +9,8 @@ import {
   type VmState,
 } from "../../src/lib/vm-state.ts";
 import { VmsanError } from "../../src/errors/base.ts";
+import { buildInitialVmState } from "../../src/commands/create/state.ts";
+import type { InitialVmStateInput } from "../../src/commands/create/types.ts";
 
 // ---------- helpers ----------
 
@@ -46,6 +48,9 @@ function makeVmState(overrides: Partial<VmState> = {}): VmState {
     agentToken: null,
     agentPort: 9119,
     stateVersion: CURRENT_STATE_VERSION,
+    disableSeccomp: false,
+    disablePidNs: false,
+    disableCgroup: false,
     ...overrides,
   };
 }
@@ -285,17 +290,17 @@ describe("state file versioning", () => {
     expect(state!.stateVersion).toBe(CURRENT_STATE_VERSION);
   });
 
-  it("saves state with version 1", () => {
+  it("saves state with current version", () => {
     const dir = makeTempDir();
     const store = new FileVmStateStore(dir);
     const state = { ...makeLegacyState(), stateVersion: CURRENT_STATE_VERSION } as VmState;
     store.save(state);
 
     const raw = JSON.parse(readFileSync(join(dir, "vm-legacy.json"), "utf-8"));
-    expect(raw.stateVersion).toBe(1);
+    expect(raw.stateVersion).toBe(CURRENT_STATE_VERSION);
   });
 
-  it("auto-migrates v0 to v1", () => {
+  it("auto-migrates v0 through all versions", () => {
     const dir = makeTempDir();
     const legacy = makeLegacyState();
     writeFileSync(join(dir, "vm-legacy.json"), JSON.stringify(legacy));
@@ -303,8 +308,114 @@ describe("state file versioning", () => {
     const store = new FileVmStateStore(dir);
     store.load("vm-legacy");
 
-    // Verify the file on disk was re-written with stateVersion
+    // Verify the file on disk was re-written with current version
     const raw = JSON.parse(readFileSync(join(dir, "vm-legacy.json"), "utf-8"));
-    expect(raw.stateVersion).toBe(1);
+    expect(raw.stateVersion).toBe(CURRENT_STATE_VERSION);
+  });
+
+  it("migrates v1 to v2 adding isolation flags defaulting to false", () => {
+    const dir = makeTempDir();
+    const v1State = { ...makeLegacyState(), id: "vm-v1", stateVersion: 1 };
+    writeFileSync(join(dir, "vm-v1.json"), JSON.stringify(v1State));
+
+    const store = new FileVmStateStore(dir);
+    const state = store.load("vm-v1");
+
+    expect(state).not.toBeNull();
+    expect(state!.stateVersion).toBe(2);
+    expect(state!.disableSeccomp).toBe(false);
+    expect(state!.disablePidNs).toBe(false);
+    expect(state!.disableCgroup).toBe(false);
+
+    // Verify persisted on disk
+    const raw = JSON.parse(readFileSync(join(dir, "vm-v1.json"), "utf-8"));
+    expect(raw.stateVersion).toBe(2);
+    expect(raw.disableSeccomp).toBe(false);
+    expect(raw.disablePidNs).toBe(false);
+    expect(raw.disableCgroup).toBe(false);
+  });
+
+  it("preserves existing isolation flags during v1 to v2 migration", () => {
+    const dir = makeTempDir();
+    // Simulate a state that somehow already has disableSeccomp set (e.g. manual edit)
+    const v1State = {
+      ...makeLegacyState(),
+      id: "vm-v1-custom",
+      stateVersion: 1,
+      disableSeccomp: true,
+    };
+    writeFileSync(join(dir, "vm-v1-custom.json"), JSON.stringify(v1State));
+
+    const store = new FileVmStateStore(dir);
+    const state = store.load("vm-v1-custom");
+
+    expect(state!.disableSeccomp).toBe(true);
+    expect(state!.disablePidNs).toBe(false);
+    expect(state!.disableCgroup).toBe(false);
+  });
+});
+
+// ---------- buildInitialVmState isolation flags ----------
+
+describe("buildInitialVmState", () => {
+  function makeInput(overrides: Partial<InitialVmStateInput> = {}): InitialVmStateInput {
+    return {
+      vmId: "vm-test",
+      project: "",
+      runtime: "base",
+      diskSizeGb: 10,
+      kernelPath: "/kernel",
+      rootfsPath: "/rootfs",
+      vcpus: 1,
+      memMib: 128,
+      networkPolicy: "allow-all",
+      domains: [],
+      allowedCidrs: [],
+      deniedCidrs: [],
+      ports: [],
+      tapDevice: "fhvm0",
+      hostIp: "198.19.0.1",
+      guestIp: "198.19.0.2",
+      subnetMask: "255.255.255.252",
+      macAddress: "aa:bb:cc:dd:ee:ff",
+      snapshotId: null,
+      timeoutMs: null,
+      agentToken: null,
+      agentPort: 9119,
+      ...overrides,
+    };
+  }
+
+  it("defaults isolation flags to false", () => {
+    const state = buildInitialVmState(makeInput());
+    expect(state.disableSeccomp).toBe(false);
+    expect(state.disablePidNs).toBe(false);
+    expect(state.disableCgroup).toBe(false);
+  });
+
+  it("persists disableSeccomp when set to true", () => {
+    const state = buildInitialVmState(makeInput({ disableSeccomp: true }));
+    expect(state.disableSeccomp).toBe(true);
+    expect(state.disablePidNs).toBe(false);
+    expect(state.disableCgroup).toBe(false);
+  });
+
+  it("persists disablePidNs when set to true", () => {
+    const state = buildInitialVmState(makeInput({ disablePidNs: true }));
+    expect(state.disablePidNs).toBe(true);
+  });
+
+  it("persists disableCgroup when set to true", () => {
+    const state = buildInitialVmState(makeInput({ disableCgroup: true }));
+    expect(state.disableCgroup).toBe(true);
+  });
+
+  it("persists all isolation flags when all set to true", () => {
+    const state = buildInitialVmState(
+      makeInput({ disableSeccomp: true, disablePidNs: true, disableCgroup: true }),
+    );
+    expect(state.disableSeccomp).toBe(true);
+    expect(state.disablePidNs).toBe(true);
+    expect(state.disableCgroup).toBe(true);
   });
 });

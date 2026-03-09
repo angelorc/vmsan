@@ -5,7 +5,7 @@ import { vmStateNotFoundError, networkSlotsExhaustedError } from "../errors/inde
 import { slotFromVmHostIpOrNull } from "./network-address.ts";
 import { mkdirSecure, writeSecure } from "./utils.ts";
 
-export const CURRENT_STATE_VERSION = 1;
+export const CURRENT_STATE_VERSION = 2;
 
 export interface VmNetwork {
   tapDevice: string;
@@ -47,6 +47,9 @@ export interface VmState {
   agentToken: string | null;
   agentPort: number;
   stateVersion: number;
+  disableSeccomp?: boolean;
+  disablePidNs?: boolean;
+  disableCgroup?: boolean;
 }
 
 export interface VmStateStore {
@@ -95,9 +98,21 @@ export class FileVmStateStore implements VmStateStore {
     const filePath = join(this.dir, `${id}.json`);
     if (!existsSync(filePath)) return null;
     const state = JSON.parse(readFileSync(filePath, "utf-8")) as VmState;
+    let migrated = false;
     if (!state.stateVersion) {
       consola.debug(`Migrated state file for VM ${id} from v0 to v1`);
-      state.stateVersion = CURRENT_STATE_VERSION;
+      state.stateVersion = 1;
+      migrated = true;
+    }
+    if (state.stateVersion === 1) {
+      consola.debug(`Migrated state file for VM ${id} from v1 to v2`);
+      state.disableSeccomp = state.disableSeccomp ?? false;
+      state.disablePidNs = state.disablePidNs ?? false;
+      state.disableCgroup = state.disableCgroup ?? false;
+      state.stateVersion = 2;
+      migrated = true;
+    }
+    if (migrated) {
       this.save(state);
     }
     return state;

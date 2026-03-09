@@ -233,6 +233,9 @@ export class VMService {
           bandwidthMbit,
           netnsName,
           skipDnat: opts.skipDnat,
+          disableSeccomp: opts.disableSeccomp,
+          disablePidNs: opts.disablePidNs,
+          disableCgroup: opts.disableCgroup,
         });
         this.store.save(state);
 
@@ -507,7 +510,14 @@ export class VMService {
         return false;
       };
 
-      const cgroup = this.buildCgroupConfig(state.vcpuCount, state.memSizeMib);
+      const seccompFilter = state.disableSeccomp ? undefined : ensureSeccompFilter(paths);
+      if (seccompFilter) {
+        logger.debug(`Seccomp filter: ${seccompFilter}`);
+      }
+
+      const cgroup = state.disableCgroup
+        ? undefined
+        : this.buildCgroupConfig(state.vcpuCount, state.memSizeMib);
 
       const spawnAndWait = async (timeoutMs: number): Promise<void> => {
         log.start("Spawning Firecracker via jailer...");
@@ -518,7 +528,8 @@ export class VMService {
           firecrackerBin,
           jailerBin,
           chrootBase: jailer.paths.chrootBase,
-          newPidNs: true,
+          seccompFilter: seccompFilter ?? undefined,
+          newPidNs: !state.disablePidNs,
           cgroup,
           netns: state.network.netnsName,
         });

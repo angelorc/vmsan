@@ -80,6 +80,9 @@ export interface InitialVmStateInput {
   bandwidthMbit?: number;
   netnsName?: string;
   skipDnat?: boolean;
+  disableSeccomp?: boolean;
+  disablePidNs?: boolean;
+  disableCgroup?: boolean;
 }
 
 export type CreateState = VmState;
