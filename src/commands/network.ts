@@ -74,10 +74,7 @@ const networkCommand = defineCommand({
         return;
       }
 
-      const outputMode = getOutputMode();
-      if (outputMode === "json") {
-        console.log(JSON.stringify(result));
-      } else {
+      if (getOutputMode() !== "json") {
         consola.success(
           `Network policy updated for ${args.vmId}: ${result.previousPolicy} → ${result.newPolicy}`,
         );

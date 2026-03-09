@@ -66,6 +66,7 @@ const main = defineCommand({
     download: () => import("../src/commands/download.ts").then((m) => m.default),
     exec: () => import("../src/commands/exec.ts").then((m) => m.default),
     network: () => import("../src/commands/network.ts").then((m) => m.default),
+    doctor: () => import("../src/commands/doctor.ts").then((m) => m.default),
   },
 });
 

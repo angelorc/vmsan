@@ -1,0 +1,272 @@
+import type { CommandDef } from "citty";
+import { defineCommand } from "citty";
+import { accessSync, constants, existsSync, readdirSync, statfsSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { basename, join } from "node:path";
+import { consola } from "consola";
+import { createCommandLogger, getOutputMode } from "../lib/logger/index.ts";
+import { handleCommandError } from "../errors/index.ts";
+import { vmsanPaths } from "../paths.ts";
+
+interface CheckResult {
+  category: string;
+  name: string;
+  status: "pass" | "fail";
+  detail: string;
+  fix?: string;
+}
+
+function checkKvm(): CheckResult {
+  try {
+    accessSync("/dev/kvm", constants.R_OK | constants.W_OK);
+    return { category: "System", name: "KVM", status: "pass", detail: "/dev/kvm" };
+  } catch {
+    return {
+      category: "System",
+      name: "KVM",
+      status: "fail",
+      detail: "KVM not available",
+      fix: "Enable KVM in BIOS or load the kvm module: sudo modprobe kvm",
+    };
+  }
+}
+
+function checkDiskSpace(baseDir: string): CheckResult {
+  try {
+    const stats = statfsSync(baseDir);
+    const freeBytes = stats.bfree * stats.bsize;
+    const freeGB = Math.floor(freeBytes / 1_073_741_824);
+    if (freeGB >= 5) {
+      return {
+        category: "System",
+        name: "Disk space",
+        status: "pass",
+        detail: `${freeGB} GB free`,
+      };
+    }
+    return {
+      category: "System",
+      name: "Disk space",
+      status: "fail",
+      detail: `Low disk space (${freeGB} GB free)`,
+      fix: "Free up disk space. vmsan needs at least 5 GB.",
+    };
+  } catch {
+    return {
+      category: "System",
+      name: "Disk space",
+      status: "fail",
+      detail: "Could not check disk space",
+      fix: `Ensure ${baseDir} exists and is accessible.`,
+    };
+  }
+}
+
+function checkDefaultInterface(): CheckResult {
+  try {
+    const output = execSync("ip route show default", { encoding: "utf-8", stdio: "pipe" }).trim();
+    const match = output.match(/dev\s+(\S+)/);
+    if (match) {
+      return { category: "System", name: "Default interface", status: "pass", detail: match[1] };
+    }
+    return {
+      category: "System",
+      name: "Default interface",
+      status: "fail",
+      detail: "No default route",
+      fix: "Configure a default network route.",
+    };
+  } catch {
+    return {
+      category: "System",
+      name: "Default interface",
+      status: "fail",
+      detail: "No default route",
+      fix: "Configure a default network route.",
+    };
+  }
+}
+
+function checkFirecracker(binDir: string): CheckResult {
+  const fcPath = join(binDir, "firecracker");
+  if (!existsSync(fcPath)) {
+    return {
+      category: "Binaries",
+      name: "Firecracker",
+      status: "fail",
+      detail: "Not found",
+      fix: 'Run "curl -fsSL https://vmsan.dev/install | bash" to install.',
+    };
+  }
+  try {
+    const version = execSync(`"${fcPath}" --version`, { encoding: "utf-8", stdio: "pipe" }).trim();
+    return { category: "Binaries", name: "Firecracker", status: "pass", detail: version };
+  } catch {
+    return { category: "Binaries", name: "Firecracker", status: "pass", detail: "Found" };
+  }
+}
+
+function checkJailer(binDir: string): CheckResult {
+  const jailerPath = join(binDir, "jailer");
+  if (!existsSync(jailerPath)) {
+    return {
+      category: "Binaries",
+      name: "Jailer",
+      status: "fail",
+      detail: "Not found",
+      fix: 'Run "curl -fsSL https://vmsan.dev/install | bash" to install.',
+    };
+  }
+  return { category: "Binaries", name: "Jailer", status: "pass", detail: "Found" };
+}
+
+function checkAgent(agentBin: string): CheckResult {
+  if (!existsSync(agentBin)) {
+    return {
+      category: "Binaries",
+      name: "Agent",
+      status: "fail",
+      detail: "Not found",
+      fix: 'Run "curl -fsSL https://vmsan.dev/install | bash" to install.',
+    };
+  }
+  return { category: "Binaries", name: "Agent", status: "pass", detail: "Found" };
+}
+
+function checkKernel(kernelsDir: string): CheckResult {
+  try {
+    if (!existsSync(kernelsDir)) {
+      return {
+        category: "Images",
+        name: "Kernel",
+        status: "fail",
+        detail: "Not found",
+        fix: 'Run "curl -fsSL https://vmsan.dev/install | bash" to install.',
+      };
+    }
+    const files = readdirSync(kernelsDir).filter((f) => f.startsWith("vmlinux"));
+    if (files.length === 0) {
+      return {
+        category: "Images",
+        name: "Kernel",
+        status: "fail",
+        detail: "Not found",
+        fix: 'Run "curl -fsSL https://vmsan.dev/install | bash" to install.',
+      };
+    }
+    const latest = files.sort().at(-1)!;
+    return { category: "Images", name: "Kernel", status: "pass", detail: latest };
+  } catch {
+    return {
+      category: "Images",
+      name: "Kernel",
+      status: "fail",
+      detail: "Not found",
+      fix: 'Run "curl -fsSL https://vmsan.dev/install | bash" to install.',
+    };
+  }
+}
+
+function checkRootfs(rootfsDir: string): CheckResult {
+  const rootfsPath = join(rootfsDir, "ubuntu-24.04.ext4");
+  if (existsSync(rootfsPath)) {
+    return {
+      category: "Images",
+      name: "Rootfs (base)",
+      status: "pass",
+      detail: basename(rootfsPath),
+    };
+  }
+  return {
+    category: "Images",
+    name: "Rootfs (base)",
+    status: "fail",
+    detail: "Not found",
+    fix: 'Run "curl -fsSL https://vmsan.dev/install | bash" to install.',
+  };
+}
+
+export function runDoctorChecks(paths?: ReturnType<typeof vmsanPaths>): CheckResult[] {
+  const p = paths ?? vmsanPaths();
+  return [
+    checkKvm(),
+    checkDiskSpace(p.baseDir),
+    checkDefaultInterface(),
+    checkFirecracker(p.binDir),
+    checkJailer(p.binDir),
+    checkAgent(p.agentBin),
+    checkKernel(p.kernelsDir),
+    checkRootfs(p.rootfsDir),
+  ];
+}
+
+const PASS = "\x1b[32mok\x1b[0m";
+const FAIL = "\x1b[31mFAIL\x1b[0m";
+
+function formatHumanOutput(checks: CheckResult[]): string {
+  const lines: string[] = [];
+  let currentCategory = "";
+
+  for (const check of checks) {
+    if (check.category !== currentCategory) {
+      if (currentCategory) lines.push("");
+      lines.push(`  ${check.category}`);
+      currentCategory = check.category;
+    }
+
+    const dots = ".".repeat(Math.max(1, 30 - check.name.length));
+    const statusStr = check.status === "pass" ? PASS : FAIL;
+    const detail = check.status === "pass" ? check.detail : check.detail;
+    lines.push(`    ${check.name} ${dots} ${statusStr} (${detail})`);
+
+    if (check.status === "fail" && check.fix) {
+      lines.push(`      \x1b[33mFix: ${check.fix}\x1b[0m`);
+    }
+  }
+
+  const passed = checks.filter((c) => c.status === "pass").length;
+  const failed = checks.filter((c) => c.status === "fail").length;
+  lines.push("");
+  lines.push(`  Result: ${passed} passed, ${failed} failed`);
+
+  return lines.join("\n");
+}
+
+const doctorCommand = defineCommand({
+  meta: {
+    name: "doctor",
+    description: "Check system prerequisites and vmsan installation health",
+  },
+  async run() {
+    const cmdLog = createCommandLogger("doctor");
+
+    try {
+      const checks = runDoctorChecks();
+      const passed = checks.filter((c) => c.status === "pass").length;
+      const failed = checks.filter((c) => c.status === "fail").length;
+
+      if (getOutputMode() === "json") {
+        cmdLog.set({
+          checks: checks.map(({ fix: _fix, ...rest }) => rest),
+          summary: { passed, failed, total: checks.length },
+        });
+      } else {
+        consola.log("");
+        consola.log("vmsan doctor\n");
+        consola.log(formatHumanOutput(checks));
+        cmdLog.set({ passed, failed, total: checks.length });
+      }
+
+      cmdLog.emit();
+
+      if (failed > 0) {
+        process.exitCode = 1;
+      }
+    } catch (error) {
+      handleCommandError(error, cmdLog);
+      process.exitCode = 1;
+    }
+  },
+});
+
+export default doctorCommand as CommandDef;
