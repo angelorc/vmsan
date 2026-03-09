@@ -43,7 +43,7 @@ if out=$(vmsan create --runtime base --vcpus 1 --memory 256 --json 2>&1); then
   VM_ID=$(extract_vm_id "$out")
   if [ -n "$VM_ID" ]; then
     VM_IDS+=("$VM_ID")
-    if vmsan exec "$VM_ID" echo "hello from VM" 2>&1 | grep -q "hello from VM"; then
+    if vmsan exec "$VM_ID" echo "hello from VM" 2>/dev/null | grep -q "hello from VM"; then
       if vmsan stop "$VM_ID" 2>&1 && vmsan remove "$VM_ID" 2>&1; then
         VM_IDS=("${VM_IDS[@]/$VM_ID/}")
         pass "I1: full lifecycle (create, exec, stop, remove)"
@@ -70,7 +70,7 @@ if out=$(vmsan create --runtime base --vcpus 1 --memory 256 --json 2>&1); then
   if [ -n "$VM_ID" ]; then
     VM_IDS+=("$VM_ID")
     if vmsan upload "$VM_ID" /tmp/vmsan-test-upload.txt 2>&1; then
-      if vmsan exec "$VM_ID" cat /root/vmsan-test-upload.txt 2>&1 | grep -q "test-content"; then
+      if vmsan exec "$VM_ID" cat /root/vmsan-test-upload.txt 2>/dev/null | grep -q "test-content"; then
         pass "I2: file transfer (upload + verify)"
       else
         fail "I2" "uploaded file content mismatch"
@@ -186,7 +186,7 @@ fi
 # I7: JSON output — vmsan list --json produces valid JSON
 # ---------------------------------------------------------------------------
 echo "[I7] JSON output"
-if vmsan list --json 2>&1 | jq . > /dev/null 2>&1; then
+if vmsan list --json 2>/dev/null | jq . > /dev/null 2>&1; then
   pass "I7: vmsan list --json (valid JSON)"
 else
   fail "I7" "vmsan list --json did not produce valid JSON"
