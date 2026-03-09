@@ -1,0 +1,5 @@
+# Use hoisted linker to avoid @nuxt/content context isolation bug
+# with bun's default isolated (pnpm-style) linker.
+# See: https://github.com/nuxt/content/issues/3547
+[install]
+linker = "hoisted"
