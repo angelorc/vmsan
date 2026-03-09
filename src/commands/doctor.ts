@@ -216,7 +216,7 @@ function formatHumanOutput(checks: CheckResult[]): string {
 
     const dots = ".".repeat(Math.max(1, 30 - check.name.length));
     const statusStr = check.status === "pass" ? PASS : FAIL;
-    const detail = check.status === "pass" ? check.detail : check.detail;
+    const detail = check.detail;
     lines.push(`    ${check.name} ${dots} ${statusStr} (${detail})`);
 
     if (check.status === "fail" && check.fix) {
