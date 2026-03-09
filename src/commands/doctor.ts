@@ -6,6 +6,7 @@ import { basename, join } from "node:path";
 import { consola } from "consola";
 import { createCommandLogger, getOutputMode } from "../lib/logger/index.ts";
 import { handleCommandError } from "../errors/index.ts";
+import type { VmsanPaths } from "../paths.ts";
 import { vmsanPaths } from "../paths.ts";
 
 interface CheckResult {
@@ -186,7 +187,7 @@ function checkRootfs(rootfsDir: string): CheckResult {
   };
 }
 
-export function runDoctorChecks(paths?: ReturnType<typeof vmsanPaths>): CheckResult[] {
+export function runDoctorChecks(paths?: VmsanPaths): CheckResult[] {
   const p = paths ?? vmsanPaths();
   return [
     checkKvm(),
