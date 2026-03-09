@@ -173,13 +173,13 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# I6: Version check — vmsan --version prints version string
+# I6: Doctor — vmsan doctor checks system prerequisites
 # ---------------------------------------------------------------------------
-echo "[I6] Version check"
-if vmsan --version 2>&1 | grep -qE '^[0-9]+\.[0-9]+'; then
-  pass "I6: vmsan --version"
+echo "[I6] Doctor"
+if vmsan doctor 2>&1; then
+  pass "I6: vmsan doctor"
 else
-  fail "I6" "vmsan --version did not return a valid version"
+  fail "I6" "vmsan doctor reported failures"
 fi
 
 # ---------------------------------------------------------------------------
