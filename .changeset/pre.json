@@ -5,7 +5,10 @@
     "vmsan": "0.1.0-alpha.27"
   },
   "changesets": [
+    "bright-clouds-dance",
     "cli-help-audit",
+    "docs-beta2-sync",
+    "e2e-smoke-tests",
     "fix-loop-device-install",
     "kvm-preflight-cleanup",
     "late-pianos-help",

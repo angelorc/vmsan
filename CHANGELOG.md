@@ -1,5 +1,17 @@
 # vmsan
 
+## 0.1.0-beta.2
+
+### Minor Changes
+
+- [#56](https://github.com/angelorc/vmsan/pull/56) [`07ac73b`](https://github.com/angelorc/vmsan/commit/07ac73b578e3cb96bc1504390ab905ff00dc08c9) Thanks [@angelorc](https://github.com/angelorc)! - feat: add `vmsan doctor` diagnostic command and fix JSON output consistency
+
+### Patch Changes
+
+- [#55](https://github.com/angelorc/vmsan/pull/55) [`0899f7f`](https://github.com/angelorc/vmsan/commit/0899f7fee2ee18ffa7346612bf41756479764ac7) Thanks [@angelorc](https://github.com/angelorc)! - docs: sync documentation with beta.1 CLI changes
+
+- [#54](https://github.com/angelorc/vmsan/pull/54) [`d518f9a`](https://github.com/angelorc/vmsan/commit/d518f9a8a917285e373cf2b2adbbd56d8f6e5235) Thanks [@angelorc](https://github.com/angelorc)! - test: add e2e smoke test script and manual test matrix
+
 ## 0.1.0-beta.1
 
 ### Minor Changes
