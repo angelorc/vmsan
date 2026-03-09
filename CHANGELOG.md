@@ -1,5 +1,47 @@
 # vmsan
 
+## 0.1.0
+
+### Minor Changes
+
+- [#56](https://github.com/angelorc/vmsan/pull/56) [`07ac73b`](https://github.com/angelorc/vmsan/commit/07ac73b578e3cb96bc1504390ab905ff00dc08c9) Thanks [@angelorc](https://github.com/angelorc)! - feat: add `vmsan doctor` diagnostic command and fix JSON output consistency
+
+- [#47](https://github.com/angelorc/vmsan/pull/47) [`bfc12a7`](https://github.com/angelorc/vmsan/commit/bfc12a795ff2c4024b60a2df624c140e86c3806a) Thanks [@angelorc](https://github.com/angelorc)! - Add KVM pre-flight check to `vmsan create` and cleanup verification after `vmsan stop`/`vmsan remove`
+
+- [#46](https://github.com/angelorc/vmsan/pull/46) [`913e721`](https://github.com/angelorc/vmsan/commit/913e72150acbb449ba8be345f580f78fd11c563f) Thanks [@angelorc](https://github.com/angelorc)! - Add state file versioning to VM state store for future migration support
+
+### Patch Changes
+
+- [#48](https://github.com/angelorc/vmsan/pull/48) [`c824d44`](https://github.com/angelorc/vmsan/commit/c824d44c7961808ec08c965cfa87f94a5fb164c6) Thanks [@angelorc](https://github.com/angelorc)! - Audit and fix CLI help text for all commands
+
+- [#55](https://github.com/angelorc/vmsan/pull/55) [`0899f7f`](https://github.com/angelorc/vmsan/commit/0899f7fee2ee18ffa7346612bf41756479764ac7) Thanks [@angelorc](https://github.com/angelorc)! - docs: sync documentation with beta.1 CLI changes
+
+- [#59](https://github.com/angelorc/vmsan/pull/59) [`14492aa`](https://github.com/angelorc/vmsan/commit/14492aa12970bfcfab6c1938cad6970a30eee7c3) Thanks [@angelorc](https://github.com/angelorc)! - docs: add known limitations and doctor command to README
+
+- [#54](https://github.com/angelorc/vmsan/pull/54) [`d518f9a`](https://github.com/angelorc/vmsan/commit/d518f9a8a917285e373cf2b2adbbd56d8f6e5235) Thanks [@angelorc](https://github.com/angelorc)! - test: add e2e smoke test script and manual test matrix
+
+- [#60](https://github.com/angelorc/vmsan/pull/60) [`d96e740`](https://github.com/angelorc/vmsan/commit/d96e74097500cbeba8ac5ba0f7c6c92a97a29d21) Thanks [@angelorc](https://github.com/angelorc)! - fix: use hoisted linker for docs to work around @nuxt/content context isolation bug
+
+- [#63](https://github.com/angelorc/vmsan/pull/63) [`de8fb76`](https://github.com/angelorc/vmsan/commit/de8fb7683fd6aa59bcf68bbc1edb135e1892ff79) Thanks [@angelorc](https://github.com/angelorc)! - fix: include error code and fix/why fields at top level of JSON error output
+
+- [#44](https://github.com/angelorc/vmsan/pull/44) [`725924c`](https://github.com/angelorc/vmsan/commit/725924c0eb05ac09649a1dfd593258c9ba0f719d) Thanks [@angelorc](https://github.com/angelorc)! - Fix install failure on systems without loop devices by replacing `mount -o loop` with `mkfs.ext4 -d` for rootfs creation, and auto-install Docker when not found instead of skipping runtime builds.
+
+- [#40](https://github.com/angelorc/vmsan/pull/40) [`fe41441`](https://github.com/angelorc/vmsan/commit/fe4144124d9fc371f7cd3d449c03d9db744008e7) Thanks [@angelorc](https://github.com/angelorc)! - Harden installer and VM networking reliability across mixed Linux hosts.
+
+  - fix branch/commit installs and uninstalls in `install.sh`, including safer cleanup of per-VM iptables rules
+  - migrate the default VM subnet to `198.19.x.x` while preserving compatibility with legacy persisted `172.16.x.x` states
+  - keep stopped VM slots reserved, tighten persisted IP parsing, and restore agent connectivity on hosts with restrictive local firewalls
+
+- [#62](https://github.com/angelorc/vmsan/pull/62) [`5092c9d`](https://github.com/angelorc/vmsan/commit/5092c9d0c839ccb53f0b52301277c9edab9743be) Thanks [@angelorc](https://github.com/angelorc)! - Persist isolation flags (disableSeccomp, disablePidNs, disableCgroup) in VM state so they are honored on restart
+
+- [#36](https://github.com/angelorc/vmsan/pull/36) [`b9a5d9c`](https://github.com/angelorc/vmsan/commit/b9a5d9c595301e07419cefb9af6a355fe4ca686b) Thanks [@angelorc](https://github.com/angelorc)! - Improve runtime VM usability and the release lifecycle.
+
+  - fix PATH handling for agent exec and PTY shells so Node/npm and user-global installs work reliably inside runtime VMs
+  - improve source installs in `install.sh` with branch/commit bootstrap support and modern Go enforcement
+  - switch the project to a real Changesets workflow with authored changesets, release PRs, and npm/agent publishing from reviewed version commits
+
+- [#49](https://github.com/angelorc/vmsan/pull/49) [`cab910a`](https://github.com/angelorc/vmsan/commit/cab910a2a07f374892362af4f227e1c8d9d2f245) Thanks [@angelorc](https://github.com/angelorc)! - Add comprehensive unit test suite and reduce stale lock timeout from 5m to 30s
+
 ## 0.1.0-beta.2
 
 ### Minor Changes
