@@ -338,7 +338,12 @@ describe("state file versioning", () => {
   it("preserves existing isolation flags during v1 to v2 migration", () => {
     const dir = makeTempDir();
     // Simulate a state that somehow already has disableSeccomp set (e.g. manual edit)
-    const v1State = { ...makeLegacyState(), id: "vm-v1-custom", stateVersion: 1, disableSeccomp: true };
+    const v1State = {
+      ...makeLegacyState(),
+      id: "vm-v1-custom",
+      stateVersion: 1,
+      disableSeccomp: true,
+    };
     writeFileSync(join(dir, "vm-v1-custom.json"), JSON.stringify(v1State));
 
     const store = new FileVmStateStore(dir);
