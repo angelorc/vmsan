@@ -42,5 +42,8 @@ export function buildInitialVmState(input: InitialVmStateInput): VmState {
     agentToken: input.agentToken,
     agentPort: input.agentPort,
     stateVersion: CURRENT_STATE_VERSION,
+    disableSeccomp: input.disableSeccomp ?? false,
+    disablePidNs: input.disablePidNs ?? false,
+    disableCgroup: input.disableCgroup ?? false,
   };
 }
