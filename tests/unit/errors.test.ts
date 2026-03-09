@@ -1,10 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeEach } from "vitest";
+import { createLogger, initLogger } from "evlog";
 import { VmsanError } from "../../src/errors/base.ts";
 import { ValidationError } from "../../src/errors/validation.ts";
 import { VmError } from "../../src/errors/vm.ts";
 import { TimeoutError } from "../../src/errors/timeout.ts";
 import { FirecrackerApiError } from "../../src/errors/firecracker.ts";
 import { CloudflareError } from "../../src/errors/cloudflare.ts";
+import { handleCommandError } from "../../src/errors/display.ts";
+import type { CommandLogger } from "../../src/lib/logger/index.ts";
 import {
   invalidIntegerFlagError,
   invalidRuntimeError,
@@ -274,5 +277,98 @@ describe("toJSON", () => {
     const err = cloudflareNoZoneError("example.com");
     const json = err.toJSON();
     expect(json.domain).toBe("example.com");
+  });
+});
+
+// ---------- handleCommandError JSON enrichment ----------
+
+describe("handleCommandError JSON enrichment", () => {
+  beforeEach(() => {
+    // Enable evlog so createLogger returns a real logger with getContext()
+    initLogger({ enabled: true, pretty: false, stringify: false });
+  });
+
+  function createTestCmdLog(): CommandLogger & { getContext: () => Record<string, unknown> } {
+    const logger = createLogger({ path: "test" });
+    return {
+      set: logger.set.bind(logger),
+      error: logger.error.bind(logger),
+      emit: () => {},
+      getContext: logger.getContext.bind(logger),
+    };
+  }
+
+  it("includes error code in logger context for VmsanError", () => {
+    const cmdLog = createTestCmdLog();
+    const err = vmNotFoundError("vm-1");
+    handleCommandError(err, cmdLog);
+
+    const ctx = cmdLog.getContext();
+    const error = ctx.error as Record<string, unknown>;
+    expect(error.code).toBe("ERR_VM_NOT_FOUND");
+  });
+
+  it("includes vmId in logger context for VmError", () => {
+    const cmdLog = createTestCmdLog();
+    const err = vmNotFoundError("vm-1");
+    handleCommandError(err, cmdLog);
+
+    const ctx = cmdLog.getContext();
+    const error = ctx.error as Record<string, unknown>;
+    expect(error.vmId).toBe("vm-1");
+  });
+
+  it("includes flag in logger context for ValidationError", () => {
+    const cmdLog = createTestCmdLog();
+    const err = invalidPortError("bad");
+    handleCommandError(err, cmdLog);
+
+    const ctx = cmdLog.getContext();
+    const error = ctx.error as Record<string, unknown>;
+    expect(error.flag).toBe("publish-port");
+  });
+
+  it("promotes fix to error top level", () => {
+    const cmdLog = createTestCmdLog();
+    const err = vmNotFoundError("vm-1");
+    handleCommandError(err, cmdLog);
+
+    const ctx = cmdLog.getContext();
+    const error = ctx.error as Record<string, unknown>;
+    expect(error.fix).toBe("Run 'vmsan list' to see available VMs.");
+  });
+
+  it("promotes why to error top level", () => {
+    const cmdLog = createTestCmdLog();
+    const err = chrootNotFoundError("vm-1");
+    handleCommandError(err, cmdLog);
+
+    const ctx = cmdLog.getContext();
+    const error = ctx.error as Record<string, unknown>;
+    expect(error.why).toBe("The VM data may have been removed.");
+  });
+
+  it("preserves standard error fields (name, message, status)", () => {
+    const cmdLog = createTestCmdLog();
+    const err = vmNotFoundError("vm-1");
+    handleCommandError(err, cmdLog);
+
+    const ctx = cmdLog.getContext();
+    const error = ctx.error as Record<string, unknown>;
+    expect(error.name).toBe("VmError");
+    expect(error.message).toContain("vm-1");
+    expect(error.status).toBe(500);
+  });
+
+  it("does not add extra fields for non-VmsanError errors", () => {
+    const cmdLog = createTestCmdLog();
+    const err = new Error("generic error");
+    handleCommandError(err, cmdLog);
+
+    const ctx = cmdLog.getContext();
+    const error = ctx.error as Record<string, unknown>;
+    expect(error.name).toBe("Error");
+    expect(error.message).toBe("generic error");
+    expect(error).not.toHaveProperty("code");
   });
 });
