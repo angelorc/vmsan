@@ -1,5 +1,17 @@
 # vmsan
 
+## 0.1.0-beta.3
+
+### Patch Changes
+
+- [#59](https://github.com/angelorc/vmsan/pull/59) [`14492aa`](https://github.com/angelorc/vmsan/commit/14492aa12970bfcfab6c1938cad6970a30eee7c3) Thanks [@angelorc](https://github.com/angelorc)! - docs: add known limitations and doctor command to README
+
+- [#60](https://github.com/angelorc/vmsan/pull/60) [`d96e740`](https://github.com/angelorc/vmsan/commit/d96e74097500cbeba8ac5ba0f7c6c92a97a29d21) Thanks [@angelorc](https://github.com/angelorc)! - fix: use hoisted linker for docs to work around @nuxt/content context isolation bug
+
+- [#63](https://github.com/angelorc/vmsan/pull/63) [`de8fb76`](https://github.com/angelorc/vmsan/commit/de8fb7683fd6aa59bcf68bbc1edb135e1892ff79) Thanks [@angelorc](https://github.com/angelorc)! - fix: include error code and fix/why fields at top level of JSON error output
+
+- [#62](https://github.com/angelorc/vmsan/pull/62) [`5092c9d`](https://github.com/angelorc/vmsan/commit/5092c9d0c839ccb53f0b52301277c9edab9743be) Thanks [@angelorc](https://github.com/angelorc)! - Persist isolation flags (disableSeccomp, disablePidNs, disableCgroup) in VM state so they are honored on restart
+
 ## 0.1.0-beta.2
 
 ### Minor Changes
