@@ -1,7 +1,6 @@
 package nftables
 
 import (
-	"errors"
 	"fmt"
 	"net"
 )
@@ -11,12 +10,6 @@ const (
 	PolicyAllowAll = "allow-all"
 	PolicyDenyAll  = "deny-all"
 	PolicyCustom   = "custom"
-)
-
-// Sentinel errors for input validation.
-var (
-	ErrMissingVMId = errors.New("vmId is required")
-	ErrMissingPolicy = errors.New("policy is required")
 )
 
 // PublishedPort describes a single port-forwarding rule from host to guest.
@@ -44,10 +37,10 @@ type SetupConfig struct {
 
 	// Firewall rules
 	PublishedPorts []PublishedPort `json:"publishedPorts,omitempty"`
-	AllowedCIDRs   []string       `json:"allowedCidrs,omitempty"`
-	DeniedCIDRs    []string       `json:"deniedCidrs,omitempty"`
-	SkipDNAT       bool           `json:"skipDnat,omitempty"`
-	DNSResolvers   []string       `json:"dnsResolvers,omitempty"`
+	AllowedCIDRs   []string        `json:"allowedCidrs,omitempty"`
+	DeniedCIDRs    []string        `json:"deniedCidrs,omitempty"`
+	SkipDNAT       bool            `json:"skipDnat,omitempty"`
+	DNSResolvers   []string        `json:"dnsResolvers,omitempty"`
 }
 
 // Validate checks that required fields are present and values are well-formed.
@@ -62,47 +55,85 @@ func (c *SetupConfig) Validate() error {
 	case PolicyAllowAll, PolicyDenyAll, PolicyCustom:
 		// valid
 	default:
-		return fmt.Errorf("invalid policy %q: must be %q, %q, or %q", c.Policy, PolicyAllowAll, PolicyDenyAll, PolicyCustom)
+		return &ValidationError{
+			Field:   "policy",
+			Value:   c.Policy,
+			Message: fmt.Sprintf("invalid policy %q: must be %q, %q, or %q", c.Policy, PolicyAllowAll, PolicyDenyAll, PolicyCustom),
+		}
 	}
 	if c.GuestIP != "" {
 		if ip := net.ParseIP(c.GuestIP); ip == nil || ip.To4() == nil {
-			return fmt.Errorf("invalid guestIp %q: must be an IPv4 address", c.GuestIP)
+			return &ValidationError{
+				Field:   "guestIp",
+				Value:   c.GuestIP,
+				Message: "invalid guestIp: must be an IPv4 address",
+			}
 		}
 	}
 	if c.HostIP != "" {
 		if ip := net.ParseIP(c.HostIP); ip == nil || ip.To4() == nil {
-			return fmt.Errorf("invalid hostIp %q: must be an IPv4 address", c.HostIP)
+			return &ValidationError{
+				Field:   "hostIp",
+				Value:   c.HostIP,
+				Message: "invalid hostIp: must be an IPv4 address",
+			}
 		}
 	}
 	for i, pp := range c.PublishedPorts {
 		if pp.HostPort == 0 {
-			return fmt.Errorf("publishedPorts[%d]: hostPort is required", i)
+			return &ValidationError{
+				Field:   fmt.Sprintf("publishedPorts[%d].hostPort", i),
+				Message: "hostPort is required",
+			}
 		}
 		if pp.GuestPort == 0 {
-			return fmt.Errorf("publishedPorts[%d]: guestPort is required", i)
+			return &ValidationError{
+				Field:   fmt.Sprintf("publishedPorts[%d].guestPort", i),
+				Message: "guestPort is required",
+			}
 		}
 		if pp.Protocol != "" && pp.Protocol != "tcp" && pp.Protocol != "udp" {
-			return fmt.Errorf("publishedPorts[%d]: protocol must be \"tcp\" or \"udp\", got %q", i, pp.Protocol)
+			return &ValidationError{
+				Field:   fmt.Sprintf("publishedPorts[%d].protocol", i),
+				Value:   pp.Protocol,
+				Message: "protocol must be \"tcp\" or \"udp\"",
+			}
 		}
 		if pp.GuestIP != "" {
 			if ip := net.ParseIP(pp.GuestIP); ip == nil || ip.To4() == nil {
-				return fmt.Errorf("publishedPorts[%d]: invalid guestIp %q: must be an IPv4 address", i, pp.GuestIP)
+				return &ValidationError{
+					Field:   fmt.Sprintf("publishedPorts[%d].guestIp", i),
+					Value:   pp.GuestIP,
+					Message: "invalid guestIp: must be an IPv4 address",
+				}
 			}
 		}
 	}
 	for i, cidr := range c.AllowedCIDRs {
 		if _, _, err := net.ParseCIDR(cidr); err != nil {
-			return fmt.Errorf("allowedCidrs[%d] %q: %w", i, cidr, err)
+			return &ValidationError{
+				Field:   fmt.Sprintf("allowedCidrs[%d]", i),
+				Value:   cidr,
+				Message: fmt.Sprintf("invalid CIDR: %v", err),
+			}
 		}
 	}
 	for i, cidr := range c.DeniedCIDRs {
 		if _, _, err := net.ParseCIDR(cidr); err != nil {
-			return fmt.Errorf("deniedCidrs[%d] %q: %w", i, cidr, err)
+			return &ValidationError{
+				Field:   fmt.Sprintf("deniedCidrs[%d]", i),
+				Value:   cidr,
+				Message: fmt.Sprintf("invalid CIDR: %v", err),
+			}
 		}
 	}
 	for i, r := range c.DNSResolvers {
 		if ip := net.ParseIP(r); ip == nil || ip.To4() == nil {
-			return fmt.Errorf("dnsResolvers[%d] %q: must be an IPv4 address", i, r)
+			return &ValidationError{
+				Field:   fmt.Sprintf("dnsResolvers[%d]", i),
+				Value:   r,
+				Message: "must be an IPv4 address",
+			}
 		}
 	}
 	return nil
@@ -158,6 +189,56 @@ func (c *CleanupConfig) Validate() error {
 		return ErrMissingVMId
 	}
 	return nil
+}
+
+// ToOptions converts SetupConfig to SetupOptions for the functional options API.
+func (c SetupConfig) ToOptions() *SetupOptions {
+	opts := NewSetupOptions(c.VMId)
+	opts.Slot = c.Slot
+	opts.Policy = c.Policy
+	opts.TapDevice = c.TapDevice
+	opts.NetNSName = c.NetNSName
+	opts.VmIP = c.GuestIP
+	opts.HostBridgeIP = c.HostIP
+	opts.VethHost = c.VethHost
+	opts.VethGuest = c.VethGuest
+	opts.HostIface = c.DefaultInterface
+	opts.PublishedPorts = c.PublishedPorts
+	opts.AllowedCIDRs = c.AllowedCIDRs
+	opts.DeniedCIDRs = c.DeniedCIDRs
+	opts.SkipDNAT = c.SkipDNAT
+	opts.DNSResolvers = c.DNSResolvers
+	return opts
+}
+
+// ToOptions converts TeardownConfig to TeardownOptions for the functional options API.
+func (c TeardownConfig) ToOptions() *TeardownOptions {
+	opts := NewTeardownOptions(c.VMId)
+	opts.NetNSName = c.NetNSName
+	opts.TapDevice = c.TapDevice
+	opts.VethHost = c.VethHost
+	opts.GuestIP = c.GuestIP
+	opts.Slot = c.Slot
+	return opts
+}
+
+// ToOptions converts VerifyConfig to VerifyOptions for the functional options API.
+func (c VerifyConfig) ToOptions() *VerifyOptions {
+	opts := NewVerifyOptions(c.VMId)
+	opts.NetNSName = c.NetNSName
+	return opts
+}
+
+// ToOptions converts CleanupConfig to CleanupOptions for the functional options API.
+func (c CleanupConfig) ToOptions() *CleanupOptions {
+	opts := NewCleanupOptions(c.VMId)
+	opts.NetNSName = c.NetNSName
+	opts.TapDevice = c.TapDevice
+	opts.VethHost = c.VethHost
+	opts.VethGuest = c.VethGuest
+	opts.HostIP = c.HostIP
+	opts.GuestIP = c.GuestIP
+	return opts
 }
 
 // NftResult is the JSON output for all commands.

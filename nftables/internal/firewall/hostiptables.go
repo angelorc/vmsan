@@ -1,41 +1,42 @@
 package firewall
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"net"
-	"os"
-	"os/exec"
 	"regexp"
 	"strings"
 
 	types "github.com/angelorc/vmsan/nftables"
+	"github.com/angelorc/vmsan/nftables/internal/compat"
 )
 
 // addHostIptables adds host-side FORWARD, MASQUERADE, and DNAT rules via
 // iptables. These must use iptables (not nftables) to coexist with Docker's
 // iptables-nft backend, which may set a FORWARD policy of DROP that a
 // separate nftables chain cannot override.
-func addHostIptables(config types.SetupConfig) error {
-	fwd := fwdDevice(config)
-	subnet := config.GuestIP + "/30"
+func addHostIptables(ctx context.Context, opts *types.SetupOptions, executor compat.IptablesExecutor) error {
+	fwd := fwdDevice(opts)
+	subnet := opts.VmIP + "/30"
 
 	// MASQUERADE outbound traffic from guest subnet
-	if err := ipt("-t", "nat", "-A", "POSTROUTING",
-		"-s", subnet, "-o", config.DefaultInterface,
+	if _, err := executor.Execute(ctx, "-t", "nat", "-A", "POSTROUTING",
+		"-s", subnet, "-o", opts.HostIface,
 		"-j", "MASQUERADE"); err != nil {
 		return fmt.Errorf("masquerade: %w", err)
 	}
 
 	// FORWARD: guest -> internet
-	if err := ipt("-A", "FORWARD",
-		"-i", fwd, "-o", config.DefaultInterface,
+	if _, err := executor.Execute(ctx, "-A", "FORWARD",
+		"-i", fwd, "-o", opts.HostIface,
 		"-s", subnet, "-j", "ACCEPT"); err != nil {
 		return fmt.Errorf("forward outbound: %w", err)
 	}
 
 	// FORWARD: internet -> guest (established/related only)
-	if err := ipt("-A", "FORWARD",
-		"-i", config.DefaultInterface, "-o", fwd,
+	if _, err := executor.Execute(ctx, "-A", "FORWARD",
+		"-i", opts.HostIface, "-o", fwd,
 		"-d", subnet,
 		"-m", "state", "--state", "RELATED,ESTABLISHED",
 		"-j", "ACCEPT"); err != nil {
@@ -43,20 +44,20 @@ func addHostIptables(config types.SetupConfig) error {
 	}
 
 	// DNAT for published ports
-	if !config.SkipDNAT {
-		for _, pp := range config.PublishedPorts {
+	if !opts.SkipDNAT {
+		for _, pp := range opts.PublishedPorts {
 			proto := pp.Protocol
 			if proto == "" {
 				proto = "tcp"
 			}
-			gip := config.GuestIP
+			gip := opts.VmIP
 			if pp.GuestIP != "" {
 				gip = pp.GuestIP
 			}
 
 			// PREROUTING DNAT
-			if err := ipt("-t", "nat", "-A", "PREROUTING",
-				"-i", config.DefaultInterface,
+			if _, err := executor.Execute(ctx, "-t", "nat", "-A", "PREROUTING",
+				"-i", opts.HostIface,
 				"-p", proto,
 				"--dport", fmt.Sprintf("%d", pp.HostPort),
 				"-j", "DNAT",
@@ -65,7 +66,7 @@ func addHostIptables(config types.SetupConfig) error {
 			}
 
 			// FORWARD to allow DNATed traffic through
-			if err := ipt("-A", "FORWARD",
+			if _, err := executor.Execute(ctx, "-A", "FORWARD",
 				"-p", proto,
 				"-d", gip,
 				"--dport", fmt.Sprintf("%d", pp.GuestPort),
@@ -81,21 +82,21 @@ func addHostIptables(config types.SetupConfig) error {
 // removeHostIptables removes host-side iptables rules for a VM by grepping
 // iptables-save output for the VM's device names and guest IP, then issuing
 // corresponding -D commands. Best-effort: logs warnings but does not error.
-func removeHostIptables(config types.TeardownConfig) error {
-	dev := config.TapDevice
-	if config.VethHost != "" {
-		dev = config.VethHost
+func removeHostIptables(ctx context.Context, opts *types.TeardownOptions, executor compat.IptablesExecutor) error {
+	dev := opts.TapDevice
+	if opts.VethHost != "" {
+		dev = opts.VethHost
 	}
 
 	var patterns []string
 	if dev != "" {
 		patterns = append(patterns, dev)
 	}
-	if config.GuestIP != "" {
-		patterns = append(patterns, config.GuestIP)
+	if opts.GuestIP != "" {
+		patterns = append(patterns, opts.GuestIP)
 		// iptables normalizes e.g. 198.19.0.2/30 to 198.19.0.0/30.
 		// Add the network address so MASQUERADE rules are matched too.
-		if ip := net.ParseIP(config.GuestIP); ip != nil {
+		if ip := net.ParseIP(opts.GuestIP); ip != nil {
 			ip4 := ip.To4()
 			if ip4 != nil {
 				netIP := net.IP{ip4[0], ip4[1], ip4[2], ip4[3] & 0xFC}
@@ -107,21 +108,21 @@ func removeHostIptables(config types.TeardownConfig) error {
 		return nil
 	}
 
-	removeMatchingRules("filter", patterns)
-	removeMatchingRules("nat", patterns)
+	removeMatchingRules(ctx, "filter", patterns, executor)
+	removeMatchingRules(ctx, "nat", patterns, executor)
 	return nil
 }
 
 // removeMatchingRules lists rules in the given iptables table, finds lines
 // matching any pattern, and deletes them.
-func removeMatchingRules(table string, patterns []string) {
-	out, err := exec.Command("iptables", "-t", table, "-S").Output()
+func removeMatchingRules(ctx context.Context, table string, patterns []string, executor compat.IptablesExecutor) {
+	out, err := executor.Execute(ctx, "-t", table, "-S")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "vmsan-nftables: warning: iptables -t %s -S: %v\n", table, err)
+		slog.WarnContext(ctx, "failed to list iptables rules", "table", table, "error", err)
 		return
 	}
 
-	for _, line := range strings.Split(string(out), "\n") {
+	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "-A ") {
 			continue
@@ -132,10 +133,11 @@ func removeMatchingRules(table string, patterns []string) {
 		// Convert -A to -D
 		args := []string{"-t", table, "-D"}
 		args = append(args, strings.Fields(line[3:])...)
-		cmd := exec.Command("iptables", args...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			fmt.Fprintf(os.Stderr, "vmsan-nftables: warning: iptables -t %s -D %s: %v: %s\n",
-				table, line[3:], err, strings.TrimSpace(string(out)))
+		if _, err := executor.Execute(ctx, args...); err != nil {
+			slog.WarnContext(ctx, "failed to delete iptables rule",
+				"table", table,
+				"rule", line[3:],
+				"error", err)
 		}
 	}
 }
@@ -155,18 +157,9 @@ func matchesAny(s string, patterns []string) bool {
 
 // fwdDevice returns the device used for FORWARD rules: vethHost in netns mode,
 // tapDevice otherwise.
-func fwdDevice(config types.SetupConfig) string {
+func fwdDevice(config *types.SetupOptions) string {
 	if config.VethHost != "" {
 		return config.VethHost
 	}
 	return config.TapDevice
-}
-
-// ipt runs a single iptables command with the given arguments.
-func ipt(args ...string) error {
-	cmd := exec.Command("iptables", args...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
 }

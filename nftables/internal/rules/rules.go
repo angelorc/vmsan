@@ -15,6 +15,25 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// NftablesClient defines the interface for nftables operations.
+// This abstraction allows for dependency injection and easier testing.
+type NftablesClient interface {
+	AddTable(*nftables.Table) *nftables.Table
+	DelTable(*nftables.Table)
+	AddChain(*nftables.Chain) *nftables.Chain
+	DelChain(*nftables.Chain)
+	AddRule(*nftables.Rule) *nftables.Rule
+	DelRule(*nftables.Rule) error
+	ListTables() ([]*nftables.Table, error)
+	ListChains() ([]*nftables.Chain, error)
+	GetRules(*nftables.Table, *nftables.Chain) ([]*nftables.Rule, error)
+	Flush() error
+	FlushRuleset()
+}
+
+// Compile-time check: ensure *nftables.Conn implements NftablesClient.
+var _ NftablesClient = (*nftables.Conn)(nil)
+
 // IPv4 header offsets (bytes from network header start).
 const (
 	ipv4OffsetProtocol = 9
@@ -28,12 +47,12 @@ const ifnameSize = 16
 // DoHResolverIPs are well-known DNS-over-HTTPS resolver IPs.
 // Blocking TCP 443 to these prevents DoH bypass of DNS filtering.
 var DoHResolverIPs = []string{
-	"8.8.8.8", "8.8.4.4",              // Google
-	"1.1.1.1", "1.0.0.1",              // Cloudflare
-	"9.9.9.9", "149.112.112.112",      // Quad9
+	"8.8.8.8", "8.8.4.4", // Google
+	"1.1.1.1", "1.0.0.1", // Cloudflare
+	"9.9.9.9", "149.112.112.112", // Quad9
 	"208.67.222.222", "208.67.220.220", // OpenDNS
-	"94.140.14.14", "94.140.15.15",     // AdGuard
-	"185.228.168.168",                  // CleanBrowsing
+	"94.140.14.14", "94.140.15.15", // AdGuard
+	"185.228.168.168", // CleanBrowsing
 }
 
 // CrossVMSubnets are internal subnets that must be blocked in the FORWARD chain
@@ -50,13 +69,13 @@ var CrossVMSubnets = []string{
 // Builder composes nftables rules for a specific table and chain.
 // It eliminates the need to pass conn/table/chain to every rule function.
 type Builder struct {
-	c     *nftables.Conn
+	c     NftablesClient
 	table *nftables.Table
 	chain *nftables.Chain
 }
 
 // NewBuilder creates a Builder bound to the given connection, table, and chain.
-func NewBuilder(c *nftables.Conn, table *nftables.Table, chain *nftables.Chain) *Builder {
+func NewBuilder(c NftablesClient, table *nftables.Table, chain *nftables.Chain) *Builder {
 	return &Builder{c: c, table: table, chain: chain}
 }
 
@@ -197,7 +216,7 @@ func (b *Builder) DNSRules(resolvers []string) error {
 // --- Chain constructors ---
 
 // AddNATChain creates a NAT chain with the given hook and priority.
-func AddNATChain(c *nftables.Conn, table *nftables.Table, name string, hook *nftables.ChainHook, priority *nftables.ChainPriority) *nftables.Chain {
+func AddNATChain(c NftablesClient, table *nftables.Table, name string, hook *nftables.ChainHook, priority *nftables.ChainPriority) *nftables.Chain {
 	return c.AddChain(&nftables.Chain{
 		Name:     name,
 		Table:    table,
@@ -208,7 +227,7 @@ func AddNATChain(c *nftables.Conn, table *nftables.Table, name string, hook *nft
 }
 
 // AddFilterChain creates a filter chain with policy DROP.
-func AddFilterChain(c *nftables.Conn, table *nftables.Table, name string, hook *nftables.ChainHook, priority *nftables.ChainPriority) *nftables.Chain {
+func AddFilterChain(c NftablesClient, table *nftables.Table, name string, hook *nftables.ChainHook, priority *nftables.ChainPriority) *nftables.Chain {
 	policyDrop := nftables.ChainPolicyDrop
 	return c.AddChain(&nftables.Chain{
 		Name:     name,

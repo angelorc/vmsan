@@ -1,7 +1,9 @@
 package firewall
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/google/nftables"
 
@@ -21,7 +23,9 @@ const hostTableName = "vmsan_host"
 // actively blocks the guest IP range, users must add explicit allow rules
 // to their firewall configuration. A mark-based bypass approach that fully
 // overrides host firewall decisions is planned for a future release.
-func setupHostBypass(vmId, guestIP string) error {
+func setupHostBypass(ctx context.Context, vmId, guestIP string) error {
+	slog.DebugContext(ctx, "setting up host bypass", "vm_id", vmId, "guest_ip", guestIP)
+
 	ip4, err := rules.ParseIPv4(guestIP)
 	if err != nil {
 		return err
@@ -62,5 +66,10 @@ func setupHostBypass(vmId, guestIP string) error {
 	})
 	rules.NewBuilder(c, hostTable, outputChain).MatchIPAddr(ip4, rules.IPv4OffsetDstAddr)
 
-	return c.Flush()
+	if err := c.Flush(); err != nil {
+		return fmt.Errorf("flush host bypass rules: %w", err)
+	}
+
+	slog.DebugContext(ctx, "host bypass setup complete", "vm_id", vmId)
+	return nil
 }

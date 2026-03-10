@@ -1,7 +1,9 @@
 package firewall
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"runtime"
 
 	types "github.com/angelorc/vmsan/nftables"
@@ -10,22 +12,24 @@ import (
 
 // Verify checks whether the nftables table for a VM exists
 // and reports information about its chains.
-func Verify(config types.VerifyConfig) (*types.VerifyResult, error) {
+func Verify(ctx context.Context, opts *types.VerifyOptions) (*types.VerifyResult, error) {
+	slog.DebugContext(ctx, "verifying firewall", "vm_id", opts.VMId, "netns", opts.NetNSName)
+
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	c, cleanup, err := netns.NewConn(config.NetNSName)
+	c, err := netns.NewConn(ctx, opts.NetNSName)
 	if err != nil {
 		return nil, err
 	}
-	defer cleanup()
+	defer c.Close()
 
 	result := &types.VerifyResult{
 		NftResult: types.NftResult{OK: true},
 	}
 
-	tName := tableName(config.VMId)
-	table, err := findTable(c, tName)
+	tName := tableName(opts.VMId)
+	table, err := findTable(c.Conn, tName)
 	if err != nil {
 		return nil, fmt.Errorf("list tables: %w", err)
 	}
@@ -34,7 +38,7 @@ func Verify(config types.VerifyConfig) (*types.VerifyResult, error) {
 	}
 
 	result.TableExists = true
-	chains, err := c.ListChainsOfTableFamily(table.Family)
+	chains, err := c.Conn.ListChainsOfTableFamily(table.Family)
 	if err != nil {
 		return nil, fmt.Errorf("list chains: %w", err)
 	}
@@ -43,6 +47,11 @@ func Verify(config types.VerifyConfig) (*types.VerifyResult, error) {
 			result.ChainCount++
 		}
 	}
+
+	slog.DebugContext(ctx, "firewall verification complete",
+		"vm_id", opts.VMId,
+		"table_exists", result.TableExists,
+		"chain_count", result.ChainCount)
 
 	return result, nil
 }

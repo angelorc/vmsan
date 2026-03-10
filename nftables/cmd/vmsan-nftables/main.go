@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"syscall"
 	"time"
@@ -15,7 +16,10 @@ import (
 	"github.com/angelorc/vmsan/nftables/internal/firewall"
 )
 
-const stdinTimeout = 5 * time.Second
+const (
+	stdinTimeout = 5 * time.Second
+	cmdTimeout   = 30 * time.Second
+)
 
 // Exit codes per the vmsan-nftables interface contract.
 const (
@@ -30,6 +34,11 @@ func main() {
 }
 
 func run() int {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+	slog.SetDefault(logger)
+
 	if len(os.Args) < 2 {
 		writeResult(&types.NftResult{OK: false, Error: "usage: vmsan-nftables <setup|teardown|verify|cleanup-iptables>", Code: "MISSING_COMMAND"})
 		return exitParseError
@@ -41,22 +50,25 @@ func run() int {
 		return exitParseError
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+	defer cancel()
+
 	switch os.Args[1] {
 	case "setup":
-		return handleSetup(input)
+		return handleSetup(ctx, input)
 	case "teardown":
-		return handleTeardown(input)
+		return handleTeardown(ctx, input)
 	case "verify":
-		return handleVerify(input)
+		return handleVerify(ctx, input)
 	case "cleanup-iptables":
-		return handleCleanupIptables(input)
+		return handleCleanupIptables(ctx, input)
 	default:
 		writeResult(&types.NftResult{OK: false, Error: fmt.Sprintf("unknown command: %s", os.Args[1]), Code: "UNKNOWN_COMMAND"})
 		return exitParseError
 	}
 }
 
-func handleSetup(input []byte) int {
+func handleSetup(ctx context.Context, input []byte) int {
 	var cfg types.SetupConfig
 	if err := json.Unmarshal(input, &cfg); err != nil {
 		return writeParseError(fmt.Errorf("parse config: %w", err))
@@ -64,14 +76,19 @@ func handleSetup(input []byte) int {
 	if err := cfg.Validate(); err != nil {
 		return writeValidationError(err)
 	}
-	if err := firewall.Setup(cfg); err != nil {
+
+	opts := cfg.ToOptions()
+	slog.InfoContext(ctx, "starting setup", "vm_id", opts.VMId)
+	if err := firewall.Setup(ctx, opts); err != nil {
+		slog.ErrorContext(ctx, "setup failed", "vm_id", opts.VMId, "error", err)
 		return writeNftError(err)
 	}
+	slog.InfoContext(ctx, "setup complete", "vm_id", opts.VMId)
 	writeResult(&types.NftResult{OK: true})
 	return exitSuccess
 }
 
-func handleTeardown(input []byte) int {
+func handleTeardown(ctx context.Context, input []byte) int {
 	var cfg types.TeardownConfig
 	if err := json.Unmarshal(input, &cfg); err != nil {
 		return writeParseError(fmt.Errorf("parse config: %w", err))
@@ -79,14 +96,19 @@ func handleTeardown(input []byte) int {
 	if err := cfg.Validate(); err != nil {
 		return writeValidationError(err)
 	}
-	if err := firewall.Teardown(cfg); err != nil {
+
+	opts := cfg.ToOptions()
+	slog.InfoContext(ctx, "starting teardown", "vm_id", opts.VMId)
+	if err := firewall.Teardown(ctx, opts); err != nil {
+		slog.ErrorContext(ctx, "teardown failed", "vm_id", opts.VMId, "error", err)
 		return writeNftError(err)
 	}
+	slog.InfoContext(ctx, "teardown complete", "vm_id", opts.VMId)
 	writeResult(&types.NftResult{OK: true})
 	return exitSuccess
 }
 
-func handleVerify(input []byte) int {
+func handleVerify(ctx context.Context, input []byte) int {
 	var cfg types.VerifyConfig
 	if err := json.Unmarshal(input, &cfg); err != nil {
 		return writeParseError(fmt.Errorf("parse config: %w", err))
@@ -94,15 +116,20 @@ func handleVerify(input []byte) int {
 	if err := cfg.Validate(); err != nil {
 		return writeValidationError(err)
 	}
-	result, err := firewall.Verify(cfg)
+
+	opts := cfg.ToOptions()
+	slog.DebugContext(ctx, "starting verify", "vm_id", opts.VMId)
+	result, err := firewall.Verify(ctx, opts)
 	if err != nil {
+		slog.ErrorContext(ctx, "verify failed", "vm_id", opts.VMId, "error", err)
 		return writeNftError(err)
 	}
+	slog.DebugContext(ctx, "verify complete", "vm_id", cfg.VMId, "table_exists", result.TableExists, "chain_count", result.ChainCount)
 	writeResult(result)
 	return exitSuccess
 }
 
-func handleCleanupIptables(input []byte) int {
+func handleCleanupIptables(ctx context.Context, input []byte) int {
 	var cfg types.CleanupConfig
 	if err := json.Unmarshal(input, &cfg); err != nil {
 		return writeParseError(fmt.Errorf("parse config: %w", err))
@@ -110,9 +137,15 @@ func handleCleanupIptables(input []byte) int {
 	if err := cfg.Validate(); err != nil {
 		return writeValidationError(err)
 	}
-	if err := compat.CleanupLegacyIptables(cfg); err != nil {
+
+	opts := cfg.ToOptions()
+	slog.InfoContext(ctx, "starting legacy iptables cleanup", "vm_id", opts.VMId, "netns", opts.NetNSName)
+	executor := compat.NewRealIptablesExecutor()
+	if err := compat.CleanupLegacyIptables(ctx, opts, executor); err != nil {
+		slog.ErrorContext(ctx, "legacy iptables cleanup failed", "vm_id", opts.VMId, "error", err)
 		return writeNftError(err)
 	}
+	slog.InfoContext(ctx, "legacy iptables cleanup complete", "vm_id", opts.VMId)
 	writeResult(&types.NftResult{OK: true})
 	return exitSuccess
 }
@@ -121,12 +154,14 @@ func handleCleanupIptables(input []byte) int {
 
 // writeParseError writes a JSON parse error response and returns the parse error exit code.
 func writeParseError(err error) int {
+	slog.Error("parse error", "error", err)
 	writeResult(&types.NftResult{OK: false, Error: err.Error(), Code: "JSON_PARSE_ERROR"})
 	return exitParseError
 }
 
 // writeValidationError writes a validation error response and returns the parse error exit code.
 func writeValidationError(err error) int {
+	slog.Error("validation error", "error", err)
 	writeResult(&types.NftResult{OK: false, Error: err.Error(), Code: "VALIDATION_ERROR"})
 	return exitParseError
 }
@@ -134,9 +169,11 @@ func writeValidationError(err error) int {
 // writeNftError classifies an nftables error and writes the appropriate response.
 func writeNftError(err error) int {
 	if isPermissionError(err) {
+		slog.Error("permission denied", "error", err)
 		writeResult(&types.NftResult{OK: false, Error: err.Error(), Code: "PERMISSION_DENIED"})
 		return exitPermDenied
 	}
+	slog.Error("nftables error", "error", err)
 	writeResult(&types.NftResult{OK: false, Error: err.Error(), Code: "NFTABLES_ERROR"})
 	return exitNftError
 }
@@ -180,11 +217,11 @@ func readStdin() ([]byte, error) {
 // writeResult encodes a value as JSON to stdout.
 func writeResult(v any) {
 	if r, ok := v.(*types.NftResult); ok && !r.OK {
-		fmt.Fprintf(os.Stderr, "vmsan-nftables: %s\n", r.Error)
+		slog.Error("operation failed", "error", r.Error, "code", r.Code)
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(v); err != nil {
-		fmt.Fprintf(os.Stderr, "vmsan-nftables: encode JSON: %v\n", err)
+		slog.Error("failed to encode JSON", "error", err)
 	}
 }

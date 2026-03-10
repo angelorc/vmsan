@@ -1,13 +1,16 @@
 package firewall
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"runtime"
 
 	"github.com/google/nftables"
 
 	types "github.com/angelorc/vmsan/nftables"
+	"github.com/angelorc/vmsan/nftables/internal/compat"
 	"github.com/angelorc/vmsan/nftables/internal/netns"
 )
 
@@ -18,37 +21,45 @@ import (
 //
 // Phase 2: Remove input_vm_<vmId> and output_vm_<vmId> chains from vmsan_host.
 // If no chains remain in vmsan_host, the table itself is removed.
-func Teardown(config types.TeardownConfig) error {
+func Teardown(ctx context.Context, opts *types.TeardownOptions) error {
+	slog.DebugContext(ctx, "tearing down firewall", "vm_id", opts.VMId, "netns", opts.NetNSName)
+
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
 	var errs []error
-	if err := deleteVMTable(config); err != nil {
+	if err := deleteVMTable(ctx, opts); err != nil {
 		errs = append(errs, fmt.Errorf("delete VM table: %w", err))
 	}
-	if err := teardownHostBypass(config.VMId); err != nil {
+	if err := teardownHostBypass(ctx, opts.VMId); err != nil {
 		errs = append(errs, fmt.Errorf("teardown host bypass: %w", err))
 	}
 
 	// Host-side iptables cleanup (best-effort)
-	if config.GuestIP != "" || config.TapDevice != "" {
-		if err := removeHostIptables(config); err != nil {
+	if opts.GuestIP != "" || opts.TapDevice != "" {
+		executor := compat.NewRealIptablesExecutor()
+		if err := removeHostIptables(ctx, opts, executor); err != nil {
 			errs = append(errs, fmt.Errorf("host iptables cleanup: %w", err))
 		}
 	}
 
-	return errors.Join(errs...)
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+
+	slog.DebugContext(ctx, "firewall teardown complete", "vm_id", opts.VMId)
+	return nil
 }
 
 // deleteVMTable removes the per-VM nftables table from the network namespace.
-func deleteVMTable(config types.TeardownConfig) error {
-	c, cleanup, err := netns.NewConn(config.NetNSName)
+func deleteVMTable(ctx context.Context, opts *types.TeardownOptions) error {
+	c, err := netns.NewConn(ctx, opts.NetNSName)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	defer c.Close()
 
-	name := tableName(config.VMId)
+	name := tableName(opts.VMId)
 	c.DelTable(&nftables.Table{
 		Family: nftables.TableFamilyIPv4,
 		Name:   name,
@@ -62,7 +73,7 @@ func deleteVMTable(config types.TeardownConfig) error {
 
 // teardownHostBypass removes the per-VM chains from the vmsan_host table.
 // If the table has no remaining chains, it is deleted entirely.
-func teardownHostBypass(vmId string) error {
+func teardownHostBypass(ctx context.Context, vmId string) error {
 	c, err := nftables.New()
 	if err != nil {
 		return fmt.Errorf("nftables conn (host): %w", err)

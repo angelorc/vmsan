@@ -1,9 +1,9 @@
 package compat
 
 import (
+	"context"
 	"fmt"
-	"os"
-	"os/exec"
+	"log/slog"
 	"regexp"
 	"strings"
 
@@ -25,26 +25,26 @@ import (
 // --state` vs `-m conntrack --ctstate`). Grepping for device names is robust.
 //
 // This shim will be removed in 0.3.0 when backward compatibility with 0.1.0 is dropped.
-func CleanupLegacyIptables(cfg types.CleanupConfig) error {
-	patterns := buildPatterns(cfg)
+func CleanupLegacyIptables(ctx context.Context, opts *types.CleanupOptions, executor IptablesExecutor) error {
+	patterns := buildPatterns(opts)
 	if len(patterns) == 0 {
 		return nil
 	}
 
-	output, err := runIptablesSave(cfg.NetNSName)
+	output, err := executor.Save(ctx, opts.NetNSName)
 	if err != nil {
 		return fmt.Errorf("iptables-save: %w", err)
 	}
 
 	rules := parseMatchingRules(output, patterns)
-	deleteRules(rules, cfg.NetNSName)
+	deleteRules(ctx, rules, opts.NetNSName, executor)
 	return nil
 }
 
 // buildPatterns collects non-empty device names and IP addresses to grep for.
-func buildPatterns(cfg types.CleanupConfig) []string {
+func buildPatterns(opts *types.CleanupOptions) []string {
 	var patterns []string
-	for _, s := range []string{cfg.TapDevice, cfg.VethHost, cfg.VethGuest, cfg.HostIP, cfg.GuestIP} {
+	for _, s := range []string{opts.TapDevice, opts.VethHost, opts.VethGuest, opts.HostIP, opts.GuestIP} {
 		if s != "" {
 			patterns = append(patterns, s)
 		}
@@ -56,21 +56,6 @@ func buildPatterns(cfg types.CleanupConfig) []string {
 type iptablesRule struct {
 	table string // e.g. "filter", "nat"
 	args  string // e.g. "FORWARD -i fhvm0 -j ACCEPT" (the -A prefix stripped)
-}
-
-// runIptablesSave executes iptables-save, optionally inside a network namespace.
-func runIptablesSave(netns string) (string, error) {
-	var cmd *exec.Cmd
-	if netns != "" {
-		cmd = exec.Command("ip", "netns", "exec", netns, "iptables-save")
-	} else {
-		cmd = exec.Command("iptables-save")
-	}
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
 }
 
 // parseMatchingRules scans iptables-save output and returns rules that mention
@@ -111,34 +96,26 @@ func parseMatchingRules(output string, patterns []string) []iptablesRule {
 }
 
 // deleteRules runs `iptables -t <table> -D <args>` for each rule.
-// Deletion failures are logged to stderr but do not stop processing.
-func deleteRules(rules []iptablesRule, netns string) {
+// Deletion failures are logged but do not stop processing.
+func deleteRules(ctx context.Context, rules []iptablesRule, netns string, executor IptablesExecutor) {
 	for _, r := range rules {
-		if err := deleteRule(r, netns); err != nil {
-			fmt.Fprintf(os.Stderr, "vmsan-nftables: warning: failed to delete iptables rule (table=%s): %s: %v\n", r.table, r.args, err)
+		if err := deleteRule(ctx, r, netns, executor); err != nil {
+			slog.WarnContext(ctx, "failed to delete iptables rule",
+				"table", r.table,
+				"rule", r.args,
+				"error", err)
 		}
 	}
 }
 
 // deleteRule executes a single iptables -D command.
-func deleteRule(r iptablesRule, netns string) error {
+func deleteRule(ctx context.Context, r iptablesRule, netns string, executor IptablesExecutor) error {
 	// Build: iptables -t <table> -D <chain> <rest...>
 	args := []string{"-t", r.table, "-D"}
 	args = append(args, strings.Fields(r.args)...)
 
-	var cmd *exec.Cmd
-	if netns != "" {
-		nsArgs := []string{"netns", "exec", netns, "iptables"}
-		nsArgs = append(nsArgs, args...)
-		cmd = exec.Command("ip", nsArgs...)
-	} else {
-		cmd = exec.Command("iptables", args...)
-	}
-
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	_, err := executor.Execute(ctx, args...)
+	return err
 }
 
 // containsAny reports whether s contains any of the given patterns as whole tokens.

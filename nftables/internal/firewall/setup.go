@@ -2,7 +2,9 @@
 package firewall
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"runtime"
 
 	"github.com/google/nftables"
@@ -10,6 +12,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	types "github.com/angelorc/vmsan/nftables"
+	"github.com/angelorc/vmsan/nftables/internal/compat"
 	"github.com/angelorc/vmsan/nftables/internal/netns"
 	"github.com/angelorc/vmsan/nftables/internal/rules"
 )
@@ -24,25 +27,27 @@ import (
 //
 // Rule ordering in the forward chain follows the workflow specification:
 //
-//	1. ct state established,related accept
-//	2. Interface forward accept (tap/veth)
-//	3. DNS allow (configured resolvers) + DNS block (all others)
-//	4. ICMP drop
-//	5. UDP drop
-//	6. DoT drop (TCP 853)
-//	7. DoH drop (TCP 443 to known resolver IPs)
-//	8. Cross-VM isolation (internal subnet drops)
-//	9. Policy-specific rules (allow-all: accept, deny-all: nothing, custom: CIDR rules)
-func Setup(config types.SetupConfig) error {
+//  1. ct state established,related accept
+//  2. Interface forward accept (tap/veth)
+//  3. DNS allow (configured resolvers) + DNS block (all others)
+//  4. ICMP drop
+//  5. UDP drop
+//  6. DoT drop (TCP 853)
+//  7. DoH drop (TCP 443 to known resolver IPs)
+//  8. Cross-VM isolation (internal subnet drops)
+//  9. Policy-specific rules (allow-all: accept, deny-all: nothing, custom: CIDR rules)
+func Setup(ctx context.Context, opts *types.SetupOptions) error {
+	slog.DebugContext(ctx, "setting up firewall", "vm_id", opts.VMId, "netns", opts.NetNSName)
+
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	if err := setupVMTable(config); err != nil {
+	if err := setupVMTable(ctx, opts); err != nil {
 		return err
 	}
 
-	if config.GuestIP != "" {
-		if err := setupHostBypass(config.VMId, config.GuestIP); err != nil {
+	if opts.VmIP != "" {
+		if err := setupHostBypass(ctx, opts.VMId, opts.VmIP); err != nil {
 			return fmt.Errorf("host bypass rules: %w", err)
 		}
 	}
@@ -50,26 +55,28 @@ func Setup(config types.SetupConfig) error {
 	// Host-side iptables FORWARD/MASQUERADE/DNAT.
 	// Required for Docker coexistence: nftables chains can't override
 	// iptables-nft FORWARD DROP policy.
-	if config.Policy != types.PolicyDenyAll {
-		if err := addHostIptables(config); err != nil {
+	if opts.Policy != types.PolicyDenyAll {
+		executor := compat.NewRealIptablesExecutor()
+		if err := addHostIptables(ctx, opts, executor); err != nil {
 			return fmt.Errorf("host iptables: %w", err)
 		}
 	}
 
+	slog.DebugContext(ctx, "firewall setup complete", "vm_id", opts.VMId)
 	return nil
 }
 
 // setupVMTable creates the per-VM nftables table in the VM's network namespace.
-func setupVMTable(config types.SetupConfig) error {
-	c, cleanup, err := netns.NewConn(config.NetNSName)
+func setupVMTable(ctx context.Context, opts *types.SetupOptions) error {
+	c, err := netns.NewConn(ctx, opts.NetNSName)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	defer c.Close()
 
 	table := c.AddTable(&nftables.Table{
 		Family: nftables.TableFamilyIPv4,
-		Name:   tableName(config.VMId),
+		Name:   tableName(opts.VMId),
 	})
 
 	prerouting := rules.AddNATChain(c, table, "prerouting", nftables.ChainHookPrerouting, nftables.ChainPriorityNATDest)
@@ -82,10 +89,10 @@ func setupVMTable(config types.SetupConfig) error {
 	fwd.Established()
 
 	// 2. Interface forwarding (tap <-> veth, both directions)
-	addInterfaceForwardRules(fwd, config)
+	addInterfaceForwardRules(fwd, opts)
 
 	// 3. DNS: allow configured resolvers, block all others
-	if err := fwd.DNSRules(config.DNSResolvers); err != nil {
+	if err := fwd.DNSRules(opts.DNSResolvers); err != nil {
 		return err
 	}
 
@@ -103,13 +110,13 @@ func setupVMTable(config types.SetupConfig) error {
 	}
 
 	// 9. Policy-specific rules
-	if err := addPolicyRules(fwd, config); err != nil {
+	if err := addPolicyRules(fwd, opts); err != nil {
 		return err
 	}
 
 	// Prerouting chain (DNAT for published ports)
-	if !config.SkipDNAT {
-		if err := addPublishedPortRules(c, table, prerouting, config); err != nil {
+	if !opts.SkipDNAT {
+		if err := addPublishedPortRules(c.Conn, table, prerouting, opts); err != nil {
 			return err
 		}
 	}
@@ -124,50 +131,50 @@ func setupVMTable(config types.SetupConfig) error {
 
 // addInterfaceForwardRules allows bidirectional forwarding between
 // the VM's tap device and veth interfaces.
-func addInterfaceForwardRules(b *rules.Builder, config types.SetupConfig) {
-	if config.TapDevice != "" && config.VethHost != "" {
-		b.MatchIface(config.TapDevice, config.VethHost)
-		b.MatchIface(config.VethHost, config.TapDevice)
+func addInterfaceForwardRules(b *rules.Builder, opts *types.SetupOptions) {
+	if opts.TapDevice != "" && opts.VethHost != "" {
+		b.MatchIface(opts.TapDevice, opts.VethHost)
+		b.MatchIface(opts.VethHost, opts.TapDevice)
 	}
-	if config.TapDevice != "" && config.VethGuest != "" {
-		b.MatchIface(config.VethGuest, config.TapDevice)
-		b.MatchIface(config.TapDevice, config.VethGuest)
+	if opts.TapDevice != "" && opts.VethGuest != "" {
+		b.MatchIface(opts.VethGuest, opts.TapDevice)
+		b.MatchIface(opts.TapDevice, opts.VethGuest)
 	}
 }
 
 // addPolicyRules adds rules specific to the configured network policy.
-func addPolicyRules(b *rules.Builder, config types.SetupConfig) error {
-	switch config.Policy {
+func addPolicyRules(b *rules.Builder, opts *types.SetupOptions) error {
+	switch opts.Policy {
 	case types.PolicyAllowAll:
 		b.Accept()
 	case types.PolicyDenyAll:
 		// Nothing -- default chain policy is DROP
 	case types.PolicyCustom:
-		for _, cidr := range config.AllowedCIDRs {
+		for _, cidr := range opts.AllowedCIDRs {
 			if err := b.MatchDstCIDR(cidr, expr.VerdictAccept); err != nil {
 				return fmt.Errorf("allowed CIDR %s: %w", cidr, err)
 			}
 		}
-		for _, cidr := range config.DeniedCIDRs {
+		for _, cidr := range opts.DeniedCIDRs {
 			if err := b.MatchDstCIDR(cidr, expr.VerdictDrop); err != nil {
 				return fmt.Errorf("denied CIDR %s: %w", cidr, err)
 			}
 		}
 	default:
-		return fmt.Errorf("unknown policy: %q", config.Policy)
+		return fmt.Errorf("unknown policy: %q", opts.Policy)
 	}
 	return nil
 }
 
 // addPublishedPortRules adds DNAT rules for each published port.
-func addPublishedPortRules(c *nftables.Conn, table *nftables.Table, chain *nftables.Chain, config types.SetupConfig) error {
-	guestIP, err := rules.ParseIPv4(config.GuestIP)
+func addPublishedPortRules(c *nftables.Conn, table *nftables.Table, chain *nftables.Chain, opts *types.SetupOptions) error {
+	guestIP, err := rules.ParseIPv4(opts.VmIP)
 	if err != nil {
 		return fmt.Errorf("guest IP: %w", err)
 	}
 
 	b := rules.NewBuilder(c, table, chain)
-	for _, pp := range config.PublishedPorts {
+	for _, pp := range opts.PublishedPorts {
 		dstIP := guestIP
 		if pp.GuestIP != "" {
 			ip, err := rules.ParseIPv4(pp.GuestIP)
