@@ -370,4 +370,23 @@ describe("runDoctorChecks", () => {
     const fsCheck = checks.find((c) => c.name === "Jailer filesystem")!;
     expect(fsCheck.status).toBe("pass");
   });
+
+  test("jailer filesystem check does not match sibling prefix mountpoints", () => {
+    setupAllPassing();
+    // /home has nodev but /home2 does not — jailer is under /home2
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      if (String(p) === "/proc/mounts") {
+        return "/dev/sda1 / ext4 rw,relatime 0 0\n/dev/sda2 /home ext4 rw,nodev,nosuid 0 0\n/dev/sda3 /home2 ext4 rw,relatime 0 0\n" as unknown as ReturnType<
+          typeof readFileSync
+        >;
+      }
+      return "" as unknown as ReturnType<typeof readFileSync>;
+    });
+
+    const home2Paths = { ...fakePaths, jailerBaseDir: "/home2/user/.vmsan/jailer" };
+    const checks = runDoctorChecks(home2Paths);
+    const fsCheck = checks.find((c) => c.name === "Jailer filesystem")!;
+    expect(fsCheck.status).toBe("pass");
+    expect(fsCheck.detail).toBe("/home2");
+  });
 });

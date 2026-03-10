@@ -112,13 +112,21 @@ function checkJailerFilesystem(jailerBaseDir: string): CheckResult {
       const parts = line.split(" ");
       if (parts.length < 4) continue;
       const mountpoint = parts[1];
-      if (jailerBaseDir.startsWith(mountpoint) && mountpoint.length > bestMatch.length) {
+      const isAncestor =
+        jailerBaseDir === mountpoint ||
+        jailerBaseDir.startsWith(mountpoint.endsWith("/") ? mountpoint : `${mountpoint}/`);
+      if (isAncestor && mountpoint.length > bestMatch.length) {
         bestMatch = mountpoint;
         bestOptions = parts[3];
       }
     }
     if (!bestMatch) {
-      return { category: "System", name: "Jailer filesystem", status: "pass", detail: "Check skipped" };
+      return {
+        category: "System",
+        name: "Jailer filesystem",
+        status: "pass",
+        detail: "Check skipped",
+      };
     }
     const options = bestOptions.split(",");
     if (options.includes("nodev")) {
@@ -132,7 +140,12 @@ function checkJailerFilesystem(jailerBaseDir: string): CheckResult {
     }
     return { category: "System", name: "Jailer filesystem", status: "pass", detail: bestMatch };
   } catch {
-    return { category: "System", name: "Jailer filesystem", status: "pass", detail: "Check skipped" };
+    return {
+      category: "System",
+      name: "Jailer filesystem",
+      status: "pass",
+      detail: "Check skipped",
+    };
   }
 }
 
