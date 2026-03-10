@@ -112,6 +112,11 @@ func (c *SetupConfig) Validate() error {
 type TeardownConfig struct {
 	VMId      string `json:"vmId"`
 	NetNSName string `json:"netnsName"`
+	// Host-side iptables cleanup fields (0.2.0)
+	TapDevice string `json:"tapDevice,omitempty"`
+	VethHost  string `json:"vethHost,omitempty"`
+	GuestIP   string `json:"guestIp,omitempty"`
+	Slot      int    `json:"slot,omitempty"`
 }
 
 // Validate checks that required fields are present.

@@ -47,6 +47,15 @@ func Setup(config types.SetupConfig) error {
 		}
 	}
 
+	// Host-side iptables FORWARD/MASQUERADE/DNAT.
+	// Required for Docker coexistence: nftables chains can't override
+	// iptables-nft FORWARD DROP policy.
+	if config.Policy != types.PolicyDenyAll {
+		if err := addHostIptables(config); err != nil {
+			return fmt.Errorf("host iptables: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -105,10 +114,9 @@ func setupVMTable(config types.SetupConfig) error {
 		}
 	}
 
-	// Postrouting chain — intentionally empty.
-	// Masquerade is handled on the HOST via iptables to coexist with Docker's
-	// FORWARD chain (nftables chains are independent, so a separate nftables
-	// FORWARD accept doesn't bypass Docker's iptables-nft DROP policy).
+	// Postrouting chain — intentionally empty in per-VM nftables namespace.
+	// MASQUERADE/FORWARD/DNAT are handled on the HOST via iptables (see
+	// addHostIptables) to coexist with Docker's iptables-nft backend.
 	_ = postrouting
 
 	return c.Flush()

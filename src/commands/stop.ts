@@ -45,7 +45,7 @@ const stopCommand = defineCommand({
         return;
       }
 
-      // Stop sequentially (shared iptables resources)
+      // Stop sequentially (shared firewall resources)
       const results: { vmId: string; success: boolean }[] = [];
       let hasErrors = false;
       for (const id of vmIds) {

@@ -29,6 +29,14 @@ func Teardown(config types.TeardownConfig) error {
 	if err := teardownHostBypass(config.VMId); err != nil {
 		errs = append(errs, fmt.Errorf("teardown host bypass: %w", err))
 	}
+
+	// Host-side iptables cleanup (best-effort)
+	if config.GuestIP != "" || config.TapDevice != "" {
+		if err := removeHostIptables(config); err != nil {
+			errs = append(errs, fmt.Errorf("host iptables cleanup: %w", err))
+		}
+	}
+
 	return errors.Join(errs...)
 }
 
