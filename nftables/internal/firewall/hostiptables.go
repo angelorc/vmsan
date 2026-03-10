@@ -2,6 +2,7 @@ package firewall
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"regexp"
@@ -92,6 +93,15 @@ func removeHostIptables(config types.TeardownConfig) error {
 	}
 	if config.GuestIP != "" {
 		patterns = append(patterns, config.GuestIP)
+		// iptables normalizes e.g. 198.19.0.2/30 to 198.19.0.0/30.
+		// Add the network address so MASQUERADE rules are matched too.
+		if ip := net.ParseIP(config.GuestIP); ip != nil {
+			ip4 := ip.To4()
+			if ip4 != nil {
+				netIP := net.IP{ip4[0], ip4[1], ip4[2], ip4[3] & 0xFC}
+				patterns = append(patterns, netIP.String())
+			}
+		}
 	}
 	if len(patterns) == 0 {
 		return nil
