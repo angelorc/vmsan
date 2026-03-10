@@ -5,7 +5,11 @@
 const _origEmit = process.emit;
 // @ts-expect-error -- overriding emit to filter a known harmless deprecation
 process.emit = function (event: string, ...args: unknown[]) {
-  if (event === "warning" && (args[0] as { name?: string })?.name === "DeprecationWarning" && (args[0] as { code?: string })?.code === "DEP0040") {
+  if (
+    event === "warning" &&
+    (args[0] as { name?: string })?.name === "DeprecationWarning" &&
+    (args[0] as { code?: string })?.code === "DEP0040"
+  ) {
     return false;
   }
   return _origEmit.apply(process, [event, ...args] as Parameters<typeof _origEmit>);
