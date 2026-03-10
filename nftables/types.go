@@ -84,6 +84,11 @@ func (c *SetupConfig) Validate() error {
 		if pp.Protocol != "" && pp.Protocol != "tcp" && pp.Protocol != "udp" {
 			return fmt.Errorf("publishedPorts[%d]: protocol must be \"tcp\" or \"udp\", got %q", i, pp.Protocol)
 		}
+		if pp.GuestIP != "" {
+			if ip := net.ParseIP(pp.GuestIP); ip == nil || ip.To4() == nil {
+				return fmt.Errorf("publishedPorts[%d]: invalid guestIp %q: must be an IPv4 address", i, pp.GuestIP)
+			}
+		}
 	}
 	for i, cidr := range c.AllowedCIDRs {
 		if _, _, err := net.ParseCIDR(cidr); err != nil {

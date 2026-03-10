@@ -152,11 +152,15 @@ func (b *Builder) Accept() {
 // --- Composite helpers ---
 
 // DoHDropRules blocks TCP 443 to well-known DoH resolver IPs.
-func (b *Builder) DoHDropRules() {
+func (b *Builder) DoHDropRules() error {
 	for _, ipStr := range DoHResolverIPs {
-		ip := net.ParseIP(ipStr).To4()
+		ip, err := ParseIPv4(ipStr)
+		if err != nil {
+			return fmt.Errorf("invalid DoH resolver IP %q: %w", ipStr, err)
+		}
 		b.MatchDstIPPort(ip, unix.IPPROTO_TCP, 443, expr.VerdictDrop)
 	}
+	return nil
 }
 
 // CrossVMIsolation blocks traffic to all internal VM subnets.

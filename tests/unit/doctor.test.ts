@@ -68,7 +68,7 @@ describe("runDoctorChecks", () => {
       if (cmdStr.includes("--version")) {
         return "firecracker v1.14.2\n";
       }
-      if (cmdStr.includes("nft list tables")) {
+      if (cmdStr.includes("vmsan-nftables")) {
         return "";
       }
       // ufw/firewalld not active
@@ -359,12 +359,12 @@ describe("runDoctorChecks", () => {
 
   // ---------- nftables kernel check ----------
 
-  test("nftables kernel check fails when nft command fails", () => {
+  test("nftables kernel check fails when vmsan-nftables verify fails", () => {
     setupAllPassing();
     vi.mocked(execSync).mockImplementation((cmd: string | URL) => {
       const cmdStr = String(cmd);
-      if (cmdStr.includes("nft list tables")) {
-        throw new Error("nft: command not found");
+      if (cmdStr.includes("vmsan-nftables") && cmdStr.includes("verify")) {
+        throw new Error("nftables kernel support not available");
       }
       if (cmdStr.includes("ip route show default")) {
         return "default via 192.168.1.1 dev eth0 proto dhcp metric 100\n";
@@ -379,16 +379,16 @@ describe("runDoctorChecks", () => {
     const checks = runDoctorChecks(fakePaths);
     const nftKernelCheck = checks.find((c) => c.name === "nftables kernel")!;
     expect(nftKernelCheck.status).toBe("fail");
-    expect(nftKernelCheck.detail).toBe("nft not available");
+    expect(nftKernelCheck.detail).toBe("nftables kernel support not available");
     expect(nftKernelCheck.fix).toContain("nf_tables");
   });
 
-  test("nftables kernel check passes when nft command succeeds", () => {
+  test("nftables kernel check passes when vmsan-nftables verify succeeds", () => {
     setupAllPassing();
     const checks = runDoctorChecks(fakePaths);
     const nftKernelCheck = checks.find((c) => c.name === "nftables kernel")!;
     expect(nftKernelCheck.status).toBe("pass");
-    expect(nftKernelCheck.detail).toBe("nft available");
+    expect(nftKernelCheck.detail).toBe("nftables kernel support verified");
   });
 
   // ---------- host firewall check ----------
@@ -409,7 +409,7 @@ describe("runDoctorChecks", () => {
       if (cmdStr.includes("--version")) {
         return "firecracker v1.14.2\n";
       }
-      if (cmdStr.includes("nft list tables")) {
+      if (cmdStr.includes("vmsan-nftables")) {
         return "";
       }
       throw new Error("Command failed");
@@ -438,7 +438,7 @@ describe("runDoctorChecks", () => {
       if (cmdStr.includes("--version")) {
         return "firecracker v1.14.2\n";
       }
-      if (cmdStr.includes("nft list tables")) {
+      if (cmdStr.includes("vmsan-nftables")) {
         return "";
       }
       throw new Error("Command failed");

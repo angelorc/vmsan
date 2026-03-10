@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 
 	types "github.com/angelorc/vmsan/nftables"
@@ -140,10 +141,16 @@ func deleteRule(r iptablesRule, netns string) error {
 	return nil
 }
 
-// containsAny reports whether s contains any of the given substrings.
+// containsAny reports whether s contains any of the given patterns as whole tokens.
+// Uses regexp.QuoteMeta to safely escape patterns (IPs, device names) and wraps
+// them with boundary assertions to prevent partial matches — e.g., "10.0.0.1"
+// must not match a rule containing "10.0.0.10" or "10.0.0.100".
 func containsAny(s string, patterns []string) bool {
 	for _, p := range patterns {
-		if strings.Contains(s, p) {
+		// Match pattern bounded by non-alphanumeric/non-dot chars (or string edges).
+		// In iptables-save output, IPs are delimited by spaces, slashes, or colons.
+		re := regexp.MustCompile(`(?:^|[^0-9a-zA-Z.])` + regexp.QuoteMeta(p) + `(?:[^0-9a-zA-Z.]|$)`)
+		if re.MatchString(s) {
 			return true
 		}
 	}

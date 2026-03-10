@@ -147,22 +147,28 @@ function checkNftablesBinary(nftablesBin: string): CheckResult {
   return { category: "Binaries", name: "vmsan-nftables", status: "pass", detail: "Found" };
 }
 
-function checkNftablesKernel(): CheckResult {
+function checkNftablesKernel(nftablesBin: string): CheckResult {
   try {
-    execSync("nft list tables", { encoding: "utf-8", stdio: "pipe" });
+    // Use vmsan-nftables verify (netlink-based) instead of the nft CLI.
+    // vmsan-nftables uses netlink directly and doesn't require the nft package.
+    execSync(`"${nftablesBin}" verify`, {
+      input: "{}",
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
     return {
       category: "System",
       name: "nftables kernel",
       status: "pass",
-      detail: "nft available",
+      detail: "nftables kernel support verified",
     };
   } catch {
     return {
       category: "System",
       name: "nftables kernel",
       status: "fail",
-      detail: "nft not available",
-      fix: "Install nftables and load the kernel module: sudo modprobe nf_tables",
+      detail: "nftables kernel support not available",
+      fix: "Load the nftables kernel module: sudo modprobe nf_tables",
     };
   }
 }
@@ -255,7 +261,7 @@ export function runDoctorChecks(paths?: VmsanPaths): CheckResult[] {
     checkKvm(),
     checkDiskSpace(p.baseDir),
     checkDefaultInterface(),
-    checkNftablesKernel(),
+    checkNftablesKernel(p.nftablesBin),
     checkHostFirewall(),
     checkFirecracker(p.binDir),
     checkJailer(p.binDir),

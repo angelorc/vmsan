@@ -191,6 +191,48 @@ func TestSetupConfig_Validate_PublishedPort_ValidProtocols(t *testing.T) {
 	}
 }
 
+func TestSetupConfig_Validate_PublishedPort_InvalidGuestIP(t *testing.T) {
+	tests := []struct {
+		name    string
+		guestIP string
+	}{
+		{"garbage", "not-an-ip"},
+		{"IPv6", "::1"},
+		{"too many octets", "1.2.3.4.5"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &SetupConfig{
+				VMId:   "vm-1",
+				Policy: PolicyAllowAll,
+				PublishedPorts: []PublishedPort{
+					{HostPort: 8080, GuestPort: 80, GuestIP: tt.guestIP},
+				},
+			}
+			err := c.Validate()
+			if err == nil {
+				t.Fatalf("expected error for published port guestIp %q", tt.guestIP)
+			}
+			if !strings.Contains(err.Error(), "guestIp") {
+				t.Errorf("got %v, want error mentioning guestIp", err)
+			}
+		})
+	}
+}
+
+func TestSetupConfig_Validate_PublishedPort_ValidGuestIP(t *testing.T) {
+	c := &SetupConfig{
+		VMId:   "vm-1",
+		Policy: PolicyAllowAll,
+		PublishedPorts: []PublishedPort{
+			{HostPort: 8080, GuestPort: 80, GuestIP: "198.19.0.2"},
+		},
+	}
+	if err := c.Validate(); err != nil {
+		t.Errorf("Validate() = %v for valid published port guestIp", err)
+	}
+}
+
 func TestSetupConfig_Validate_InvalidAllowedCIDR(t *testing.T) {
 	c := &SetupConfig{
 		VMId:         "vm-1",

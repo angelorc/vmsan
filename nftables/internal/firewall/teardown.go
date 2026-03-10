@@ -1,6 +1,7 @@
 package firewall
 
 import (
+	"errors"
 	"fmt"
 	"runtime"
 
@@ -21,11 +22,14 @@ func Teardown(config types.TeardownConfig) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
+	var errs []error
 	if err := deleteVMTable(config); err != nil {
-		return err
+		errs = append(errs, fmt.Errorf("delete VM table: %w", err))
 	}
-
-	return teardownHostBypass(config.VMId)
+	if err := teardownHostBypass(config.VMId); err != nil {
+		errs = append(errs, fmt.Errorf("teardown host bypass: %w", err))
+	}
+	return errors.Join(errs...)
 }
 
 // deleteVMTable removes the per-VM nftables table from the network namespace.

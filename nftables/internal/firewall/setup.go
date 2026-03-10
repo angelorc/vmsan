@@ -84,7 +84,9 @@ func setupVMTable(config types.SetupConfig) error {
 	fwd.MatchProtoVerdict(unix.IPPROTO_ICMP, expr.VerdictDrop)
 	fwd.MatchProtoVerdict(unix.IPPROTO_UDP, expr.VerdictDrop)
 	fwd.MatchDstPort(unix.IPPROTO_TCP, 853, expr.VerdictDrop)
-	fwd.DoHDropRules()
+	if err := fwd.DoHDropRules(); err != nil {
+		return err
+	}
 
 	// 8. Cross-VM isolation
 	if err := fwd.CrossVMIsolation(); err != nil {
