@@ -33,10 +33,31 @@ export const firecrackerApiError = (
   path: string,
   httpStatus: number,
   body: string,
-): FirecrackerApiError =>
-  new FirecrackerApiError("ERR_FIRECRACKER_API", {
+): FirecrackerApiError => {
+  const opts: ErrorOptions & { method: string; path: string; httpStatus: number } = {
     method,
     path,
     httpStatus,
     message: `${method} ${path} failed (${httpStatus}): ${body}`,
-  });
+  };
+
+  if (body.includes("/dev/net/tun") && body.includes("Permission denied")) {
+    opts.why =
+      "Firecracker cannot open /dev/net/tun inside the jailer chroot. " +
+      "This usually means the filesystem where ~/.vmsan resides is mounted with the 'nodev' option.";
+    opts.fix = [
+      "Check mount options:  findmnt -T ~/.vmsan -o TARGET,OPTIONS",
+      "",
+      "If 'nodev' appears, remount without it:",
+      "  sudo mount -o remount,dev <mountpoint>",
+      "",
+      "Or move vmsan to a different filesystem:",
+      "  export VMSAN_DIR=/var/lib/vmsan",
+      "  curl -fsSL https://vmsan.dev/install | bash",
+      "",
+      "Run 'vmsan doctor' for a full diagnostic.",
+    ].join("\n");
+  }
+
+  return new FirecrackerApiError("ERR_FIRECRACKER_API", opts);
+};

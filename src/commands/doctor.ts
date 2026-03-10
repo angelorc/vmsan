@@ -1,6 +1,6 @@
 import type { CommandDef } from "citty";
 import { defineCommand } from "citty";
-import { accessSync, constants, existsSync, readdirSync, statfsSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync, readdirSync, statfsSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { basename, join } from "node:path";
 import { consola } from "consola";
@@ -85,6 +85,54 @@ function checkDefaultInterface(): CheckResult {
       detail: "No default route",
       fix: "Configure a default network route.",
     };
+  }
+}
+
+function checkTunDevice(): CheckResult {
+  try {
+    accessSync("/dev/net/tun", constants.R_OK | constants.W_OK);
+    return { category: "System", name: "TUN device", status: "pass", detail: "/dev/net/tun" };
+  } catch {
+    return {
+      category: "System",
+      name: "TUN device",
+      status: "fail",
+      detail: "/dev/net/tun not accessible",
+      fix: "Load the tun kernel module: sudo modprobe tun",
+    };
+  }
+}
+
+function checkJailerFilesystem(jailerBaseDir: string): CheckResult {
+  try {
+    const mounts = readFileSync("/proc/mounts", "utf-8");
+    let bestMatch = "";
+    let bestOptions = "";
+    for (const line of mounts.split("\n")) {
+      const parts = line.split(" ");
+      if (parts.length < 4) continue;
+      const mountpoint = parts[1];
+      if (jailerBaseDir.startsWith(mountpoint) && mountpoint.length > bestMatch.length) {
+        bestMatch = mountpoint;
+        bestOptions = parts[3];
+      }
+    }
+    if (!bestMatch) {
+      return { category: "System", name: "Jailer filesystem", status: "pass", detail: "Check skipped" };
+    }
+    const options = bestOptions.split(",");
+    if (options.includes("nodev")) {
+      return {
+        category: "System",
+        name: "Jailer filesystem",
+        status: "fail",
+        detail: `${bestMatch} mounted with nodev`,
+        fix: `The jailer needs device nodes to work. Remount without nodev: sudo mount -o remount,dev ${bestMatch}`,
+      };
+    }
+    return { category: "System", name: "Jailer filesystem", status: "pass", detail: bestMatch };
+  } catch {
+    return { category: "System", name: "Jailer filesystem", status: "pass", detail: "Check skipped" };
   }
 }
 
@@ -191,8 +239,10 @@ export function runDoctorChecks(paths?: VmsanPaths): CheckResult[] {
   const p = paths ?? vmsanPaths();
   return [
     checkKvm(),
+    checkTunDevice(),
     checkDiskSpace(p.baseDir),
     checkDefaultInterface(),
+    checkJailerFilesystem(p.jailerBaseDir),
     checkFirecracker(p.binDir),
     checkJailer(p.binDir),
     checkAgent(p.agentBin),
