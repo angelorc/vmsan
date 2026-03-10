@@ -213,7 +213,7 @@ function checkNftablesKernel(nftablesBin: string): CheckResult {
     // Use vmsan-nftables verify (netlink-based) instead of the nft CLI.
     // vmsan-nftables uses netlink directly and doesn't require the nft package.
     execSync(`"${nftablesBin}" verify`, {
-      input: "{}",
+      input: '{"vmId":"_doctor_probe"}',
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
     });
