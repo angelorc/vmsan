@@ -74,3 +74,34 @@ export function vmAddressBlockCidrFromIp(ip: string): string {
   const [first, second] = parseIpv4(ip);
   return `${first}.${second}.0.0/16`;
 }
+
+// Reserved port ranges for future DNS/SNI/HTTP proxies (0.3.0)
+// TODO(0.3.0): DNS and HTTP ranges overlap (10053-10307 vs 10080-10334).
+// Fix by bumping HTTP_PORT_BASE to 10698 before ports are actually allocated.
+export const DNS_PORT_BASE = 10053; // Range: 10053-10307 (255 slots)
+export const SNI_PORT_BASE = 10443; // Range: 10443-10697 (255 slots)
+export const HTTP_PORT_BASE = 10080; // Range: 10080-10334 (255 slots)
+
+export function dnsPortForSlot(slot: number): number {
+  assertValidSlot(slot);
+  return DNS_PORT_BASE + slot;
+}
+
+export function sniPortForSlot(slot: number): number {
+  assertValidSlot(slot);
+  return SNI_PORT_BASE + slot;
+}
+
+export function httpPortForSlot(slot: number): number {
+  assertValidSlot(slot);
+  return HTTP_PORT_BASE + slot;
+}
+
+/** Check if a port falls within any reserved range. */
+export function isReservedPort(port: number): boolean {
+  return (
+    (port >= DNS_PORT_BASE && port < DNS_PORT_BASE + 255) ||
+    (port >= SNI_PORT_BASE && port < SNI_PORT_BASE + 255) ||
+    (port >= HTTP_PORT_BASE && port < HTTP_PORT_BASE + 255)
+  );
+}

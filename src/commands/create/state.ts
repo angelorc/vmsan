@@ -33,6 +33,7 @@ export function buildInitialVmState(input: InitialVmStateInput): VmState {
       bandwidthMbit: input.bandwidthMbit,
       netnsName: input.netnsName,
       skipDnat: input.skipDnat,
+      firewallBackend: "nftables",
     },
     snapshot: input.snapshotId,
     timeoutMs: input.timeoutMs,

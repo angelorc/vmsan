@@ -23,6 +23,7 @@ export interface VmNetwork {
   bandwidthMbit?: number;
   netnsName?: string;
   skipDnat?: boolean;
+  firewallBackend?: "iptables" | "nftables";
 }
 
 export interface VmState {

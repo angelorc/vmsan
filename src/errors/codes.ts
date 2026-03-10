@@ -24,7 +24,12 @@ export type VmErrorCode =
 
 export type FirecrackerErrorCode = "ERR_FIRECRACKER_API";
 
-export type NetworkErrorCode = "ERR_NETWORK_DEFAULT_INTERFACE";
+export type NetworkErrorCode =
+  | "ERR_NETWORK_DEFAULT_INTERFACE"
+  | "ERR_NFT_SETUP_FAILED"
+  | "ERR_NFT_TEARDOWN_FAILED"
+  | "ERR_NFT_BINARY_MISSING"
+  | "ERR_NFT_TABLE_MISSING";
 
 export type TimeoutErrorCode = "ERR_TIMEOUT_SOCKET" | "ERR_TIMEOUT_LOCK" | "ERR_TIMEOUT_AGENT";
 

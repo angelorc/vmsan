@@ -667,7 +667,7 @@ export class VMService {
           this.logger.debug(`Network teardown failed for VM ${vmId}: ${toError(err).message}`);
         }
 
-        const leaks = verifyCleanup(state.network);
+        const leaks = verifyCleanup(state.network, vmId);
         for (const leak of leaks) {
           this.logger.warn(`[${vmId}] cleanup leak: ${leak}`);
         }
@@ -801,7 +801,7 @@ export class VMService {
 
       // Verify network cleanup
       if (state.network) {
-        const leaks = verifyCleanup(state.network);
+        const leaks = verifyCleanup(state.network, vmId);
         for (const leak of leaks) {
           this.logger.warn(`[${vmId}] cleanup leak: ${leak}`);
         }

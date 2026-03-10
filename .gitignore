@@ -5,8 +5,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 
-# Go agent binary
+# Go binaries
 agent/vmsan-agent
+nftables/vmsan-nftables*
 
 # IDE
 .vscode/

@@ -1,7 +1,9 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { consola } from "consola";
 import { defaultInterfaceNotFoundError } from "../errors/index.ts";
+import { vmsanPaths } from "../paths.ts";
 import { toError } from "./utils.ts";
 import type { VmNetwork } from "./vm-state.ts";
 import {
@@ -29,12 +31,15 @@ export interface NetworkConfig {
   bandwidthMbit?: number;
   netnsName?: string;
   skipDnat?: boolean;
+  /** VM identifier, used by nftables backend for per-VM table naming. */
+  vmId?: string;
 }
 
 // DNS resolvers the VM uses (Google Public DNS)
 const DNS_RESOLVERS = ["8.8.8.8", "8.8.4.4"];
 
-// Well-known DoH/DoQ resolver IPs (Google, Cloudflare, Quad9, OpenDNS, CleanBrowsing)
+// Well-known DoH/DoQ resolver IPs — only used by legacy iptables path
+// (nftables binary handles DoH/DoT blocking internally)
 const DOH_RESOLVER_IPS = [
   "8.8.8.8",
   "8.8.4.4",
@@ -47,6 +52,65 @@ const DOH_RESOLVER_IPS = [
   "185.228.168.168",
   "185.228.169.168",
 ];
+
+// ---------------------------------------------------------------------------
+// nftables binary helper
+// ---------------------------------------------------------------------------
+
+interface NftablesResult {
+  ok: boolean;
+  error?: string;
+  code?: string;
+  tableExists?: boolean;
+  chainCount?: number;
+}
+
+function execNftables(command: string, config: object): NftablesResult {
+  const nftablesPath = join(vmsanPaths().binDir, "vmsan-nftables");
+  const input = JSON.stringify(config);
+  try {
+    const result = execFileSync(nftablesPath, [command], {
+      input,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    return JSON.parse(result);
+  } catch (err: unknown) {
+    // If the binary exits non-zero, execFileSync throws.
+    // Try to parse stdout for structured error.
+    const error = toError(err);
+    if (
+      err !== null &&
+      typeof err === "object" &&
+      "stdout" in err &&
+      typeof (err as { stdout: unknown }).stdout === "string" &&
+      (err as { stdout: string }).stdout.trim()
+    ) {
+      try {
+        return JSON.parse((err as { stdout: string }).stdout);
+      } catch {
+        // fall through
+      }
+    }
+    return { ok: false, error: error.message, code: "ERR_NFT_EXEC" };
+  }
+}
+
+/**
+ * Derive vmId from the NetworkConfig. Prefers the explicit vmId field,
+ * falls back to extracting from the netnsName pattern "vmsan-<vmId>".
+ */
+function resolveVmId(config: NetworkConfig): string {
+  if (config.vmId) return config.vmId;
+  if (config.netnsName?.startsWith("vmsan-")) {
+    return config.netnsName.slice("vmsan-".length);
+  }
+  return `slot-${config.slot}`;
+}
+
+// ---------------------------------------------------------------------------
+// iptables helpers (shared by legacy path and non-rule methods)
+// ---------------------------------------------------------------------------
 
 function runArgs(bin: string, args: string[]): void {
   execFileSync(bin, args, { stdio: "pipe" });
@@ -263,6 +327,54 @@ export class NetworkManager {
   }
 
   setupRules(): void {
+    if (process.env.VMSAN_LEGACY_IPTABLES === "1") {
+      this.setupRulesIptables();
+      return;
+    }
+
+    const { tapDevice, hostIp, guestIp, publishedPorts, netnsName, slot } = this.config;
+    const vmId = resolveVmId(this.config);
+    const policy = effectivePolicy(this.config);
+
+    // Build defaultInterface — not needed for deny-all
+    let defaultInterface = "";
+    if (policy !== "deny-all") {
+      defaultInterface = getDefaultInterface();
+    }
+
+    const setupConfig = {
+      vmId,
+      slot,
+      policy,
+      tapDevice,
+      hostIp,
+      guestIp,
+      vethHost: netnsName ? `veth-h-${slot}` : "",
+      vethGuest: netnsName ? `veth-g-${slot}` : "",
+      netnsName: netnsName || "",
+      defaultInterface,
+      publishedPorts: publishedPorts.map((p) => ({
+        hostPort: p,
+        guestIp,
+        guestPort: p,
+        protocol: "tcp",
+      })),
+      allowedCidrs: this.config.allowedCidrs,
+      deniedCidrs: this.config.deniedCidrs,
+      skipDnat: this.config.skipDnat || false,
+      dnsResolvers: DNS_RESOLVERS,
+    };
+
+    const result = execNftables("setup", setupConfig);
+    if (!result.ok) {
+      throw new Error(
+        `nftables setup failed: ${result.error || "unknown error"} (code: ${result.code || "none"})`,
+      );
+    }
+  }
+
+  /** Legacy iptables-based setupRules, gated behind VMSAN_LEGACY_IPTABLES=1 */
+  private setupRulesIptables(): void {
     const { tapDevice, guestIp, publishedPorts } = this.config;
     const policy = effectivePolicy(this.config);
     const vethGuest = this.config.netnsName ? `veth-g-${this.config.slot}` : undefined;
@@ -721,6 +833,55 @@ export class NetworkManager {
   }
 
   teardownRules(): void {
+    if (process.env.VMSAN_LEGACY_IPTABLES === "1") {
+      this.teardownRulesIptables();
+      return;
+    }
+
+    const { tapDevice, hostIp, guestIp, netnsName, slot } = this.config;
+    const vmId = resolveVmId(this.config);
+
+    // 1. Try nftables teardown (namespace table + host bypass + host iptables)
+    const teardownResult = execNftables("teardown", {
+      vmId,
+      netnsName: netnsName || "",
+      tapDevice,
+      vethHost: netnsName ? `veth-h-${slot}` : "",
+      guestIp,
+      slot,
+    });
+
+    if (!teardownResult.ok) {
+      // 2. If nftables table not found, try cleanup-iptables as fallback (0.1.0 VMs)
+      if (teardownResult.code === "NFTABLES_ERROR") {
+        consola.debug(
+          `nftables teardown returned NFTABLES_ERROR for ${vmId}, trying iptables cleanup fallback`,
+        );
+        const cleanupResult = execNftables("cleanup-iptables", {
+          vmId,
+          tapDevice,
+          vethHost: netnsName ? `veth-h-${slot}` : "",
+          vethGuest: netnsName ? `veth-g-${slot}` : "",
+          netnsName: netnsName || "",
+          hostIp,
+          guestIp,
+        });
+        if (!cleanupResult.ok) {
+          consola.warn(
+            `iptables cleanup fallback failed for ${vmId}: ${cleanupResult.error || "unknown"} (code: ${cleanupResult.code || "none"})`,
+          );
+        }
+      } else {
+        // 3. Other errors — log warning, don't throw
+        consola.warn(
+          `nftables teardown failed for ${vmId}: ${teardownResult.error || "unknown"} (code: ${teardownResult.code || "none"})`,
+        );
+      }
+    }
+  }
+
+  /** Legacy iptables-based teardownRules, gated behind VMSAN_LEGACY_IPTABLES=1 */
+  private teardownRulesIptables(): void {
     const { tapDevice, guestIp, publishedPorts, netnsName } = this.config;
     const vethGuest = netnsName ? `veth-g-${this.config.slot}` : undefined;
 
@@ -1066,7 +1227,7 @@ export class NetworkManager {
         this.setupRules();
       } catch (rollbackErr) {
         consola.warn(
-          `iptables rollback failed for ${this.config.tapDevice}, VM may have no rules: ${toError(rollbackErr).message}`,
+          `nftables rollback failed for ${this.config.tapDevice}, VM may have no rules: ${toError(rollbackErr).message}`,
         );
       }
       throw err;
@@ -1074,7 +1235,7 @@ export class NetworkManager {
   }
 }
 
-export function verifyCleanup(network: VmNetwork): string[] {
+export function verifyCleanup(network: VmNetwork, vmId?: string): string[] {
   const leaks: string[] = [];
   if (existsSync(`/sys/class/net/${network.tapDevice}`)) {
     leaks.push(`TAP device ${network.tapDevice} still exists`);
@@ -1092,5 +1253,27 @@ export function verifyCleanup(network: VmNetwork): string[] {
       leaks.push(`Veth ${vethHost} still exists`);
     }
   }
+
+  // Check for leaked nftables table (best-effort)
+  const resolvedVmId =
+    vmId ||
+    (network.netnsName?.startsWith("vmsan-") ? network.netnsName.slice("vmsan-".length) : null);
+  if (resolvedVmId) {
+    try {
+      const nftablesPath = join(vmsanPaths().binDir, "vmsan-nftables");
+      if (existsSync(nftablesPath)) {
+        const verifyResult = execNftables("verify", {
+          vmId: resolvedVmId,
+          netnsName: network.netnsName || "",
+        });
+        if (verifyResult.ok && verifyResult.tableExists) {
+          leaks.push(`nftables table vmsan_${resolvedVmId} still exists`);
+        }
+      }
+    } catch {
+      // Best-effort — skip if binary missing or fails
+    }
+  }
+
   return leaks;
 }

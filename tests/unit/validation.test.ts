@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   parseBandwidth,
   parseCidrList,
@@ -11,8 +11,21 @@ import {
   parseRuntime,
   parseVcpuCount,
   validateCidr,
+  validatePublishedPortsAvailable,
 } from "../../src/commands/create/validation.ts";
 import { VmsanError } from "../../src/errors/base.ts";
+import type { VmsanPaths } from "../../src/paths.ts";
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    readdirSync: vi.fn().mockReturnValue([]),
+    existsSync: vi.fn().mockReturnValue(false),
+    readFileSync: vi.fn(),
+    mkdirSync: vi.fn(),
+  };
+});
 
 // ---------- vcpus ----------
 
@@ -390,5 +403,61 @@ describe("parseBandwidth", () => {
 
   it("rejects non-numeric input", () => {
     expect(() => parseBandwidth("fast")).toThrow(VmsanError);
+  });
+});
+
+// ---------- validatePublishedPortsAvailable ----------
+
+describe("validatePublishedPortsAvailable", () => {
+  const fakePaths: VmsanPaths = {
+    baseDir: "/fake/.vmsan",
+    vmsDir: "/fake/.vmsan/vms",
+    jailerBaseDir: "/fake/.vmsan/jailer",
+    binDir: "/fake/.vmsan/bin",
+    agentBin: "/fake/.vmsan/bin/vmsan-agent",
+    nftablesBin: "/fake/.vmsan/bin/vmsan-nftables",
+    kernelsDir: "/fake/.vmsan/kernels",
+    rootfsDir: "/fake/.vmsan/rootfs",
+    registryDir: "/fake/.vmsan/registry/rootfs",
+    snapshotsDir: "/fake/.vmsan/snapshots",
+    seccompDir: "/fake/.vmsan/seccomp",
+    seccompFilter: "/fake/.vmsan/seccomp/default.json",
+    agentPort: 9119,
+  };
+
+  it("rejects port 10053 (DNS_PORT_BASE) as reserved", () => {
+    expect(() => validatePublishedPortsAvailable([10053], fakePaths)).toThrow(VmsanError);
+    expect(() => validatePublishedPortsAvailable([10053], fakePaths)).toThrow("reserved");
+  });
+
+  it("rejects port 10307 (last DNS port) as reserved", () => {
+    expect(() => validatePublishedPortsAvailable([10307], fakePaths)).toThrow(VmsanError);
+    expect(() => validatePublishedPortsAvailable([10307], fakePaths)).toThrow("reserved");
+  });
+
+  it("rejects port 10443 (SNI_PORT_BASE) as reserved", () => {
+    expect(() => validatePublishedPortsAvailable([10443], fakePaths)).toThrow(VmsanError);
+    expect(() => validatePublishedPortsAvailable([10443], fakePaths)).toThrow("reserved");
+  });
+
+  it("rejects port 10080 (HTTP_PORT_BASE) as reserved", () => {
+    expect(() => validatePublishedPortsAvailable([10080], fakePaths)).toThrow(VmsanError);
+    expect(() => validatePublishedPortsAvailable([10080], fakePaths)).toThrow("reserved");
+  });
+
+  it("accepts port 80 (not reserved)", () => {
+    expect(() => validatePublishedPortsAvailable([80], fakePaths)).not.toThrow();
+  });
+
+  it("accepts port 443 (not reserved)", () => {
+    expect(() => validatePublishedPortsAvailable([443], fakePaths)).not.toThrow();
+  });
+
+  it("accepts port 9999 (not reserved)", () => {
+    expect(() => validatePublishedPortsAvailable([9999], fakePaths)).not.toThrow();
+  });
+
+  it("does nothing for empty ports array", () => {
+    expect(() => validatePublishedPortsAvailable([], fakePaths)).not.toThrow();
   });
 });

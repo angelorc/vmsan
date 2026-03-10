@@ -1,5 +1,19 @@
 #!/usr/bin/env node
 
+// Suppress DEP0040 (punycode) from cloudflare SDK's transitive dep chain:
+// cloudflare → node-fetch → whatwg-url → tr46 → require("punycode")
+const _origEmit = process.emit;
+process.emit = function (event: string, ...args: unknown[]) {
+  if (
+    event === "warning" &&
+    (args[0] as { name?: string })?.name === "DeprecationWarning" &&
+    (args[0] as { code?: string })?.code === "DEP0040"
+  ) {
+    return false;
+  }
+  return _origEmit.apply(process, [event, ...args] as Parameters<typeof _origEmit>);
+};
+
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";

@@ -623,6 +623,25 @@ else
   success "vmsan-agent ${LATEST_TAG} installed"
 fi
 
+# --- vmsan-nftables ---
+
+NFTABLES_PATH="$VMSAN_DIR/bin/vmsan-nftables"
+
+if [ "$INSTALL_MODE" = "source" ]; then
+  ensure_go
+  info "Building vmsan-nftables from source (${SOURCE_SHA})..."
+  (cd "$VMSAN_SRC/nftables" && CGO_ENABLED=0 GOOS=linux GOARCH="$(go_arch)" go build -ldflags="-s -w" -o "$NFTABLES_PATH" ./cmd/vmsan-nftables)
+  chmod +x "$NFTABLES_PATH"
+  success "vmsan-nftables built from ${SOURCE_LABEL}"
+elif [ -x "$NFTABLES_PATH" ]; then
+  success "vmsan-nftables already installed"
+else
+  NFTABLES_URL="https://github.com/$VMSAN_REPO/releases/download/${LATEST_TAG}/vmsan-nftables-${ARCH}"
+  download "$NFTABLES_URL" "$NFTABLES_PATH"
+  chmod +x "$NFTABLES_PATH"
+  success "vmsan-nftables ${LATEST_TAG} installed"
+fi
+
 # --- cloudflared ---
 
 CLOUDFLARED_PATH="$VMSAN_DIR/bin/cloudflared"
