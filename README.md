@@ -146,8 +146,12 @@ vmsan remove <vm-id>
 - No inter-VM networking (planned for 0.4.0)
 - No declarative config / `vmsan.toml` (planned for 0.5.0)
 - No multi-host support (planned for 0.7.0)
-- Uses `iptables`, not `nftables` (migration planned for 0.2.0)
+- Uses `nftables` with atomic rule application for network isolation (since 0.2.0)
 - No DNS or SNI filtering (planned for 0.3.0)
+- ICMP blocked by default from VMs (prevents ICMP tunneling)
+- UDP blocked by default except DNS (prevents UDP exfiltration; QUIC/HTTP3 will not work)
+- NTP (UDP 123) blocked — kvm-clock used for time sync, long-running VMs may drift
+- Host firewall (ufw/firewalld) may need explicit allow rules for vmsan traffic
 - Linux only — requires KVM support
 - Primary platform: Ubuntu 24.04 LTS
 

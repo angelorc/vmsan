@@ -9,7 +9,7 @@ set -euo pipefail
 
 PASSED=0
 FAILED=0
-TOTAL=7
+TOTAL=8
 VM_IDS=()
 
 pass() { echo "  PASS: $1"; PASSED=$((PASSED + 1)); }
@@ -194,6 +194,42 @@ if vmsan list --json 2>/dev/null | jq . > /dev/null 2>&1; then
   pass "I7: vmsan list --json (valid JSON)"
 else
   fail "I7" "vmsan list --json did not produce valid JSON"
+fi
+
+# ---------------------------------------------------------------------------
+# I8: nftables rules — table created on start, removed on stop
+# ---------------------------------------------------------------------------
+echo "[I8] nftables rules"
+SECONDS=0
+if out=$(vmsan create --runtime base --vcpus 1 --memory 256 --json 2>&1); then
+  VM_ID=$(extract_vm_id "$out")
+  if [ -n "$VM_ID" ]; then
+    VM_IDS+=("$VM_ID")
+    # Verify nftables table exists for this VM
+    if sudo nft list table ip "vmsan_${VM_ID}" > /dev/null 2>&1; then
+      # Verify ICMP is blocked (default policy should deny outbound)
+      if sudo vmsan exec "$VM_ID" -- ping -c 1 -W 3 8.8.8.8 2>/dev/null; then
+        fail "I8" "ping succeeded but should have been blocked by nftables"
+      else
+        # Stop and remove the VM
+        vmsan stop "$VM_ID" 2>/dev/null || true
+        vmsan remove "$VM_ID" 2>/dev/null || true
+        VM_IDS=("${VM_IDS[@]/$VM_ID/}")
+        # Verify nftables table was cleaned up
+        if ! sudo nft list table ip "vmsan_${VM_ID}" 2>/dev/null; then
+          pass "I8: nftables rules (created & removed) [${SECONDS}s]"
+        else
+          fail "I8" "nftables table vmsan_${VM_ID} still exists after remove"
+        fi
+      fi
+    else
+      fail "I8" "nftables table vmsan_${VM_ID} not found after create"
+    fi
+  else
+    fail "I8" "could not extract vmId"
+  fi
+else
+  fail "I8" "create failed"
 fi
 
 # ---------------------------------------------------------------------------
