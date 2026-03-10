@@ -110,20 +110,36 @@ func (c *SetupConfig) Validate() error {
 		}
 	}
 	for i, cidr := range c.AllowedCIDRs {
-		if _, _, err := net.ParseCIDR(cidr); err != nil {
+		ip, _, err := net.ParseCIDR(cidr)
+		if err != nil {
 			return &ValidationError{
 				Field:   fmt.Sprintf("allowedCidrs[%d]", i),
 				Value:   cidr,
 				Message: fmt.Sprintf("invalid CIDR: %v", err),
 			}
 		}
+		if ip.To4() == nil {
+			return &ValidationError{
+				Field:   fmt.Sprintf("allowedCidrs[%d]", i),
+				Value:   cidr,
+				Message: "IPv6 CIDRs are not supported, must be IPv4",
+			}
+		}
 	}
 	for i, cidr := range c.DeniedCIDRs {
-		if _, _, err := net.ParseCIDR(cidr); err != nil {
+		ip, _, err := net.ParseCIDR(cidr)
+		if err != nil {
 			return &ValidationError{
 				Field:   fmt.Sprintf("deniedCidrs[%d]", i),
 				Value:   cidr,
 				Message: fmt.Sprintf("invalid CIDR: %v", err),
+			}
+		}
+		if ip.To4() == nil {
+			return &ValidationError{
+				Field:   fmt.Sprintf("deniedCidrs[%d]", i),
+				Value:   cidr,
+				Message: "IPv6 CIDRs are not supported, must be IPv4",
 			}
 		}
 	}
@@ -148,6 +164,9 @@ type TeardownConfig struct {
 	VethHost  string `json:"vethHost,omitempty"`
 	GuestIP   string `json:"guestIp,omitempty"`
 	Slot      int    `json:"slot,omitempty"`
+	// Published ports for DNAT rule cleanup
+	PublishedPorts   []PublishedPort `json:"publishedPorts,omitempty"`
+	DefaultInterface string          `json:"defaultInterface,omitempty"`
 }
 
 // Validate checks that required fields are present.
@@ -219,6 +238,8 @@ func (c TeardownConfig) ToOptions() *TeardownOptions {
 	opts.VethHost = c.VethHost
 	opts.GuestIP = c.GuestIP
 	opts.Slot = c.Slot
+	opts.PublishedPorts = c.PublishedPorts
+	opts.HostIface = c.DefaultInterface
 	return opts
 }
 

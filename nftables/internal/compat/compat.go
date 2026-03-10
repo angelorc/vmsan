@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"regexp"
 	"strings"
 
 	types "github.com/angelorc/vmsan/nftables"
@@ -109,27 +108,69 @@ func deleteRules(ctx context.Context, rules []iptablesRule, netns string, execut
 }
 
 // deleteRule executes a single iptables -D command.
+// If netns is non-empty, the command runs inside that network namespace.
 func deleteRule(ctx context.Context, r iptablesRule, netns string, executor IptablesExecutor) error {
 	// Build: iptables -t <table> -D <chain> <rest...>
 	args := []string{"-t", r.table, "-D"}
 	args = append(args, strings.Fields(r.args)...)
+
+	// If namespace is specified, prepend ip netns exec to run inside the namespace
+	if netns != "" {
+		args = append([]string{"ip", "netns", "exec", netns, "iptables"}, args...)
+		_, err := executor.Execute(ctx, args...)
+		return err
+	}
 
 	_, err := executor.Execute(ctx, args...)
 	return err
 }
 
 // containsAny reports whether s contains any of the given patterns as whole tokens.
-// Uses regexp.QuoteMeta to safely escape patterns (IPs, device names) and wraps
-// them with boundary assertions to prevent partial matches — e.g., "10.0.0.1"
-// must not match a rule containing "10.0.0.10" or "10.0.0.100".
+// Uses word-boundary matching to prevent partial matches — e.g., "10.0.0.1"
+// must not match a rule containing "10.0.0.10" or "10.0.0.100", and "tap0"
+// must not match "tap0-old" or "tap0_backup".
+//
+// A pattern is considered to match if it appears as a complete token bounded by:
+// - Start/end of string
+// - Whitespace
+// - Common delimiters: / : , - _ ( )
 func containsAny(s string, patterns []string) bool {
 	for _, p := range patterns {
-		// Match pattern bounded by non-alphanumeric/non-dot chars (or string edges).
-		// In iptables-save output, IPs are delimited by spaces, slashes, or colons.
-		re := regexp.MustCompile(`(?:^|[^0-9a-zA-Z.])` + regexp.QuoteMeta(p) + `(?:[^0-9a-zA-Z.]|$)`)
-		if re.MatchString(s) {
+		if patternMatches(s, p) {
 			return true
 		}
 	}
 	return false
+}
+
+// patternMatches checks if pattern p appears as a complete token in s.
+// It handles cases like "10.0.0.1" matching "10.0.0.1/32" but not "10.0.0.10".
+func patternMatches(s, p string) bool {
+	// Find all occurrences of the pattern
+	idx := 0
+	for {
+		i := strings.Index(s[idx:], p)
+		if i == -1 {
+			return false
+		}
+		i += idx // adjust for offset
+
+		// Check left boundary
+		leftOK := i == 0 || isBoundary(s[i-1])
+		// Check right boundary
+		rightBound := i + len(p)
+		rightOK := rightBound >= len(s) || isBoundary(s[rightBound])
+
+		if leftOK && rightOK {
+			return true
+		}
+
+		idx = i + 1 // continue searching
+	}
+}
+
+// isBoundary reports whether c is a valid token boundary character.
+func isBoundary(c byte) bool {
+	return c == ' ' || c == '\t' || c == '/' || c == ':' || c == ',' ||
+		c == '-' || c == '_' || c == '(' || c == ')' || c == '[' || c == ']'
 }

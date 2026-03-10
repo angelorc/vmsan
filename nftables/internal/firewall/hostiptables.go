@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	"regexp"
 	"strings"
 
 	types "github.com/angelorc/vmsan/nftables"
@@ -65,8 +64,11 @@ func addHostIptables(ctx context.Context, opts *types.SetupOptions, executor com
 				return fmt.Errorf("dnat port %d: %w", pp.HostPort, err)
 			}
 
-			// FORWARD to allow DNATed traffic through
+			// FORWARD to allow DNATed traffic through - restrict to DNAT path
+			// Only accept packets entering on host interface and leaving via VM device
 			if _, err := executor.Execute(ctx, "-A", "FORWARD",
+				"-i", opts.HostIface,
+				"-o", fwd,
 				"-p", proto,
 				"-d", gip,
 				"--dport", fmt.Sprintf("%d", pp.GuestPort),
@@ -82,6 +84,7 @@ func addHostIptables(ctx context.Context, opts *types.SetupOptions, executor com
 // removeHostIptables removes host-side iptables rules for a VM by grepping
 // iptables-save output for the VM's device names and guest IP, then issuing
 // corresponding -D commands. Best-effort: logs warnings but does not error.
+// Also removes per-port DNAT rules when PublishedPorts are provided.
 func removeHostIptables(ctx context.Context, opts *types.TeardownOptions, executor compat.IptablesExecutor) error {
 	dev := opts.TapDevice
 	if opts.VethHost != "" {
@@ -104,6 +107,14 @@ func removeHostIptables(ctx context.Context, opts *types.TeardownOptions, execut
 			}
 		}
 	}
+
+	// Add per-port guest IPs to patterns for DNAT rule cleanup
+	for _, pp := range opts.PublishedPorts {
+		if pp.GuestIP != "" {
+			patterns = append(patterns, pp.GuestIP)
+		}
+	}
+
 	if len(patterns) == 0 {
 		return nil
 	}
@@ -144,15 +155,51 @@ func removeMatchingRules(ctx context.Context, table string, patterns []string, e
 
 // matchesAny reports whether s contains any of the given patterns as whole tokens.
 // Uses word-boundary matching to prevent partial matches (e.g., "10.0.0.1" must
-// not match "10.0.0.10").
+// not match "10.0.0.10", and "tap0" must not match "tap0-old").
+//
+// A pattern is considered to match if it appears as a complete token bounded by:
+// - Start/end of string
+// - Whitespace
+// - Common delimiters: / : , - _ ( )
 func matchesAny(s string, patterns []string) bool {
 	for _, p := range patterns {
-		re := regexp.MustCompile(`(?:^|[^0-9a-zA-Z.])` + regexp.QuoteMeta(p) + `(?:[^0-9a-zA-Z.]|$)`)
-		if re.MatchString(s) {
+		if patternMatches(s, p) {
 			return true
 		}
 	}
 	return false
+}
+
+// patternMatches checks if pattern p appears as a complete token in s.
+// It handles cases like "10.0.0.1" matching "10.0.0.1/32" but not "10.0.0.10".
+func patternMatches(s, p string) bool {
+	// Find all occurrences of the pattern
+	idx := 0
+	for {
+		i := strings.Index(s[idx:], p)
+		if i == -1 {
+			return false
+		}
+		i += idx // adjust for offset
+
+		// Check left boundary
+		leftOK := i == 0 || isBoundary(s[i-1])
+		// Check right boundary
+		rightBound := i + len(p)
+		rightOK := rightBound >= len(s) || isBoundary(s[rightBound])
+
+		if leftOK && rightOK {
+			return true
+		}
+
+		idx = i + 1 // continue searching
+	}
+}
+
+// isBoundary reports whether c is a valid token boundary character.
+func isBoundary(c byte) bool {
+	return c == ' ' || c == '\t' || c == '/' || c == ':' || c == ',' ||
+		c == '-' || c == '_' || c == '(' || c == ')' || c == '[' || c == ']'
 }
 
 // fwdDevice returns the device used for FORWARD rules: vethHost in netns mode,

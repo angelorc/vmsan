@@ -10,6 +10,10 @@ type TeardownOptions struct {
 	VethHost  string
 	GuestIP   string
 	Slot      int
+
+	// Published ports for DNAT rule cleanup
+	PublishedPorts []PublishedPort
+	HostIface      string
 }
 
 // TeardownOption is a functional option for configuring TeardownOptions.
@@ -47,6 +51,20 @@ func WithTeardownGuestIP(ip string) TeardownOption {
 func WithTeardownSlot(slot int) TeardownOption {
 	return func(o *TeardownOptions) {
 		o.Slot = slot
+	}
+}
+
+// WithTeardownPublishedPorts sets the published ports for DNAT rule cleanup.
+func WithTeardownPublishedPorts(ports []PublishedPort) TeardownOption {
+	return func(o *TeardownOptions) {
+		o.PublishedPorts = ports
+	}
+}
+
+// WithTeardownHostIface sets the host interface for teardown.
+func WithTeardownHostIface(iface string) TeardownOption {
+	return func(o *TeardownOptions) {
+		o.HostIface = iface
 	}
 }
 

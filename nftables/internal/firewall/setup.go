@@ -28,19 +28,25 @@ import (
 // Rule ordering in the forward chain follows the workflow specification:
 //
 //  1. ct state established,related accept
-//  2. Interface forward accept (tap/veth)
-//  3. DNS allow (configured resolvers) + DNS block (all others)
-//  4. ICMP drop
-//  5. UDP drop
-//  6. DoT drop (TCP 853)
-//  7. DoH drop (TCP 443 to known resolver IPs)
-//  8. Cross-VM isolation (internal subnet drops)
+//  2. DNS allow (configured resolvers) + DNS block (all others)
+//  3. ICMP drop
+//  4. UDP drop
+//  5. DoT drop (TCP 853)
+//  6. DoH drop (TCP 443 to known resolver IPs)
+//  7. Cross-VM isolation (internal subnet drops)
+//  8. Interface forward accept (tap/veth) - AFTER security rules
 //  9. Policy-specific rules (allow-all: accept, deny-all: nothing, custom: CIDR rules)
+//
+// Setup is transactional: if any step fails, cleanup is attempted to leave
+// the system in a consistent state.
 func Setup(ctx context.Context, opts *types.SetupOptions) error {
 	slog.DebugContext(ctx, "setting up firewall", "vm_id", opts.VMId, "netns", opts.NetNSName)
 
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
+
+	var hostBypassSetup bool
+	var hostIptablesSetup bool
 
 	if err := setupVMTable(ctx, opts); err != nil {
 		return err
@@ -48,8 +54,11 @@ func Setup(ctx context.Context, opts *types.SetupOptions) error {
 
 	if opts.VmIP != "" {
 		if err := setupHostBypass(ctx, opts.VMId, opts.VmIP); err != nil {
+			// Rollback: try to clean up VM table
+			_ = deleteVMTable(ctx, &types.TeardownOptions{VMId: opts.VMId, NetNSName: opts.NetNSName})
 			return fmt.Errorf("host bypass rules: %w", err)
 		}
+		hostBypassSetup = true
 	}
 
 	// Host-side iptables FORWARD/MASQUERADE/DNAT.
@@ -58,8 +67,19 @@ func Setup(ctx context.Context, opts *types.SetupOptions) error {
 	if opts.Policy != types.PolicyDenyAll {
 		executor := compat.NewRealIptablesExecutor()
 		if err := addHostIptables(ctx, opts, executor); err != nil {
+			// Rollback: clean up previous steps
+			if hostBypassSetup {
+				_ = teardownHostBypass(ctx, opts.VMId)
+			}
+			_ = deleteVMTable(ctx, &types.TeardownOptions{VMId: opts.VMId, NetNSName: opts.NetNSName})
 			return fmt.Errorf("host iptables: %w", err)
 		}
+		hostIptablesSetup = true
+	}
+
+	// Verify host iptables setup succeeded if we attempted it
+	if opts.Policy != types.PolicyDenyAll && !hostIptablesSetup {
+		slog.WarnContext(ctx, "host iptables not set up but policy requires it", "vm_id", opts.VMId)
 	}
 
 	slog.DebugContext(ctx, "firewall setup complete", "vm_id", opts.VMId)
@@ -88,15 +108,12 @@ func setupVMTable(ctx context.Context, opts *types.SetupOptions) error {
 	// 1. Allow established/related connections (MUST be first)
 	fwd.Established()
 
-	// 2. Interface forwarding (tap <-> veth, both directions)
-	addInterfaceForwardRules(fwd, opts)
-
-	// 3. DNS: allow configured resolvers, block all others
+	// 2. DNS: allow configured resolvers, block all others
 	if err := fwd.DNSRules(opts.DNSResolvers); err != nil {
 		return err
 	}
 
-	// 4-7. Security rules (all policies)
+	// 3-6. Security rules (all policies) - evaluated before interface forwarding
 	fwd.MatchProtoVerdict(unix.IPPROTO_ICMP, expr.VerdictDrop)
 	fwd.MatchProtoVerdict(unix.IPPROTO_UDP, expr.VerdictDrop)
 	fwd.MatchDstPort(unix.IPPROTO_TCP, 853, expr.VerdictDrop)
@@ -104,10 +121,14 @@ func setupVMTable(ctx context.Context, opts *types.SetupOptions) error {
 		return err
 	}
 
-	// 8. Cross-VM isolation
+	// 7. Cross-VM isolation
 	if err := fwd.CrossVMIsolation(); err != nil {
 		return err
 	}
+
+	// 8. Interface forwarding (tap <-> veth, both directions) - AFTER security rules
+	// This prevents interface-forwarded packets from bypassing DNS/ICMP/UDP blocks
+	addInterfaceForwardRules(fwd, opts)
 
 	// 9. Policy-specific rules
 	if err := addPolicyRules(fwd, opts); err != nil {
@@ -143,6 +164,8 @@ func addInterfaceForwardRules(b *rules.Builder, opts *types.SetupOptions) {
 }
 
 // addPolicyRules adds rules specific to the configured network policy.
+// For custom policy, DeniedCIDRs are evaluated before AllowedCIDRs so that
+// explicit denies take precedence over broad allows (e.g., 0.0.0.0/0).
 func addPolicyRules(b *rules.Builder, opts *types.SetupOptions) error {
 	switch opts.Policy {
 	case types.PolicyAllowAll:
@@ -150,14 +173,16 @@ func addPolicyRules(b *rules.Builder, opts *types.SetupOptions) error {
 	case types.PolicyDenyAll:
 		// Nothing -- default chain policy is DROP
 	case types.PolicyCustom:
-		for _, cidr := range opts.AllowedCIDRs {
-			if err := b.MatchDstCIDR(cidr, expr.VerdictAccept); err != nil {
-				return fmt.Errorf("allowed CIDR %s: %w", cidr, err)
-			}
-		}
+		// Process DeniedCIDRs FIRST so they take precedence over AllowedCIDRs
+		// This prevents a broad allow like 0.0.0.0/0 from making all denies unreachable
 		for _, cidr := range opts.DeniedCIDRs {
 			if err := b.MatchDstCIDR(cidr, expr.VerdictDrop); err != nil {
 				return fmt.Errorf("denied CIDR %s: %w", cidr, err)
+			}
+		}
+		for _, cidr := range opts.AllowedCIDRs {
+			if err := b.MatchDstCIDR(cidr, expr.VerdictAccept); err != nil {
+				return fmt.Errorf("allowed CIDR %s: %w", cidr, err)
 			}
 		}
 	default:

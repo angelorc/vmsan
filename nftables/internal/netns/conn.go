@@ -6,6 +6,8 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/angelorc/vmsan/nftables"
 	nft "github.com/google/nftables"
@@ -51,7 +53,17 @@ func NewConn(ctx context.Context, netnsName string) (*NetNSConn, error) {
 		return &NetNSConn{Conn: conn, nsFD: nil}, nil
 	}
 
-	nsPath := fmt.Sprintf("/var/run/netns/%s", netnsName)
+	// Validate netnsName to prevent path traversal
+	if strings.Contains(netnsName, "/") || strings.Contains(netnsName, "..") || netnsName == "." {
+		slog.ErrorContext(ctx, "invalid netns name", "netns", netnsName)
+		return nil, &nftables.NetNSError{
+			Op:    "enter",
+			NetNS: netnsName,
+			Err:   fmt.Errorf("invalid netns name %q: must not contain path separators", netnsName),
+		}
+	}
+
+	nsPath := filepath.Join("/var/run/netns", netnsName)
 	fd, err := os.Open(nsPath)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to open netns", "netns", netnsName, "path", nsPath, "error", err)

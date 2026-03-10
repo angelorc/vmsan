@@ -84,7 +84,9 @@ func handleSetup(ctx context.Context, input []byte) int {
 		return writeNftError(err)
 	}
 	slog.InfoContext(ctx, "setup complete", "vm_id", opts.VMId)
-	writeResult(&types.NftResult{OK: true})
+	if err := writeResult(&types.NftResult{OK: true}); err != nil {
+		return writeNftError(err)
+	}
 	return exitSuccess
 }
 
@@ -104,7 +106,9 @@ func handleTeardown(ctx context.Context, input []byte) int {
 		return writeNftError(err)
 	}
 	slog.InfoContext(ctx, "teardown complete", "vm_id", opts.VMId)
-	writeResult(&types.NftResult{OK: true})
+	if err := writeResult(&types.NftResult{OK: true}); err != nil {
+		return writeNftError(err)
+	}
 	return exitSuccess
 }
 
@@ -125,7 +129,9 @@ func handleVerify(ctx context.Context, input []byte) int {
 		return writeNftError(err)
 	}
 	slog.DebugContext(ctx, "verify complete", "vm_id", cfg.VMId, "table_exists", result.TableExists, "chain_count", result.ChainCount)
-	writeResult(result)
+	if err := writeResult(result); err != nil {
+		return writeNftError(err)
+	}
 	return exitSuccess
 }
 
@@ -146,7 +152,9 @@ func handleCleanupIptables(ctx context.Context, input []byte) int {
 		return writeNftError(err)
 	}
 	slog.InfoContext(ctx, "legacy iptables cleanup complete", "vm_id", opts.VMId)
-	writeResult(&types.NftResult{OK: true})
+	if err := writeResult(&types.NftResult{OK: true}); err != nil {
+		return writeNftError(err)
+	}
 	return exitSuccess
 }
 
@@ -155,14 +163,18 @@ func handleCleanupIptables(ctx context.Context, input []byte) int {
 // writeParseError writes a JSON parse error response and returns the parse error exit code.
 func writeParseError(err error) int {
 	slog.Error("parse error", "error", err)
-	writeResult(&types.NftResult{OK: false, Error: err.Error(), Code: "JSON_PARSE_ERROR"})
+	if encErr := writeResult(&types.NftResult{OK: false, Error: err.Error(), Code: "JSON_PARSE_ERROR"}); encErr != nil {
+		slog.Error("failed to write parse error response", "error", encErr)
+	}
 	return exitParseError
 }
 
 // writeValidationError writes a validation error response and returns the parse error exit code.
 func writeValidationError(err error) int {
 	slog.Error("validation error", "error", err)
-	writeResult(&types.NftResult{OK: false, Error: err.Error(), Code: "VALIDATION_ERROR"})
+	if encErr := writeResult(&types.NftResult{OK: false, Error: err.Error(), Code: "VALIDATION_ERROR"}); encErr != nil {
+		slog.Error("failed to write validation error response", "error", encErr)
+	}
 	return exitParseError
 }
 
@@ -170,11 +182,15 @@ func writeValidationError(err error) int {
 func writeNftError(err error) int {
 	if isPermissionError(err) {
 		slog.Error("permission denied", "error", err)
-		writeResult(&types.NftResult{OK: false, Error: err.Error(), Code: "PERMISSION_DENIED"})
+		if encErr := writeResult(&types.NftResult{OK: false, Error: err.Error(), Code: "PERMISSION_DENIED"}); encErr != nil {
+			slog.Error("failed to write permission error response", "error", encErr)
+		}
 		return exitPermDenied
 	}
 	slog.Error("nftables error", "error", err)
-	writeResult(&types.NftResult{OK: false, Error: err.Error(), Code: "NFTABLES_ERROR"})
+	if encErr := writeResult(&types.NftResult{OK: false, Error: err.Error(), Code: "NFTABLES_ERROR"}); encErr != nil {
+		slog.Error("failed to write nftables error response", "error", encErr)
+	}
 	return exitNftError
 }
 
@@ -214,8 +230,9 @@ func readStdin() ([]byte, error) {
 	}
 }
 
-// writeResult encodes a value as JSON to stdout.
-func writeResult(v any) {
+// writeResult encodes a value as JSON to stdout and returns any encoding error.
+// Callers should check the returned error and handle appropriately (e.g., return non-zero exit code).
+func writeResult(v any) error {
 	if r, ok := v.(*types.NftResult); ok && !r.OK {
 		slog.Error("operation failed", "error", r.Error, "code", r.Code)
 	}
@@ -223,5 +240,7 @@ func writeResult(v any) {
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(v); err != nil {
 		slog.Error("failed to encode JSON", "error", err)
+		return fmt.Errorf("encode JSON: %w", err)
 	}
+	return nil
 }
