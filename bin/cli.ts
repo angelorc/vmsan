@@ -3,7 +3,6 @@
 // Suppress DEP0040 (punycode) from cloudflare SDK's transitive dep chain:
 // cloudflare → node-fetch → whatwg-url → tr46 → require("punycode")
 const _origEmit = process.emit;
-// @ts-expect-error -- overriding emit to filter a known harmless deprecation
 process.emit = function (event: string, ...args: unknown[]) {
   if (
     event === "warning" &&
