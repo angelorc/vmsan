@@ -1,5 +1,11 @@
 # vmsan
 
+## 0.1.1
+
+### Patch Changes
+
+- [#68](https://github.com/angelorc/vmsan/pull/68) [`168717d`](https://github.com/angelorc/vmsan/commit/168717da17e66c68db62c0ec12dea945223ddb05) Thanks [@angelorc](https://github.com/angelorc)! - Detect `nodev` filesystem and `/dev/net/tun` issues that prevent Firecracker from opening TAP devices inside the jailer chroot. Adds doctor checks and actionable error messages with fix instructions.
+
 ## 0.1.0
 
 ### Minor Changes
