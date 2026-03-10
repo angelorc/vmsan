@@ -33,8 +33,9 @@ import (
 //  4. UDP drop
 //  5. DoT drop (TCP 853)
 //  6. DoH drop (TCP 443 to known resolver IPs)
-//  7. Cross-VM isolation (internal subnet drops)
-//  8. Interface forward accept (tap/veth) - AFTER security rules
+//  7. Interface forward accept (tap/veth) - BEFORE cross-VM isolation
+//     This allows host↔VM traffic before the 198.19.0.0/16 drop
+//  8. Cross-VM isolation (internal subnet drops)
 //  9. Policy-specific rules (allow-all: accept, deny-all: nothing, custom: CIDR rules)
 //
 // Setup is transactional: if any step fails, cleanup is attempted to leave
@@ -113,7 +114,7 @@ func setupVMTable(ctx context.Context, opts *types.SetupOptions) error {
 		return err
 	}
 
-	// 3-6. Security rules (all policies) - evaluated before interface forwarding
+	// 3-6. Security rules (all policies)
 	fwd.MatchProtoVerdict(unix.IPPROTO_ICMP, expr.VerdictDrop)
 	fwd.MatchProtoVerdict(unix.IPPROTO_UDP, expr.VerdictDrop)
 	fwd.MatchDstPort(unix.IPPROTO_TCP, 853, expr.VerdictDrop)
@@ -121,14 +122,15 @@ func setupVMTable(ctx context.Context, opts *types.SetupOptions) error {
 		return err
 	}
 
-	// 7. Cross-VM isolation
+	// 7. Interface forwarding (tap <-> veth, both directions) - BEFORE cross-VM isolation
+	// Must come before CrossVMIsolation to allow host↔VM traffic (e.g., 198.19.0.1 gateway)
+	// Protocol-specific drops (ICMP, UDP) still apply because they match regardless of interface
+	addInterfaceForwardRules(fwd, opts)
+
+	// 8. Cross-VM isolation
 	if err := fwd.CrossVMIsolation(); err != nil {
 		return err
 	}
-
-	// 8. Interface forwarding (tap <-> veth, both directions) - AFTER security rules
-	// This prevents interface-forwarded packets from bypassing DNS/ICMP/UDP blocks
-	addInterfaceForwardRules(fwd, opts)
 
 	// 9. Policy-specific rules
 	if err := addPolicyRules(fwd, opts); err != nil {
