@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach } from "vitest";
-import { accessSync, existsSync, readdirSync, statfsSync } from "node:fs";
+import { accessSync, existsSync, readFileSync, readdirSync, statfsSync } from "node:fs";
 import { execSync } from "node:child_process";
 
 vi.mock("node:fs", async (importOriginal) => {
@@ -8,6 +8,7 @@ vi.mock("node:fs", async (importOriginal) => {
     ...actual,
     accessSync: vi.fn(),
     existsSync: vi.fn(),
+    readFileSync: vi.fn(),
     readdirSync: vi.fn(),
     statfsSync: vi.fn(),
   };
@@ -43,13 +44,14 @@ describe("runDoctorChecks", () => {
   beforeEach(() => {
     vi.mocked(accessSync).mockReset();
     vi.mocked(existsSync).mockReset();
+    vi.mocked(readFileSync).mockReset();
     vi.mocked(readdirSync).mockReset();
     vi.mocked(statfsSync).mockReset();
     vi.mocked(execSync).mockReset();
   });
 
   function setupAllPassing(): void {
-    // KVM accessible
+    // KVM + TUN accessible
     vi.mocked(accessSync).mockImplementation(() => {});
 
     // Disk space: 50 GB free
@@ -57,6 +59,14 @@ describe("runDoctorChecks", () => {
       bfree: 12_500_000,
       bsize: 4096,
     } as ReturnType<typeof statfsSync>);
+
+    // /proc/mounts: no nodev on the relevant mount
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      if (String(p) === "/proc/mounts") {
+        return "/dev/sda1 / ext4 rw,relatime 0 0\n" as unknown as ReturnType<typeof readFileSync>;
+      }
+      return "" as unknown as ReturnType<typeof readFileSync>;
+    });
 
     // Default interface
     vi.mocked(execSync).mockImplementation((cmd: string | URL) => {
@@ -91,14 +101,14 @@ describe("runDoctorChecks", () => {
     setupAllPassing();
     const checks = runDoctorChecks(fakePaths);
 
-    expect(checks).toHaveLength(8);
+    expect(checks).toHaveLength(10);
     expect(checks.every((c) => c.status === "pass")).toBe(true);
 
     const summary = {
       passed: checks.filter((c) => c.status === "pass").length,
       failed: checks.filter((c) => c.status === "fail").length,
     };
-    expect(summary).toEqual({ passed: 8, failed: 0 });
+    expect(summary).toEqual({ passed: 10, failed: 0 });
   });
 
   test("KVM check fails when /dev/kvm is not accessible", () => {
@@ -243,15 +253,15 @@ describe("runDoctorChecks", () => {
 
     const checks = runDoctorChecks(fakePaths);
 
-    // All 8 checks should still run
-    expect(checks).toHaveLength(8);
-    expect(checks.every((c) => c.status === "fail")).toBe(true);
+    // All 10 checks should still run
+    expect(checks).toHaveLength(10);
 
     const summary = {
       passed: checks.filter((c) => c.status === "pass").length,
       failed: checks.filter((c) => c.status === "fail").length,
     };
-    expect(summary).toEqual({ passed: 0, failed: 8 });
+    // Jailer filesystem check returns "pass" (Check skipped) when readFileSync fails
+    expect(summary).toEqual({ passed: 1, failed: 9 });
   });
 
   test("summary counts are correct with mixed results", () => {
@@ -269,9 +279,10 @@ describe("runDoctorChecks", () => {
     const passed = checks.filter((c) => c.status === "pass").length;
     const failed = checks.filter((c) => c.status === "fail").length;
 
-    expect(passed).toBe(6);
-    expect(failed).toBe(2);
-    expect(passed + failed).toBe(8);
+    // accessSync throws → KVM + TUN fail; statfsSync low → Disk fails
+    expect(passed).toBe(7);
+    expect(failed).toBe(3);
+    expect(passed + failed).toBe(10);
   });
 
   test("checks are categorized correctly", () => {
@@ -282,7 +293,7 @@ describe("runDoctorChecks", () => {
     const binaryChecks = checks.filter((c) => c.category === "Binaries");
     const imageChecks = checks.filter((c) => c.category === "Images");
 
-    expect(systemChecks).toHaveLength(3);
+    expect(systemChecks).toHaveLength(5);
     expect(binaryChecks).toHaveLength(3);
     expect(imageChecks).toHaveLength(2);
   });
@@ -317,5 +328,65 @@ describe("runDoctorChecks", () => {
     const ifaceCheck = checks.find((c) => c.name === "Default interface")!;
     expect(ifaceCheck.status).toBe("pass");
     expect(ifaceCheck.detail).toBe("eth0");
+  });
+
+  test("TUN device check fails when /dev/net/tun is not accessible", () => {
+    setupAllPassing();
+    vi.mocked(accessSync).mockImplementation((p) => {
+      if (String(p) === "/dev/net/tun") throw new Error("EACCES");
+    });
+
+    const checks = runDoctorChecks(fakePaths);
+    const tunCheck = checks.find((c) => c.name === "TUN device")!;
+    expect(tunCheck.status).toBe("fail");
+    expect(tunCheck.detail).toBe("/dev/net/tun not accessible");
+    expect(tunCheck.fix).toContain("modprobe tun");
+  });
+
+  test("jailer filesystem check fails when mounted with nodev", () => {
+    setupAllPassing();
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      if (String(p) === "/proc/mounts") {
+        return "/dev/sda2 /home ext4 rw,nodev,nosuid,relatime 0 0\n/dev/sda1 / ext4 rw,relatime 0 0\n" as unknown as ReturnType<
+          typeof readFileSync
+        >;
+      }
+      return "" as unknown as ReturnType<typeof readFileSync>;
+    });
+
+    // fakePaths.jailerBaseDir = /fake/.vmsan/jailer — doesn't start with /home
+    // so it matches / (no nodev). Let's use a paths object where jailer is under /home
+    const homePaths = { ...fakePaths, jailerBaseDir: "/home/user/.vmsan/jailer" };
+    const checks = runDoctorChecks(homePaths);
+    const fsCheck = checks.find((c) => c.name === "Jailer filesystem")!;
+    expect(fsCheck.status).toBe("fail");
+    expect(fsCheck.detail).toContain("nodev");
+    expect(fsCheck.fix).toContain("remount");
+  });
+
+  test("jailer filesystem check passes when no nodev", () => {
+    setupAllPassing();
+    const checks = runDoctorChecks(fakePaths);
+    const fsCheck = checks.find((c) => c.name === "Jailer filesystem")!;
+    expect(fsCheck.status).toBe("pass");
+  });
+
+  test("jailer filesystem check does not match sibling prefix mountpoints", () => {
+    setupAllPassing();
+    // /home has nodev but /home2 does not — jailer is under /home2
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      if (String(p) === "/proc/mounts") {
+        return "/dev/sda1 / ext4 rw,relatime 0 0\n/dev/sda2 /home ext4 rw,nodev,nosuid 0 0\n/dev/sda3 /home2 ext4 rw,relatime 0 0\n" as unknown as ReturnType<
+          typeof readFileSync
+        >;
+      }
+      return "" as unknown as ReturnType<typeof readFileSync>;
+    });
+
+    const home2Paths = { ...fakePaths, jailerBaseDir: "/home2/user/.vmsan/jailer" };
+    const checks = runDoctorChecks(home2Paths);
+    const fsCheck = checks.find((c) => c.name === "Jailer filesystem")!;
+    expect(fsCheck.status).toBe("pass");
+    expect(fsCheck.detail).toBe("/home2");
   });
 });
