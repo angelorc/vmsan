@@ -1,5 +1,15 @@
 # vmsan
 
+## 0.2.1
+
+### Patch Changes
+
+- [#72](https://github.com/angelorc/vmsan/pull/72) [`204b06e`](https://github.com/angelorc/vmsan/commit/204b06e8372afd45947c549c3386a381f4f665a3) Thanks [@angelorc](https://github.com/angelorc)! - Move built-in runtime distribution to Cloudflare R2.
+
+  - switch release installs to manifest-driven runtime downloads
+  - keep source installs on local runtime builds
+  - reduce default install requirements by removing Docker from the normal release path
+
 ## 0.2.0
 
 ### Minor Changes

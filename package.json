@@ -1,6 +1,6 @@
 {
   "name": "vmsan",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Firecracker microVM sandbox toolkit",
   "homepage": "https://github.com/angelorc/vmsan",
   "bugs": "https://github.com/angelorc/vmsan/issues",
