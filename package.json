@@ -25,6 +25,7 @@
     }
   },
   "scripts": {
+    "prebuild": "node src/completions/codegen.mjs",
     "build": "obuild",
     "dev": "obuild --stub",
     "lint": "bunx oxlint . && bunx oxfmt --check '!**/*.md' '!docs/**' '!.changeset/pre.json' .",
