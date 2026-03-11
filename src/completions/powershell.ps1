@@ -34,8 +34,15 @@ Register-ArgumentCompleter -Native -CommandName vmsan -ScriptBlock {
         return
     }
 
-    # Enum value completions for flags with fixed choices
-    $prevToken = if ($tokens.Count -ge 2) { $tokens[$tokens.Count - 2] } else { '' }
+    # Enum value completions for flags with fixed choices.
+    # When $wordToComplete is empty the current token is not yet in $tokens,
+    # so the preceding flag is at $tokens.Count - 1; when non-empty it is at
+    # $tokens.Count - 2.
+    $prevToken = if ($wordToComplete -eq '') {
+        if ($tokens.Count -ge 1) { $tokens[$tokens.Count - 1] } else { '' }
+    } else {
+        if ($tokens.Count -ge 2) { $tokens[$tokens.Count - 2] } else { '' }
+    }
     switch ($prevToken) {
         '--runtime' {
             @('base','node22','node24','python3.13') | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
