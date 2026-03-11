@@ -2,12 +2,13 @@
 // Reads shell completion source files and writes TypeScript string-constant modules.
 // Edit the source files (.sh, .fish, .ps1) then run: bun run build
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const dir = dirname(fileURLToPath(import.meta.url));
 const outDir = join(dir, "generated");
+mkdirSync(outDir, { recursive: true });
 
 const shells = [
   { src: "bash.sh", out: "bash.ts", exportName: "bashCompletionScript" },
