@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Reads shell completion source files and writes TypeScript string-constant modules.
-// Edit the source files (.sh, .fish, .ps1) then run: bun run generate
+// Edit the source files (.sh, .fish, .ps1) then run: bun run build
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -18,7 +18,7 @@ const shells = [
 for (const { src, out, exportName } of shells) {
   const content = readFileSync(join(dir, src), "utf8");
   const ts = [
-    `// Generated from src/completions/${src} — edit that file, then run: bun run generate`,
+    `// Generated from src/completions/${src} — edit that file, then run: bun run build`,
     `export const ${exportName} = ${JSON.stringify(content)};`,
     "",
   ].join("\n");
