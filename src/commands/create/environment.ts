@@ -58,7 +58,7 @@ export function findRuntimeRootfs(runtime: Exclude<Runtime, "base">, baseDir: st
   if (!existsSync(rootfsPath)) {
     throw new SetupError("ERR_SETUP_NO_EXT4_ROOTFS", {
       message: `Runtime "${runtime}" rootfs not found at ${rootfsPath}`,
-      fix: 'Run "curl -fsSL https://vmsan.dev/install | bash" to build runtime images.',
+      fix: 'Run "curl -fsSL https://vmsan.dev/install | bash" to install or refresh runtime images.',
     });
   }
   return rootfsPath;

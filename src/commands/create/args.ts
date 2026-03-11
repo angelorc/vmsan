@@ -26,7 +26,7 @@ export const createCommandArgs = {
     type: "string",
     default: "base",
     description:
-      "Runtime environment (base, node22, node24, python3.13). Pre-built during install. Default: base",
+      "Runtime environment (base, node22, node24, python3.13). Release installs download prebuilt runtimes; source installs build them locally. Default: base",
   },
   project: {
     type: "string",
