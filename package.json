@@ -33,7 +33,7 @@
     "fmt": "bunx oxfmt '!**/*.md' '!docs/**' '!.changeset/pre.json' .",
     "fmt:check": "bunx oxfmt --check '!**/*.md' '!docs/**' '!.changeset/pre.json' .",
     "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "node src/completions/codegen.mjs && tsc --noEmit",
     "prepack": "bun run build",
     "automd": "automd",
     "changeset": "changeset",

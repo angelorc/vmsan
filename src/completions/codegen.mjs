@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const dir = dirname(fileURLToPath(import.meta.url));
+const outDir = join(dir, "generated");
 
 const shells = [
   { src: "bash.sh", out: "bash.ts", exportName: "bashCompletionScript" },
@@ -22,6 +23,6 @@ for (const { src, out, exportName } of shells) {
     `export const ${exportName} = ${JSON.stringify(content)};`,
     "",
   ].join("\n");
-  writeFileSync(join(dir, out), ts);
+  writeFileSync(join(outDir, out), ts);
   console.log(`  generated ${out}`);
 }

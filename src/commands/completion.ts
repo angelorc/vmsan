@@ -1,9 +1,9 @@
 import type { CommandDef } from "citty";
 import { defineCommand } from "citty";
-import { bashCompletionScript } from "../completions/bash.ts";
-import { zshCompletionScript } from "../completions/zsh.ts";
-import { fishCompletionScript } from "../completions/fish.ts";
-import { powershellCompletionScript } from "../completions/powershell.ts";
+import { bashCompletionScript } from "../completions/generated/bash.ts";
+import { zshCompletionScript } from "../completions/generated/zsh.ts";
+import { fishCompletionScript } from "../completions/generated/fish.ts";
+import { powershellCompletionScript } from "../completions/generated/powershell.ts";
 
 const SUPPORTED_SHELLS = ["bash", "zsh", "fish", "powershell"] as const;
 

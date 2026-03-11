@@ -5,6 +5,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# Generated completion modules (built from src/completions/*.sh/.fish/.ps1)
+src/completions/generated/
+
 # Go binaries
 agent/vmsan-agent
 nftables/vmsan-nftables*
