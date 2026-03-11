@@ -14,12 +14,16 @@ VMSAN_INSTALL_BOOTSTRAPPED="${VMSAN_INSTALL_BOOTSTRAPPED:-}"
 VMSAN_INSTALL_SOURCE_SHA="${VMSAN_INSTALL_SOURCE_SHA:-}"
 VMSAN_INSTALL_REQUESTED_REF="${VMSAN_INSTALL_REQUESTED_REF:-}"
 VMSAN_INSTALL_REQUESTED_SHA="${VMSAN_INSTALL_REQUESTED_SHA:-}"
+VMSAN_RUNTIME_MANIFEST_URL="${VMSAN_RUNTIME_MANIFEST_URL:-https://artifacts.vmsan.dev/runtimes/channels/stable.json}"
+VMSAN_FORCE_LOCAL_RUNTIME_BUILD="${VMSAN_FORCE_LOCAL_RUNTIME_BUILD:-0}"
 ARCH="$(uname -m)"
 CLOUDFLARED_VERSION="${CLOUDFLARED_VERSION:-2026.2.0}"
 GO_REQUIRED_VERSION="${GO_REQUIRED_VERSION:-1.22.0}"
 GO_INSTALL_VERSION="${GO_INSTALL_VERSION:-1.22.0}"
 REQUESTED_REF="$VMSAN_INSTALL_REQUESTED_REF"
 REQUESTED_SHA="$VMSAN_INSTALL_REQUESTED_SHA"
+RUNTIME_MANIFEST_URL="$VMSAN_RUNTIME_MANIFEST_URL"
+FORCE_LOCAL_RUNTIME_BUILD="$VMSAN_FORCE_LOCAL_RUNTIME_BUILD"
 UNINSTALL=0
 
 # --- helpers ---
@@ -73,6 +77,11 @@ json_string_field() {
 json_bool_field() {
   local key="$1" file="$2"
   grep -oP "\"$key\"\\s*:\\s*\\K(true|false)" "$file" 2>/dev/null | head -n1 || true
+}
+
+json_number_field() {
+  local key="$1" file="$2"
+  grep -oP "\"$key\"\\s*:\\s*\\K[0-9]+" "$file" 2>/dev/null | head -n1 || true
 }
 
 json_ports_field() {
@@ -153,8 +162,14 @@ VMSAN_DIR="$(resolve_vmsan_dir)"
 
 download() {
   local url="$1" dest="$2"
+  local tmp_dest
+  tmp_dest="$(mktemp)"
   info "Downloading $(basename "$dest")..."
-  curl -fsSL -o "$dest" "$url"
+  if ! curl -fsSL -o "$tmp_dest" "$url"; then
+    rm -f "$tmp_dest"
+    error "Failed to download $(basename "$dest") from $url"
+  fi
+  mv "$tmp_dest" "$dest"
 }
 
 go_arch() {
@@ -162,6 +177,34 @@ go_arch() {
     x86_64)  echo "amd64" ;;
     aarch64) echo "arm64" ;;
     *)       error "Unsupported architecture: $ARCH" ;;
+  esac
+}
+
+runtime_release_arch() {
+  case "$ARCH" in
+    x86_64)  echo "linux-amd64" ;;
+    aarch64) echo "linux-arm64" ;;
+    *)       error "Unsupported architecture: $ARCH" ;;
+  esac
+}
+
+builtin_runtime_filename() {
+  case "$1" in
+    node22) echo "node22.ext4" ;;
+    node24) echo "node24.ext4" ;;
+    python3.13) echo "python3.13.ext4" ;;
+    *) error "Unsupported runtime: $1" ;;
+  esac
+}
+
+is_truthy() {
+  case "${1:-}" in
+    1|true|TRUE|yes|YES|on|ON)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
   esac
 }
 
@@ -462,14 +505,14 @@ ensure_docker() {
   success "Docker $(docker --version | awk '{print $3}' | tr -d ',') installed"
 }
 
-download_source_tree() {
-  local sha="$1"
+download_source_tree_ref() {
+  local ref="$1"
   local dest="$2"
 
   rm -rf "$dest"
   mkdir -p "$dest"
-  info "Fetching vmsan source at $sha..."
-  curl -fsSL "https://github.com/$VMSAN_REPO/archive/${sha}.tar.gz" \
+  info "Fetching vmsan source at $ref..."
+  curl -fsSL "https://github.com/$VMSAN_REPO/archive/${ref}.tar.gz" \
     | tar -xz --strip-components=1 -C "$dest"
 }
 
@@ -477,6 +520,7 @@ MISSING_PKGS=()
 command -v unzip       >/dev/null 2>&1 || MISSING_PKGS+=(unzip)
 command -v unsquashfs  >/dev/null 2>&1 || MISSING_PKGS+=(squashfs-tools)
 command -v mkfs.ext4   >/dev/null 2>&1 || MISSING_PKGS+=(e2fsprogs)
+command -v zstd        >/dev/null 2>&1 || MISSING_PKGS+=(zstd)
 
 if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
   info "Installing prerequisites: ${MISSING_PKGS[*]}..."
@@ -575,15 +619,24 @@ fi
 
 VMSAN_SRC="$VMSAN_DIR/src"
 LATEST_TAG=""
+LOCAL_RUNTIME_BUILD=0
+
+if [ "$INSTALL_MODE" = "source" ] || is_truthy "$FORCE_LOCAL_RUNTIME_BUILD"; then
+  LOCAL_RUNTIME_BUILD=1
+fi
 
 if [ "$INSTALL_MODE" = "source" ]; then
   info "Source install mode active (${SOURCE_LABEL})"
-  download_source_tree "$SOURCE_SHA" "$VMSAN_SRC"
+  download_source_tree_ref "$SOURCE_SHA" "$VMSAN_SRC"
 else
   info "Fetching latest release tag..."
   LATEST_TAG=$(curl -fsSL "https://api.github.com/repos/$VMSAN_REPO/releases" | grep -oP '"tag_name":\s*"\K[^"]+' | head -1)
   [ -n "$LATEST_TAG" ] || error "Could not determine latest release tag"
   success "Latest release: $LATEST_TAG"
+  if [ "$LOCAL_RUNTIME_BUILD" -eq 1 ]; then
+    info "Local runtime build forced; downloading source tree for ${LATEST_TAG}..."
+    download_source_tree_ref "$LATEST_TAG" "$VMSAN_SRC"
+  fi
 fi
 
 # --- vmsan CLI ---
@@ -726,158 +779,296 @@ fi
 
 # --- runtime images ---
 
-RUNTIME_RECIPE_VERSION="2"
+BUILTIN_RUNTIMES=(node22 node24 python3.13)
+HOST_RUNTIME_ARCH="$(runtime_release_arch)"
+RUNTIME_RECIPE_VERSION_INSTALLED=""
+RUNTIME_DISTRIBUTION="r2"
 
 runtime_metadata_path() {
   local name="$1"
   echo "$VMSAN_DIR/rootfs/${name}.meta"
 }
 
-runtime_metadata_matches() {
-  local name="$1"
-  local base_image="$2"
+runtime_metadata_field() {
+  local name="$1" key="$2"
   local meta
   meta="$(runtime_metadata_path "$name")"
+  [ -f "$meta" ] || return 1
+  sed -n "s/^${key}=//p" "$meta" | head -n1
+}
 
+runtime_metadata_matches() {
+  local name="$1"
+  shift
+  local meta
+  meta="$(runtime_metadata_path "$name")"
   [ -f "$meta" ] || return 1
 
-  local recipe_version
-  local recorded_base_image
-  recipe_version="$(sed -n 's/^recipe_version=//p' "$meta" | head -n1)"
-  recorded_base_image="$(sed -n 's/^base_image=//p' "$meta" | head -n1)"
-
-  [ "$recipe_version" = "$RUNTIME_RECIPE_VERSION" ] && [ "$recorded_base_image" = "$base_image" ]
+  while [ $# -gt 0 ]; do
+    local key="$1"
+    local expected="$2"
+    local actual
+    shift 2
+    actual="$(runtime_metadata_field "$name" "$key" || true)"
+    [ "$actual" = "$expected" ] || return 1
+  done
 }
 
 write_runtime_metadata() {
   local name="$1"
-  local base_image="$2"
+  shift
   local meta
   meta="$(runtime_metadata_path "$name")"
 
-  cat > "$meta" <<EOF
-recipe_version=$RUNTIME_RECIPE_VERSION
-base_image=$base_image
-built_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  : > "$meta"
+  while [ $# -gt 0 ]; do
+    printf '%s=%s\n' "$1" "$2" >> "$meta"
+    shift 2
+  done
+}
+
+read_runtime_manifest_entry() {
+  local manifest_file="$1" runtime="$2" arch="$3"
+
+  MANIFEST_PATH="$manifest_file" \
+  MANIFEST_RUNTIME="$runtime" \
+  MANIFEST_ARCH="$arch" \
+  MANIFEST_SOURCE_URL="$RUNTIME_MANIFEST_URL" \
+  node <<'EOF'
+const fs = require("fs");
+
+const fail = (message) => {
+  console.error(message);
+  process.exit(1);
+};
+
+const manifestPath = process.env.MANIFEST_PATH;
+const runtime = process.env.MANIFEST_RUNTIME;
+const arch = process.env.MANIFEST_ARCH;
+const manifestSourceUrl = process.env.MANIFEST_SOURCE_URL || manifestPath;
+
+let manifest;
+try {
+  manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+} catch (error) {
+  fail(`Could not parse runtime manifest ${manifestSourceUrl}: ${error.message}`);
+}
+
+if (manifest.schemaVersion !== 1) {
+  fail(`Unsupported runtime manifest schemaVersion ${manifest.schemaVersion} from ${manifestSourceUrl}`);
+}
+
+const entry = manifest.runtimes?.[runtime]?.[arch];
+if (!entry) {
+  fail(`Runtime "${runtime}" for "${arch}" is missing from ${manifestSourceUrl}`);
+}
+
+const values = {
+  manifestVersion: String(manifest.version ?? ""),
+  manifestRecipeVersion: String(manifest.recipeVersion ?? ""),
+  artifactVersion: String(entry.artifactVersion ?? ""),
+  entryRecipeVersion: String(entry.recipeVersion ?? ""),
+  url: String(entry.url ?? ""),
+  sha256: String(entry.sha256 ?? ""),
+  bytes: String(entry.bytes ?? ""),
+  baseImage: String(entry.baseImage ?? ""),
+  baseImageDigest: String(entry.baseImageDigest ?? ""),
+};
+
+for (const [key, value] of Object.entries(values)) {
+  if (!value) {
+    fail(`Runtime "${runtime}" for "${arch}" is missing "${key}" in ${manifestSourceUrl}`);
+  }
+  console.log(`${key}=${value}`);
+}
 EOF
 }
 
-build_runtime() {
-  local name="$1"
-  local base_image="$2"
-  local dest="$VMSAN_DIR/rootfs/${name}.ext4"
-  local meta
-  meta="$(runtime_metadata_path "$name")"
+install_runtime_from_manifest() {
+  local runtime="$1" arch="$2" manifest_file="$3"
+  local entry_lines
+  local manifest_version=""
+  local manifest_recipe_version=""
+  local artifact_version=""
+  local entry_recipe_version=""
+  local url=""
+  local sha256=""
+  local bytes=""
+  local base_image=""
+  local base_image_digest=""
+  local dest
+  local tmp_dir
+  local artifact_tmp
+  local ext4_tmp
+  local actual_sha256
+  local actual_bytes
 
-  if [ -f "$dest" ] && runtime_metadata_matches "$name" "$base_image"; then
-    success "Runtime ${name} already built"
+  if ! entry_lines="$(read_runtime_manifest_entry "$manifest_file" "$runtime" "$arch")"; then
+    error "Could not resolve runtime \"$runtime\" for \"$arch\" from $RUNTIME_MANIFEST_URL"
+  fi
+
+  while IFS='=' read -r key value; do
+    case "$key" in
+      manifestVersion) manifest_version="$value" ;;
+      manifestRecipeVersion) manifest_recipe_version="$value" ;;
+      artifactVersion) artifact_version="$value" ;;
+      entryRecipeVersion) entry_recipe_version="$value" ;;
+      url) url="$value" ;;
+      sha256) sha256="$value" ;;
+      bytes) bytes="$value" ;;
+      baseImage) base_image="$value" ;;
+      baseImageDigest) base_image_digest="$value" ;;
+    esac
+  done <<< "$entry_lines"
+
+  [ "$manifest_recipe_version" = "$entry_recipe_version" ] \
+    || error "Runtime manifest recipe version mismatch for $runtime ($manifest_recipe_version != $entry_recipe_version)"
+
+  dest="$VMSAN_DIR/rootfs/$(builtin_runtime_filename "$runtime")"
+  if [ -f "$dest" ] && runtime_metadata_matches \
+    "$runtime" \
+    distribution r2 \
+    artifact_version "$artifact_version" \
+    recipe_version "$entry_recipe_version" \
+    sha256 "$sha256" \
+    base_image "$base_image" \
+    base_image_digest "$base_image_digest"; then
+    RUNTIME_RECIPE_VERSION_INSTALLED="$entry_recipe_version"
+    success "Runtime ${runtime} already installed (${artifact_version})"
     return
   fi
 
-  if [ -f "$dest" ]; then
-    info "Rebuilding runtime ${name} to refresh the runtime recipe..."
-    rm -f "$dest" "$meta"
-  fi
+  info "Installing runtime ${runtime} from release ${manifest_version} (${arch})..."
+  tmp_dir="$(mktemp -d)"
+  artifact_tmp="$tmp_dir/rootfs.ext4.zst"
+  ext4_tmp="$tmp_dir/$(builtin_runtime_filename "$runtime")"
+  trap 'trap - RETURN; rm -rf "$tmp_dir"' RETURN
 
-  need_cmd docker
+  download "$url" "$artifact_tmp"
 
-  info "Building runtime ${name} from ${base_image}..."
+  actual_sha256="$(sha256sum "$artifact_tmp" | awk '{print $1}')"
+  [ "$actual_sha256" = "$sha256" ] \
+    || error "Checksum mismatch for runtime ${runtime} from ${url} (expected ${sha256}, got ${actual_sha256})"
 
-  local build_dir
-  build_dir=$(mktemp -d)
-  local build_tag="vmsan-rootfs-${name}:latest"
-  local container_name="vmsan-export-${name}-$$"
-  trap 'trap - RETURN; docker rm -f "$container_name" >/dev/null 2>&1 || true; rm -rf "$build_dir"' RETURN
+  actual_bytes="$(stat -c %s "$artifact_tmp")"
+  [ "$actual_bytes" = "$bytes" ] \
+    || error "Size mismatch for runtime ${runtime} from ${url} (expected ${bytes}, got ${actual_bytes})"
 
-  # Detect package manager and install appropriate packages
-  cat > "$build_dir/Dockerfile" <<'DEOF'
-FROM __BASE_IMAGE__
-RUN if command -v apt-get >/dev/null 2>&1; then \
-      apt-get update && apt-get install -y --no-install-recommends \
-        bind9-utils bzip2 findutils git gzip iptables iputils-ping libicu-dev libjpeg-dev \
-        libpng-dev ncurses-base libssl-dev openssl procps sudo \
-        systemd systemd-sysv tar unzip debianutils whois zstd \
-      && rm -rf /var/lib/apt/lists/*; \
-    elif command -v dnf >/dev/null 2>&1; then \
-      dnf install -y bind-utils bzip2 findutils git gzip iptables iputils libicu libjpeg \
-        libpng ncurses-libs openssl openssl-libs procps sudo \
-        systemd tar unzip which whois zstd \
-      && dnf clean all; \
-    elif command -v apk >/dev/null 2>&1; then \
-      apk add --no-cache bash bind-tools bzip2 findutils git gzip iptables iputils \
-        icu-libs libjpeg-turbo libpng ncurses-libs openrc openssl \
-        procps sudo tar unzip whois zstd; \
-    fi
-RUN if command -v apk >/dev/null 2>&1; then \
-      id -u ubuntu >/dev/null 2>&1 || adduser -D -s /bin/bash ubuntu; \
-    else \
-      id -u ubuntu >/dev/null 2>&1 || useradd -m -s /bin/bash ubuntu; \
-    fi; \
-    echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/ubuntu; \
-    chmod 440 /etc/sudoers.d/ubuntu; \
-    chown -R ubuntu:ubuntu /home/ubuntu
-RUN EXTRA=""; \
-    if command -v npm >/dev/null 2>&1; then \
-      su -c 'mkdir -p /home/ubuntu/.npm-global && npm config set prefix /home/ubuntu/.npm-global' ubuntu; \
-      EXTRA="${EXTRA}export PATH=\"/home/ubuntu/.npm-global/bin:\$PATH\"\n"; \
-    fi; \
-    if command -v pip3 >/dev/null 2>&1 || command -v pip >/dev/null 2>&1; then \
-      EXTRA="${EXTRA}export PATH=\"/home/ubuntu/.local/bin:\$PATH\"\n"; \
-    fi; \
-    if [ -n "$EXTRA" ]; then \
-      printf '%b' "$EXTRA" >> /home/ubuntu/.profile; \
-      { printf '%b' "$EXTRA"; cat /home/ubuntu/.bashrc; } > /home/ubuntu/.bashrc.tmp \
-        && mv /home/ubuntu/.bashrc.tmp /home/ubuntu/.bashrc; \
-    fi; \
-    chown -R ubuntu:ubuntu /home/ubuntu
-RUN if command -v rc-update >/dev/null 2>&1; then \
-      rc-update add devfs sysinit 2>/dev/null || true; \
-      rc-update add mdev sysinit 2>/dev/null || true; \
-      rc-update add hwdrivers sysinit 2>/dev/null || true; \
-      rc-update add modules boot 2>/dev/null || true; \
-      rc-update add sysctl boot 2>/dev/null || true; \
-      rc-update add hostname boot 2>/dev/null || true; \
-      rc-update add bootmisc boot 2>/dev/null || true; \
-      rc-update add networking boot 2>/dev/null || true; \
-      printf '%s\n' '::sysinit:/sbin/openrc sysinit' '::sysinit:/sbin/openrc boot' '::wait:/sbin/openrc default' '::shutdown:/sbin/openrc shutdown' 'ttyS0::respawn:/sbin/getty 115200 ttyS0' > /etc/inittab; \
-    fi
-DEOF
+  zstd -d -q -f -o "$ext4_tmp" "$artifact_tmp"
+  mv "$ext4_tmp" "$dest"
 
-  sed -i "s|__BASE_IMAGE__|${base_image}|" "$build_dir/Dockerfile"
+  write_runtime_metadata \
+    "$runtime" \
+    distribution r2 \
+    artifact_version "$artifact_version" \
+    recipe_version "$entry_recipe_version" \
+    sha256 "$sha256" \
+    base_image "$base_image" \
+    base_image_digest "$base_image_digest" \
+    installed_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
-  # Build
-  docker build -t "$build_tag" -f "$build_dir/Dockerfile" "$build_dir" >/dev/null \
-    || error "Failed to build runtime ${name} from ${base_image}"
-
-  # Export
-  docker create --name "$container_name" "$build_tag" >/dev/null \
-    || error "Failed to create export container for runtime ${name}"
-  docker export "$container_name" -o "$build_dir/rootfs.tar" \
-    || error "Failed to export rootfs tar for runtime ${name}"
-
-  # Convert to ext4
-  local tar_bytes
-  tar_bytes=$(stat -c %s "$build_dir/rootfs.tar")
-  local tar_mb=$(( tar_bytes / 1024 / 1024 ))
-  local image_mb=$(( tar_mb + 512 ))
-  [ "$image_mb" -lt 1024 ] && image_mb=1024
-
-  local tar_extract_dir="$build_dir/rootfs-extracted"
-  mkdir -p "$tar_extract_dir"
-  tar -xf "$build_dir/rootfs.tar" -C "$tar_extract_dir"
-
-  mkfs.ext4 -q -d "$tar_extract_dir" "$dest" "${image_mb}M"
-  tune2fs -m 0 "$dest" >/dev/null 2>&1
-
-  write_runtime_metadata "$name" "$base_image"
-
-  success "Runtime ${name} built (${image_mb} MB)"
+  RUNTIME_RECIPE_VERSION_INSTALLED="$entry_recipe_version"
+  trap - RETURN
+  rm -rf "$tmp_dir"
+  success "Runtime ${runtime} installed from R2 (${artifact_version})"
 }
 
-ensure_docker
-build_runtime "node22" "node:22"
-build_runtime "node24" "node:24"
-build_runtime "python3.13" "python:3.13-slim"
+build_runtime_from_source_tree() {
+  local runtime="$1" source_tree="$2" artifact_version="$3" arch="$4"
+  local runtime_manifest="$source_tree/docker/runtimes/runtime-manifest.sh"
+  local build_dir
+  local dest
+  local base_image
+  local base_image_digest
+  local artifact_sha256
+  local recipe_version
+  local expected_recipe_version
+  local metadata_json
+
+  [ -f "$runtime_manifest" ] || error "Runtime manifest not found at $runtime_manifest"
+  # shellcheck disable=SC1090
+  source "$runtime_manifest"
+
+  base_image="$(runtime_base_image "$runtime" 2>/dev/null)" \
+    || error "Unsupported runtime in local build path: $runtime"
+  expected_recipe_version="$RUNTIME_RECIPE_VERSION"
+  dest="$VMSAN_DIR/rootfs/$(builtin_runtime_filename "$runtime")"
+
+  if [ -f "$dest" ] && runtime_metadata_matches \
+    "$runtime" \
+    distribution local \
+    artifact_version "$artifact_version" \
+    recipe_version "$expected_recipe_version" \
+    base_image "$base_image"; then
+    RUNTIME_RECIPE_VERSION_INSTALLED="$expected_recipe_version"
+    success "Runtime ${runtime} already built locally"
+    return
+  fi
+
+  build_dir="$(mktemp -d)"
+  trap 'trap - RETURN; rm -rf "$build_dir"' RETURN
+
+  info "Building runtime ${runtime} locally..."
+  bash "$source_tree/scripts/build-runtime-rootfs.sh" \
+    --runtime "$runtime" \
+    --arch "$arch" \
+    --version "$artifact_version" \
+    --output-dir "$build_dir"
+
+  (
+    cd "$build_dir"
+    sha256sum -c sha256sums.txt >/dev/null
+  ) || error "Checksum verification failed for locally built runtime ${runtime}"
+
+  metadata_json="$build_dir/metadata.json"
+  artifact_sha256="$(json_string_field sha256 "$metadata_json")"
+  base_image_digest="$(json_string_field baseImageDigest "$metadata_json")"
+  recipe_version="$(json_number_field recipeVersion "$metadata_json")"
+  base_image="$(json_string_field baseImage "$metadata_json")"
+
+  [ -n "$artifact_sha256" ] || error "Missing sha256 in $metadata_json"
+  [ -n "$base_image_digest" ] || error "Missing baseImageDigest in $metadata_json"
+  [ -n "$recipe_version" ] || error "Missing recipeVersion in $metadata_json"
+  [ -n "$base_image" ] || error "Missing baseImage in $metadata_json"
+
+  zstd -d -q -f -o "$build_dir/$(builtin_runtime_filename "$runtime")" "$build_dir/rootfs.ext4.zst"
+  mv "$build_dir/$(builtin_runtime_filename "$runtime")" "$dest"
+
+  write_runtime_metadata \
+    "$runtime" \
+    distribution local \
+    artifact_version "$artifact_version" \
+    recipe_version "$recipe_version" \
+    sha256 "$artifact_sha256" \
+    base_image "$base_image" \
+    base_image_digest "$base_image_digest" \
+    installed_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+  RUNTIME_RECIPE_VERSION_INSTALLED="$recipe_version"
+  trap - RETURN
+  rm -rf "$build_dir"
+  success "Runtime ${runtime} built locally (${artifact_version})"
+}
+
+need_cmd zstd
+need_cmd sha256sum
+
+if [ "$LOCAL_RUNTIME_BUILD" -eq 1 ]; then
+  RUNTIME_DISTRIBUTION="local"
+  ensure_docker
+  RUNTIME_ARTIFACT_VERSION="${LATEST_TAG:-$SOURCE_SHA}"
+  for rt in "${BUILTIN_RUNTIMES[@]}"; do
+    build_runtime_from_source_tree "$rt" "$VMSAN_SRC" "$RUNTIME_ARTIFACT_VERSION" "$HOST_RUNTIME_ARCH"
+  done
+else
+  RUNTIME_MANIFEST_FILE="$(mktemp)"
+  info "Fetching runtime manifest from $RUNTIME_MANIFEST_URL..."
+  download "$RUNTIME_MANIFEST_URL" "$RUNTIME_MANIFEST_FILE"
+  for rt in "${BUILTIN_RUNTIMES[@]}"; do
+    install_runtime_from_manifest "$rt" "$HOST_RUNTIME_ARCH" "$RUNTIME_MANIFEST_FILE"
+  done
+  rm -f "$RUNTIME_MANIFEST_FILE"
+fi
 
 # --- install metadata ---
 
@@ -890,7 +1081,10 @@ resolved_sha=$SOURCE_SHA
 source_label=$SOURCE_LABEL
 latest_release=$LATEST_TAG
 cli_version=$VMSAN_VER
-runtime_recipe_version=$RUNTIME_RECIPE_VERSION
+runtime_distribution=$RUNTIME_DISTRIBUTION
+runtime_manifest_url=$RUNTIME_MANIFEST_URL
+runtime_recipe_version=$RUNTIME_RECIPE_VERSION_INSTALLED
+local_runtime_build=$LOCAL_RUNTIME_BUILD
 installed_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
 

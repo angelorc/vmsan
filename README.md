@@ -37,7 +37,7 @@ Create, manage, and connect to isolated [Firecracker](https://github.com/firecra
 
 - Linux (x86_64 or aarch64) with KVM support
 - Root/sudo access (required for TAP device networking and jailer)
-- Docker (for building runtime images and `--from-image`)
+- Docker (for source installs, local runtime rebuilds, and `--from-image`)
 
 ## 🚀 Install
 
@@ -51,7 +51,9 @@ This downloads and installs everything into `~/.vmsan/`:
 - Linux kernel (vmlinux 6.1)
 - Ubuntu 24.04 rootfs (converted from squashfs to ext4)
 - vmsan CLI + in-VM agent
-- Runtime images (node22, node24, python3.13)
+- Runtime images (`node22`, `node24`, `python3.13`) downloaded as prebuilt artifacts
+
+Standard release installs download built-in runtimes from `https://artifacts.vmsan.dev/` and do not require Docker. Source installs still build runtimes locally.
 
 <details>
 <summary>Uninstall</summary>
