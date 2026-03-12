@@ -5,7 +5,7 @@ node_modules/
 dist/
 *.tsbuildinfo
 
-# Generated completion modules (built from src/completions/*.sh/.fish/.ps1)
+# Generated completion artifacts (shell scripts + TS wrappers, built by codegen.ts from commands.ts)
 src/completions/generated/
 
 # Go binaries

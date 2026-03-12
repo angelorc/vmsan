@@ -25,7 +25,7 @@
     }
   },
   "scripts": {
-    "prebuild": "node src/completions/codegen.mjs",
+    "prebuild": "bun run src/completions/codegen.ts",
     "build": "obuild",
     "dev": "obuild --stub",
     "lint": "bunx oxlint . && bunx oxfmt --check '!**/*.md' '!docs/**' '!.changeset/pre.json' .",
@@ -33,7 +33,7 @@
     "fmt": "bunx oxfmt '!**/*.md' '!docs/**' '!.changeset/pre.json' .",
     "fmt:check": "bunx oxfmt --check '!**/*.md' '!docs/**' '!.changeset/pre.json' .",
     "test": "vitest run --passWithNoTests",
-    "typecheck": "node src/completions/codegen.mjs && tsc --noEmit",
+    "typecheck": "bun run src/completions/codegen.ts && tsc --noEmit",
     "prepack": "bun run build",
     "automd": "automd",
     "changeset": "changeset",
