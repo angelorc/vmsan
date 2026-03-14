@@ -17,10 +17,10 @@ const snapshotCreateCommand = defineCommand({
       description: "VM ID to snapshot",
       required: true,
     },
-    "no-resume": {
+    resume: {
       type: "boolean",
-      default: false,
-      description: "Keep VM paused after snapshot (default: resume)",
+      default: true,
+      description: "Resume VM after snapshot (use --no-resume to keep paused)",
     },
   },
   async run({ args }) {
@@ -32,7 +32,7 @@ const snapshotCreateCommand = defineCommand({
 
       const result = await service.create({
         vmId: args.vmId,
-        resume: !args["no-resume"],
+        resume: args.resume,
       });
 
       if (getOutputMode() === "json") {
