@@ -1,4 +1,13 @@
-import { copyFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import {
+  copyFileSync,
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { join } from "node:path";
 import type { VmsanContext } from "../context.ts";
 import { FirecrackerClient } from "./firecracker.ts";
@@ -213,7 +222,9 @@ export class SnapshotService {
       }
     }
 
-    return entries.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return entries.sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
   }
 
   // -----------------------------------------------------------------------
