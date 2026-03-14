@@ -70,3 +70,9 @@ export const snapshotNotFoundError = (snapshotId: string): VmError =>
   new VmError("ERR_VM_SNAPSHOT_NOT_FOUND", {
     message: `Snapshot not found: ${snapshotId}`,
   });
+
+export const snapshotCreateFailedError = (vmId: string, reason: string): VmError =>
+  new VmError("ERR_VM_SNAPSHOT_CREATE_FAILED", {
+    vmId,
+    message: `Failed to create snapshot for VM ${vmId}: ${reason}`,
+  });

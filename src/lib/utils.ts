@@ -18,7 +18,7 @@ function getSudoOwner(): { uid: number; gid: number } | null {
   return { uid: numUid, gid: numGid };
 }
 
-function chownToSudoUser(path: string): void {
+export function chownToSudoUser(path: string): void {
   const owner = getSudoOwner();
   if (!owner) return;
   try {
