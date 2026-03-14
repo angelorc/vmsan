@@ -33,7 +33,7 @@ const snapshotDeleteCommand = defineCommand({
         return;
       }
 
-      const ctx = await createVmsanContext();
+      const ctx = createVmsanContext();
       const service = new SnapshotService(ctx);
 
       const results: { snapshotId: string; success: boolean }[] = [];

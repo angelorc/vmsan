@@ -27,7 +27,7 @@ const snapshotCreateCommand = defineCommand({
     const cmdLog = createCommandLogger("snapshot:create");
 
     try {
-      const ctx = await createVmsanContext();
+      const ctx = createVmsanContext();
       const service = new SnapshotService(ctx);
 
       const result = await service.create({

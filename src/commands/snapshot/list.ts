@@ -17,7 +17,7 @@ const snapshotListCommand = defineCommand({
     const log = consola.withTag("snapshot");
 
     try {
-      const ctx = await createVmsanContext();
+      const ctx = createVmsanContext();
       const service = new SnapshotService(ctx);
       const snapshots = service.list();
 

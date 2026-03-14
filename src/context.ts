@@ -36,7 +36,7 @@ function buildContext(options?: VmsanOptions): VmsanContext {
   return { paths, store, hooks, logger };
 }
 
-export async function createVmsanContext(options?: VmsanOptions): Promise<VmsanContext> {
+export function createVmsanContext(options?: VmsanOptions): VmsanContext {
   return buildContext(options);
 }
 

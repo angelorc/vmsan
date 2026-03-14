@@ -138,7 +138,7 @@ export class SnapshotService {
 
       log.success(`Snapshot files saved to ${destDir}`);
 
-      // 5. Resume VM (unless --no-resume)
+      // 6. Resume VM (unless --no-resume)
       if (resume) {
         try {
           await fc.resume();
@@ -181,7 +181,6 @@ export class SnapshotService {
 
   static loadMetadata(snapshotsDir: string, snapshotId: string): SnapshotMetadata | null {
     const metaPath = join(snapshotsDir, snapshotId, "metadata.json");
-    if (!existsSync(metaPath)) return null;
     try {
       return JSON.parse(readFileSync(metaPath, "utf-8")) as SnapshotMetadata;
     } catch {
