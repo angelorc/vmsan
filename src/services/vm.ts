@@ -37,6 +37,7 @@ import { generateVmId, safeKill, toError } from "../lib/utils.ts";
 import { spawnTimeoutKiller } from "../lib/timeout-killer.ts";
 import { waitForAgent } from "../lib/vm-context.ts";
 import { AgentClient } from "./agent.ts";
+import { SnapshotService } from "./snapshot.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -184,8 +185,17 @@ export class VMService {
       logger.debug(`Rootfs resolved: ${rootfsPath}`);
 
       const netnsName = opts.disableNetns ? undefined : `vmsan-${vmId}`;
-      const agentToken =
-        !opts.fromImage && existsSync(paths.agentBin) ? randomBytes(32).toString("hex") : null;
+
+      // Reuse agent token from snapshot metadata when restoring;
+      // the agent inside the guest already has this token baked in.
+      let agentToken: string | null = null;
+      if (snapshotId) {
+        const meta = SnapshotService.loadMetadata(paths.snapshotsDir, snapshotId);
+        agentToken = meta?.agentToken ?? null;
+      }
+      if (!agentToken && !opts.fromImage && existsSync(paths.agentBin)) {
+        agentToken = randomBytes(32).toString("hex");
+      }
 
       log.start(`Creating VM ${vmId}...`);
 

@@ -1,4 +1,4 @@
-import { copyFileSync, chmodSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { VmsanContext } from "../context.ts";
 import { FirecrackerClient } from "./firecracker.ts";
@@ -8,7 +8,7 @@ import {
   snapshotNotFoundError,
   snapshotCreateFailedError,
 } from "../errors/index.ts";
-import { mkdirSecure, chownToSudoUser, toError } from "../lib/utils.ts";
+import { mkdirSecure, writeSecure, chownToSudoUser, toError } from "../lib/utils.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -29,6 +29,12 @@ export interface CreateSnapshotResult {
 export interface SnapshotEntry {
   id: string;
   sizeMb: number;
+  createdAt: string;
+}
+
+export interface SnapshotMetadata {
+  vmId: string;
+  agentToken: string | null;
   createdAt: string;
 }
 
@@ -121,6 +127,15 @@ export class SnapshotService {
 
       copyFileSecure(srcSnapshotFile, dstSnapshotFile);
       copyFileSecure(srcMemFile, dstMemFile);
+
+      // 5. Save metadata (agent token needed for restore)
+      const metadata: SnapshotMetadata = {
+        vmId,
+        agentToken: state.agentToken,
+        createdAt: new Date().toISOString(),
+      };
+      writeSecure(join(destDir, "metadata.json"), JSON.stringify(metadata, null, 2));
+
       log.success(`Snapshot files saved to ${destDir}`);
 
       // 5. Resume VM (unless --no-resume)
@@ -157,6 +172,20 @@ export class SnapshotService {
       }
 
       throw snapshotCreateFailedError(vmId, toError(error).message);
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // loadMetadata
+  // -----------------------------------------------------------------------
+
+  static loadMetadata(snapshotsDir: string, snapshotId: string): SnapshotMetadata | null {
+    const metaPath = join(snapshotsDir, snapshotId, "metadata.json");
+    if (!existsSync(metaPath)) return null;
+    try {
+      return JSON.parse(readFileSync(metaPath, "utf-8")) as SnapshotMetadata;
+    } catch {
+      return null;
     }
   }
 
