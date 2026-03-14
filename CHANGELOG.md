@@ -1,5 +1,11 @@
 # vmsan
 
+## 0.3.0
+
+### Minor Changes
+
+- [`2003bb3`](https://github.com/angelorc/vmsan/commit/2003bb393cdd36bdda529417c1372a0cec591e6c) Thanks [@angelorc](https://github.com/angelorc)! - Add `vmsan snapshot` command group with `create`, `list`, and `delete` subcommands for saving and restoring VM state.
+
 ## 0.2.1
 
 ### Patch Changes
