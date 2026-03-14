@@ -42,6 +42,7 @@ export {
   chrootNotFoundError,
   networkSlotsExhaustedError,
   snapshotNotFoundError,
+  snapshotCreateFailedError,
 } from "./vm.ts";
 
 export { FirecrackerApiError } from "./firecracker.ts";

@@ -113,6 +113,15 @@ vmsan upload <vm-id> ./local-file.txt /remote/path/file.txt
 # Download a file from a VM
 vmsan download <vm-id> /remote/path/file.txt ./local-file.txt
 
+# Snapshot a running VM
+vmsan snapshot create <vm-id>
+
+# List snapshots
+vmsan snapshot list
+
+# Restore a VM from a snapshot
+vmsan create --snapshot <snapshot-id>
+
 # Stop a VM
 vmsan stop <vm-id>
 
@@ -141,6 +150,7 @@ vmsan remove <vm-id>
 | `upload`   |       | Upload files to a VM                  |
 | `download` |       | Download files from a VM              |
 | `network`  |       | Update network policy on a running VM |
+| `snapshot`  |       | Manage VM snapshots (create, list, delete) |
 | `doctor`   |       | Check system prerequisites and installation health |
 
 ## ⚠️ Known Limitations

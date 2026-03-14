@@ -165,6 +165,20 @@ export class FirecrackerClient {
     });
   }
 
+  async pause(): Promise<void> {
+    await firecrackerFetch(this.socketPath, "PATCH", "/vm", {
+      state: "Paused",
+    });
+  }
+
+  async createSnapshot(snapshotPath: string, memPath: string): Promise<void> {
+    await firecrackerFetch(this.socketPath, "PUT", "/snapshot/create", {
+      snapshot_path: snapshotPath,
+      mem_file_path: memPath,
+      snapshot_type: "Full",
+    });
+  }
+
   async resume(): Promise<void> {
     await firecrackerFetch(this.socketPath, "PATCH", "/vm", {
       state: "Resumed",

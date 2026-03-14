@@ -21,7 +21,7 @@ export interface VmsanContext {
   readonly logger: VmsanLogger;
 }
 
-export async function createVmsan(options?: VmsanOptions): Promise<VMService> {
+function buildContext(options?: VmsanOptions): VmsanContext {
   const paths =
     options?.paths === undefined
       ? vmsanPaths()
@@ -33,10 +33,18 @@ export async function createVmsan(options?: VmsanOptions): Promise<VMService> {
   const logger = options?.logger ?? createDefaultLogger();
   const hooks = createHooks<VmsanHooks>();
 
-  const ctx: VmsanContext = { paths, store, hooks, logger };
+  return { paths, store, hooks, logger };
+}
+
+export function createVmsanContext(options?: VmsanOptions): VmsanContext {
+  return buildContext(options);
+}
+
+export async function createVmsan(options?: VmsanOptions): Promise<VMService> {
+  const ctx = buildContext(options);
   const vmsan = new VMService(ctx);
 
-  const builtinPlugins: VmsanPlugin[] = [cloudflarePlugin(paths.baseDir)];
+  const builtinPlugins: VmsanPlugin[] = [cloudflarePlugin(ctx.paths.baseDir)];
   const allPlugins = [...builtinPlugins, ...(options?.plugins ?? [])];
   for (const plugin of allPlugins) {
     await plugin.setup(ctx);
