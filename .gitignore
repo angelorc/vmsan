@@ -5,6 +5,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# Generated completion artifacts (shell scripts + TS wrappers, built by codegen.ts from commands.ts)
+src/completions/generated/
+
 # Go binaries
 agent/vmsan-agent
 nftables/vmsan-nftables*

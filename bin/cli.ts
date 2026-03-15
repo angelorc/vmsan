@@ -82,6 +82,7 @@ const main = defineCommand({
     network: () => import("../src/commands/network.ts").then((m) => m.default),
     snapshot: () => import("../src/commands/snapshot.ts").then((m) => m.default),
     doctor: () => import("../src/commands/doctor.ts").then((m) => m.default),
+    completion: () => import("../src/commands/completion.ts").then((m) => m.default),
   },
 });
 
