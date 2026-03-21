@@ -2,7 +2,8 @@ import { randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { mkdirSecure, writeSecure } from "../utils.ts";
+import consola from "consola";
+import { mkdirSecure, writeSecure, toError } from "../utils.ts";
 
 interface EncryptedValue {
   iv: string;
@@ -127,7 +128,8 @@ export class SecretsStore {
     if (!existsSync(path)) return {};
     try {
       return JSON.parse(readFileSync(path, "utf8")) as SecretsFile;
-    } catch {
+    } catch (err) {
+      consola.debug(`loadSecrets: ${toError(err).message}`);
       return {};
     }
   }

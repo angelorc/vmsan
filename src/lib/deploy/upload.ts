@@ -161,35 +161,42 @@ function matchPattern(relPath: string, pattern: string): boolean {
 /**
  * Match a string against a glob pattern supporting * and **.
  */
-function globMatch(str: string, pattern: string): boolean {
-  // Convert glob to regex
-  let regexStr = "^";
-  let i = 0;
-  while (i < pattern.length) {
-    if (pattern[i] === "*" && pattern[i + 1] === "*") {
-      // ** matches any number of directories
-      if (pattern[i + 2] === "/") {
-        regexStr += "(?:.+/)?";
-        i += 3;
-      } else {
-        regexStr += ".*";
-        i += 2;
-      }
-    } else if (pattern[i] === "*") {
-      // * matches anything except /
-      regexStr += "[^/]*";
-      i++;
-    } else if (pattern[i] === "?") {
-      regexStr += "[^/]";
-      i++;
-    } else {
-      regexStr += escapeRegex(pattern[i]);
-      i++;
-    }
-  }
-  regexStr += "$";
+const regexCache = new Map<string, RegExp>();
 
-  return new RegExp(regexStr).test(str);
+function globMatch(str: string, pattern: string): boolean {
+  let regex = regexCache.get(pattern);
+  if (!regex) {
+    // Convert glob to regex
+    let regexStr = "^";
+    let i = 0;
+    while (i < pattern.length) {
+      if (pattern[i] === "*" && pattern[i + 1] === "*") {
+        // ** matches any number of directories
+        if (pattern[i + 2] === "/") {
+          regexStr += "(?:.+/)?";
+          i += 3;
+        } else {
+          regexStr += ".*";
+          i += 2;
+        }
+      } else if (pattern[i] === "*") {
+        // * matches anything except /
+        regexStr += "[^/]*";
+        i++;
+      } else if (pattern[i] === "?") {
+        regexStr += "[^/]";
+        i++;
+      } else {
+        regexStr += escapeRegex(pattern[i]);
+        i++;
+      }
+    }
+    regexStr += "$";
+    regex = new RegExp(regexStr);
+    regexCache.set(pattern, regex);
+  }
+
+  return regex.test(str);
 }
 
 function escapeRegex(char: string): string {

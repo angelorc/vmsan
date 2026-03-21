@@ -11,8 +11,8 @@ import { executeRelease } from "./release.ts";
 import { getDeployHash, setDeployHash } from "./hash.ts";
 import { toError } from "../utils.ts";
 import { waitForAgent } from "../vm-context.ts";
-import { AgentClient } from "../../services/agent.ts";
 import { getRootfsPath, type RootfsType } from "../rootfs-manager.ts";
+import { createAgentClient } from "./agent-client.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -65,6 +65,8 @@ const ACCESSORY_ROOTFS_MAP: Record<string, RootfsType> = {
   redis: "redis7",
 };
 
+const SKIP = new Set([".git", "node_modules", ".vmsan"]);
+
 function parsePublishPorts(portSpecs?: string[]): number[] {
   if (!portSpecs || portSpecs.length === 0) return [];
   const ports: number[] = [];
@@ -96,11 +98,11 @@ function walkForHash(dir: string, hash: ReturnType<typeof createHash>): void {
   let names: string[];
   try {
     names = readdirSync(dir);
-  } catch {
+  } catch (err) {
+    consola.debug(`walkForHash: cannot read directory ${dir}: ${toError(err).message}`);
     return;
   }
 
-  const SKIP = new Set([".git", "node_modules", ".vmsan"]);
   names.sort();
 
   for (const name of names) {
@@ -114,7 +116,8 @@ function walkForHash(dir: string, hash: ReturnType<typeof createHash>): void {
       } else if (stat.isFile()) {
         hash.update(`f:${name}:${stat.size}:${stat.mtimeMs}\n`);
       }
-    } catch {
+    } catch (err) {
+      consola.debug(`walkForHash: cannot stat ${fullPath}: ${toError(err).message}`);
       hash.update(`f:${name}\n`);
     }
   }
@@ -135,14 +138,6 @@ function findExistingVm(
     }
   }
   return null;
-}
-
-/**
- * Create an AgentClient for a VM.
- */
-function createAgentClient(state: VmState): AgentClient {
-  const agentUrl = `http://${state.network.guestIp}:${state.agentPort}`;
-  return new AgentClient(agentUrl, state.agentToken!);
 }
 
 // ── Health check polling ────────────────────────────────────────────────────
@@ -189,8 +184,8 @@ async function waitForHealthy(
           return true;
         }
       }
-    } catch {
-      // Not ready yet
+    } catch (err) {
+      consola.debug(`Health check not ready: ${toError(err).message}`);
     }
     await new Promise((r) => setTimeout(r, HEALTH_CHECK_POLL_INTERVAL_MS));
   }

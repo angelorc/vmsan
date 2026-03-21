@@ -121,7 +121,8 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Log to sync
-	payload := fmt.Sprintf(`{"name":%q,"address":%q}`, req.Name, req.Address)
+	payloadBytes, _ := json.Marshal(map[string]string{"name": req.Name, "address": req.Address})
+	payload := string(payloadBytes)
 	if err := s.db.AppendSyncLog("host", hostID, "create", &payload); err != nil {
 		s.logger.Error("failed to append sync log", "error", err)
 	}
@@ -292,34 +293,14 @@ func (s *Server) handleGetVM(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStartVM(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	vm, err := s.db.GetVM(id)
-	if err == sql.ErrNoRows {
-		s.writeError(w, http.StatusNotFound, "vm not found")
-		return
-	}
-	if err != nil {
-		s.logger.Error("failed to get vm", "error", err, "vm_id", id)
-		s.writeError(w, http.StatusInternalServerError, "failed to get vm")
-		return
-	}
-
-	if err := s.db.UpdateVM(id, vm.StateJSON, "running"); err != nil {
-		s.logger.Error("failed to start vm", "error", err, "vm_id", id)
-		s.writeError(w, http.StatusInternalServerError, "failed to start vm")
-		return
-	}
-
-	payload := `{"status":"running"}`
-	if err := s.db.AppendSyncLog("vm", id, "update", &payload); err != nil {
-		s.logger.Error("failed to append sync log", "error", err)
-	}
-
-	s.logger.Info("vm started", "vm_id", id)
-	s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	s.handleVMStatusChange(w, r, "running")
 }
 
 func (s *Server) handleStopVM(w http.ResponseWriter, r *http.Request) {
+	s.handleVMStatusChange(w, r, "stopped")
+}
+
+func (s *Server) handleVMStatusChange(w http.ResponseWriter, r *http.Request, newStatus string) {
 	id := r.PathValue("id")
 	vm, err := s.db.GetVM(id)
 	if err == sql.ErrNoRows {
@@ -332,18 +313,19 @@ func (s *Server) handleStopVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.db.UpdateVM(id, vm.StateJSON, "stopped"); err != nil {
-		s.logger.Error("failed to stop vm", "error", err, "vm_id", id)
-		s.writeError(w, http.StatusInternalServerError, "failed to stop vm")
+	if err := s.db.UpdateVM(id, vm.StateJSON, newStatus); err != nil {
+		s.logger.Error("failed to update vm status", "error", err, "vm_id", id, "status", newStatus)
+		s.writeError(w, http.StatusInternalServerError, "failed to update vm status")
 		return
 	}
 
-	payload := `{"status":"stopped"}`
-	if err := s.db.AppendSyncLog("vm", id, "update", &payload); err != nil {
+	payload, _ := json.Marshal(map[string]string{"status": newStatus})
+	payloadStr := string(payload)
+	if err := s.db.AppendSyncLog("vm", id, "update", &payloadStr); err != nil {
 		s.logger.Error("failed to append sync log", "error", err)
 	}
 
-	s.logger.Info("vm stopped", "vm_id", id)
+	s.logger.Info("vm status changed", "vm_id", id, "status", newStatus)
 	s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 

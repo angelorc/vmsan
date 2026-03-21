@@ -1,20 +1,20 @@
 import type { CommandDef } from "citty";
 import { defineCommand } from "citty";
 import { consola } from "consola";
-import { resolve, basename } from "node:path";
-import { existsSync } from "node:fs";
 import { createVmsan } from "../../context.ts";
-import { loadVmsanToml, normalizeToml } from "../../lib/toml/parser.ts";
+import { normalizeToml } from "../../lib/toml/parser.ts";
 import type { ServiceConfig } from "../../lib/toml/parser.ts";
+import { loadProjectConfig } from "../../lib/project.ts";
 import { buildDependencyGraph } from "../../lib/deploy/graph.ts";
 import { uploadSource } from "../../lib/deploy/upload.ts";
 import { executeBuild, startApp } from "../../lib/deploy/build.ts";
 import { executeRelease } from "../../lib/deploy/release.ts";
-import { AgentClient } from "../../services/agent.ts";
 import { handleCommandError } from "../../errors/index.ts";
 import { createCommandLogger, getOutputMode } from "../../lib/logger/index.ts";
 import { table, toError } from "../../lib/utils.ts";
 import type { VmState } from "../../lib/vm-state.ts";
+import { createAgentClient } from "../../lib/deploy/agent-client.ts";
+import type { AgentClient } from "../../services/agent.ts";
 
 interface RedeployResult {
   service: string;
@@ -24,17 +24,12 @@ interface RedeployResult {
   durationMs: number;
 }
 
-function createAgentClient(state: VmState): AgentClient {
-  const agentUrl = `http://${state.network.guestIp}:${state.agentPort}`;
-  return new AgentClient(agentUrl, state.agentToken!);
-}
-
 async function stopRunningApp(agent: AgentClient): Promise<void> {
   try {
     // Kill any running app processes via the agent
     await agent.runCommand("sh", ["-c", "pkill -f '/app' || true"]);
-  } catch {
-    // Best-effort: app may not be running
+  } catch (err) {
+    consola.debug(`stopRunningApp: ${toError(err).message}`);
   }
 }
 
@@ -140,24 +135,11 @@ const deployCommand = defineCommand({
     const cmdLog = createCommandLogger("deploy");
 
     try {
-      // 1. Find vmsan.toml
-      const configPath = resolve(args.config || "vmsan.toml");
-      if (!existsSync(configPath)) {
-        consola.error(`Configuration file not found: ${configPath}`);
-        consola.info('Run "vmsan init" to create a vmsan.toml');
-        process.exitCode = 1;
-        return;
-      }
-
-      // 2. Load and parse
+      // 1. Load project config
+      const { config, configPath, sourceDir, project } = loadProjectConfig(args.config);
       consola.start(`Loading ${configPath}`);
-      const config = loadVmsanToml(configPath);
 
-      // 3. Determine project name
-      const sourceDir = resolve(configPath, "..");
-      const project = basename(sourceDir);
-
-      // 4. Create VMService
+      // 2. Create VMService
       const vmService = await createVmsan();
 
       // 5. Normalize services and determine what to deploy

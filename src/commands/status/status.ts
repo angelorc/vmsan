@@ -1,15 +1,13 @@
 import type { CommandDef } from "citty";
 import { defineCommand } from "citty";
 import { consola } from "consola";
-import { resolve, basename } from "node:path";
-import { existsSync } from "node:fs";
 import { createVmsan } from "../../context.ts";
-import { loadVmsanToml } from "../../lib/toml/parser.ts";
-import { AgentClient } from "../../services/agent.ts";
+import { loadProjectConfig } from "../../lib/project.ts";
 import { handleCommandError } from "../../errors/index.ts";
 import { createCommandLogger, getOutputMode } from "../../lib/logger/index.ts";
 import { table, toError } from "../../lib/utils.ts";
 import type { VmState } from "../../lib/vm-state.ts";
+import { createAgentClient } from "../../lib/deploy/agent-client.ts";
 
 interface ServiceStatus {
   service: string;
@@ -26,7 +24,7 @@ async function checkHealth(vm: VmState): Promise<string> {
   }
 
   try {
-    const agent = new AgentClient(`http://${vm.network.guestIp}:${vm.agentPort}`, vm.agentToken);
+    const agent = createAgentClient(vm);
     const result = await agent.health();
     return result.status === "ok" || result.status === "healthy" ? "healthy" : result.status;
   } catch (err) {
@@ -55,23 +53,10 @@ const statusCommand = defineCommand({
     const cmdLog = createCommandLogger("status");
 
     try {
-      // 1. Find vmsan.toml
-      const configPath = resolve(args.config || "vmsan.toml");
-      if (!existsSync(configPath)) {
-        consola.error(`Configuration file not found: ${configPath}`);
-        consola.info('Run "vmsan init" to create a vmsan.toml');
-        process.exitCode = 1;
-        return;
-      }
+      // 1. Load project config
+      const { project } = loadProjectConfig(args.config);
 
-      // 2. Load and parse
-      const config = loadVmsanToml(configPath);
-
-      // 3. Determine project name
-      const sourceDir = resolve(configPath, "..");
-      const project = basename(sourceDir);
-
-      // 4. Create VMService
+      // 2. Create VMService
       const vmService = await createVmsan();
 
       // 5. Find VMs for this project

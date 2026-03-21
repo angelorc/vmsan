@@ -64,8 +64,7 @@ func (a *Agent) sendHeartbeat() {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := a.http.Do(req)
 	if err != nil {
 		a.logger.Warn("heartbeat failed", "error", err)
 		return

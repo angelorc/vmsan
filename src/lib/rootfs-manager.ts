@@ -12,7 +12,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { consola } from "consola";
-import { mkdirSecure } from "./utils.ts";
+import { mkdirSecure, toError } from "./utils.ts";
 
 export type RootfsType = "postgres16" | "redis7";
 
@@ -46,7 +46,8 @@ function readChecksums(): Record<string, ChecksumEntry> {
   if (!existsSync(path)) return {};
   try {
     return JSON.parse(readFileSync(path, "utf-8"));
-  } catch {
+  } catch (err) {
+    consola.debug(`readChecksums: ${toError(err).message}`);
     return {};
   }
 }
@@ -139,8 +140,8 @@ export async function downloadRootfs(type: RootfsType, arch?: string): Promise<v
     // Clean up partial download
     try {
       unlinkSync(tmpPath);
-    } catch {
-      // ignore cleanup errors
+    } catch (cleanupErr) {
+      consola.debug(`downloadRootfs cleanup: ${toError(cleanupErr).message}`);
     }
     throw error;
   }
@@ -165,9 +166,8 @@ export async function getRootfsPath(type: RootfsType): Promise<string> {
     } else {
       // File exists but no checksum recorded -- compute and store it
       const sha256 = await computeChecksum(filePath);
-      const checksums2 = readChecksums();
-      checksums2[filename] = { sha256 };
-      writeChecksums(checksums2);
+      checksums[filename] = { sha256 };
+      writeChecksums(checksums);
       consola.debug(`Using cached rootfs: ${filePath}`);
       return filePath;
     }

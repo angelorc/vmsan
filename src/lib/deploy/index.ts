@@ -20,3 +20,4 @@ export {
   type OrchestrateResult,
 } from "./orchestrator.ts";
 export { getDeployHash, setDeployHash, removeDeployHash } from "./hash.ts";
+export { createAgentClient } from "./agent-client.ts";

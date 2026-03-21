@@ -1,14 +1,12 @@
 import type { CommandDef } from "citty";
 import { defineCommand } from "citty";
 import { consola } from "consola";
-import { resolve, basename } from "node:path";
-import { existsSync } from "node:fs";
 import { createVmsan } from "../../context.ts";
-import { loadVmsanToml } from "../../lib/toml/parser.ts";
 import { orchestrateDeploy } from "../../lib/deploy/orchestrator.ts";
 import { handleCommandError } from "../../errors/index.ts";
 import { createCommandLogger, getOutputMode } from "../../lib/logger/index.ts";
 import { table } from "../../lib/utils.ts";
+import { loadProjectConfig } from "../../lib/project.ts";
 
 const upCommand = defineCommand({
   meta: {
@@ -25,22 +23,9 @@ const upCommand = defineCommand({
     const cmdLog = createCommandLogger("up");
 
     try {
-      // 1. Find vmsan.toml
-      const configPath = resolve(args.config || "vmsan.toml");
-      if (!existsSync(configPath)) {
-        consola.error(`Configuration file not found: ${configPath}`);
-        consola.info('Run "vmsan init" to create a vmsan.toml');
-        process.exitCode = 1;
-        return;
-      }
-
-      // 2. Load and parse
+      // 1. Load project config
+      const { config, configPath, sourceDir, project } = loadProjectConfig(args.config);
       consola.start(`Loading ${configPath}`);
-      const config = loadVmsanToml(configPath);
-
-      // 3. Determine project name from directory name
-      const sourceDir = resolve(configPath, "..");
-      const project = basename(sourceDir);
 
       // 4. Create VMService
       const vmService = await createVmsan();

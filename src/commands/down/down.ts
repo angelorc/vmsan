@@ -1,11 +1,10 @@
 import type { CommandDef } from "citty";
 import { defineCommand } from "citty";
 import { consola } from "consola";
-import { resolve, basename } from "node:path";
-import { existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { createVmsan } from "../../context.ts";
-import { loadVmsanToml, normalizeToml } from "../../lib/toml/parser.ts";
+import { normalizeToml } from "../../lib/toml/parser.ts";
+import { loadProjectConfig } from "../../lib/project.ts";
 import { buildDependencyGraph } from "../../lib/deploy/graph.ts";
 import { removeDeployHash } from "../../lib/deploy/hash.ts";
 import { handleCommandError } from "../../errors/index.ts";
@@ -48,23 +47,10 @@ const downCommand = defineCommand({
     const cmdLog = createCommandLogger("down");
 
     try {
-      // 1. Find vmsan.toml
-      const configPath = resolve(args.config || "vmsan.toml");
-      if (!existsSync(configPath)) {
-        consola.error(`Configuration file not found: ${configPath}`);
-        consola.info('Run "vmsan init" to create a vmsan.toml');
-        process.exitCode = 1;
-        return;
-      }
+      // 1. Load project config
+      const { config, project } = loadProjectConfig(args.config);
 
-      // 2. Load and parse
-      const config = loadVmsanToml(configPath);
-
-      // 3. Determine project name
-      const sourceDir = resolve(configPath, "..");
-      const project = basename(sourceDir);
-
-      // 4. Create VMService
+      // 2. Create VMService
       const vmService = await createVmsan();
 
       // 5. Find VMs for this project

@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	vmsync "github.com/angelorc/vmsan/nftables/internal/sync"
 )
@@ -26,6 +28,7 @@ type Config struct {
 type Agent struct {
 	config *Config
 	logger *slog.Logger
+	http   *http.Client
 	sync   *vmsync.Engine
 	cancel context.CancelFunc
 }
@@ -117,6 +120,7 @@ func New(logger *slog.Logger) (*Agent, error) {
 	return &Agent{
 		config: cfg,
 		logger: logger,
+		http:   &http.Client{Timeout: 30 * time.Second},
 		sync:   syncEngine,
 	}, nil
 }

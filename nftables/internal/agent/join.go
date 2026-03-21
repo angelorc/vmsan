@@ -26,6 +26,8 @@ type joinResponse struct {
 // Join registers this host with the vmsan server and persists the
 // resulting configuration to ~/.vmsan/agent.json.
 func Join(serverURL, token, name string, logger *slog.Logger) error {
+	client := &http.Client{Timeout: 30 * time.Second}
+
 	localIP, err := detectLocalIP()
 	if err != nil {
 		return fmt.Errorf("detect local IP: %w", err)
@@ -46,7 +48,6 @@ func Join(serverURL, token, name string, logger *slog.Logger) error {
 		return fmt.Errorf("marshal join request: %w", err)
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Post(
 		serverURL+"/api/v1/hosts/join",
 		"application/json",

@@ -1,20 +1,10 @@
 import type { CommandDef } from "citty";
 import { defineCommand } from "citty";
-import { basename, resolve } from "node:path";
-import { existsSync } from "node:fs";
 import { consola } from "consola";
 import { createCommandLogger, getOutputMode } from "../../lib/logger/index.ts";
 import { handleCommandError } from "../../errors/index.ts";
 import { SecretsStore } from "../../lib/secrets/index.ts";
-
-function resolveProject(): string {
-  const cwd = process.cwd();
-  const tomlPath = resolve(cwd, "vmsan.toml");
-  if (existsSync(tomlPath)) {
-    return basename(cwd);
-  }
-  return basename(cwd);
-}
+import { resolveProject } from "./resolve-project.ts";
 
 const secretsListCommand = defineCommand({
   meta: {
