@@ -114,10 +114,12 @@ func setupVMTable(ctx context.Context, opts *types.SetupOptions) error {
 		return err
 	}
 
-	// 2b. Allow DNAT'd DNS traffic to the mesh handler (UDP to hostIP:10052).
+	// 2b. Allow DNAT'd DNS traffic to the mesh handler on the veth host IP.
+	// Compute veth host IP: 10.200.{slot*4}.1 for each VM slot.
 	// Must come before the blanket UDP drop rule so DNS-via-DNAT isn't blocked.
-	if opts.HostIP != "" {
-		fwd.AcceptDstIPPort(opts.HostIP, unix.IPPROTO_UDP, 10052)
+	vethHostIP := vethHostIPForSlot(opts.Slot)
+	if vethHostIP != "" {
+		fwd.AcceptDstIPPort(vethHostIP, unix.IPPROTO_UDP, 10052)
 	}
 
 	// 3-6. Security rules with logging (all policies)
@@ -165,6 +167,14 @@ func setupVMTable(ctx context.Context, opts *types.SetupOptions) error {
 	_ = postrouting
 
 	return c.Flush()
+}
+
+// vethHostIPForSlot computes the veth host-side IP for a given slot.
+// Veth subnets use 10.200.{offset}/30 where offset = slot * 4.
+// Host side is .1, guest side is .2.
+func vethHostIPForSlot(slot int) string {
+	offset := slot * 4
+	return fmt.Sprintf("10.200.%d.%d", offset/256, (offset%256)+1)
 }
 
 // addInterfaceForwardRules allows bidirectional forwarding between
@@ -240,7 +250,7 @@ func addPublishedPortRules(c *nftables.Conn, table *nftables.Table, chain *nftab
 // to the per-VM SNI proxy listener.
 func addTLSDNATRules(c *nftables.Conn, table *nftables.Table, chain *nftables.Chain, opts *types.SetupOptions) {
 	sniPort := uint16(10443 + opts.Slot)
-	dstIP := net.ParseIP(opts.HostIP).To4()
+	dstIP := net.ParseIP(vethHostIPForSlot(opts.Slot)).To4()
 	if dstIP == nil {
 		dstIP = net.ParseIP("127.0.0.1").To4()
 	}
@@ -252,7 +262,7 @@ func addTLSDNATRules(c *nftables.Conn, table *nftables.Table, chain *nftables.Ch
 // to the per-VM HTTP proxy listener.
 func addHTTPDNATRules(c *nftables.Conn, table *nftables.Table, chain *nftables.Chain, opts *types.SetupOptions) {
 	httpPort := uint16(10698 + opts.Slot)
-	dstIP := net.ParseIP(opts.HostIP).To4()
+	dstIP := net.ParseIP(vethHostIPForSlot(opts.Slot)).To4()
 	if dstIP == nil {
 		dstIP = net.ParseIP("127.0.0.1").To4()
 	}
@@ -265,9 +275,11 @@ func addHTTPDNATRules(c *nftables.Conn, table *nftables.Table, chain *nftables.C
 // vmsan.internal names resolve correctly, and non-mesh queries are forwarded upstream.
 func addDNSDNATRules(c *nftables.Conn, table *nftables.Table, chain *nftables.Chain, opts *types.SetupOptions) {
 	const meshDNSPort = 10052
-	// DNAT to the host IP (198.19.X.1) so traffic exits the namespace via veth.
-	// Using 127.0.0.1 would target the namespace's own loopback.
-	dstIP := net.ParseIP(opts.HostIP).To4()
+	// DNAT to the veth host IP (10.200.X.1) so traffic exits the namespace
+	// via the veth pair and reaches the mesh DNS handler on the host.
+	// Cannot use opts.HostIP (198.19.X.1) because that's a local address in the
+	// namespace (assigned to the TAP device), causing INPUT delivery instead of FORWARD.
+	dstIP := net.ParseIP(vethHostIPForSlot(opts.Slot)).To4()
 	if dstIP == nil {
 		dstIP = net.ParseIP("127.0.0.1").To4()
 	}
