@@ -8,7 +8,7 @@ import (
 func TestStartVM(t *testing.T) {
 	m := NewManager()
 
-	state, err := m.StartVM("vm-1", 1, "deny-all")
+	state, err := m.StartVM("vm-1", 1, "deny-all", nil)
 	if err != nil {
 		t.Fatalf("StartVM: unexpected error: %v", err)
 	}
@@ -29,12 +29,12 @@ func TestStartVM(t *testing.T) {
 func TestStartVM_Idempotent(t *testing.T) {
 	m := NewManager()
 
-	first, err := m.StartVM("vm-1", 1, "deny-all")
+	first, err := m.StartVM("vm-1", 1, "deny-all", nil)
 	if err != nil {
 		t.Fatalf("first StartVM: %v", err)
 	}
 
-	second, err := m.StartVM("vm-1", 2, "allow")
+	second, err := m.StartVM("vm-1", 2, "allow", nil)
 	if err != nil {
 		t.Fatalf("second StartVM: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestStartVM_Idempotent(t *testing.T) {
 func TestStopVM(t *testing.T) {
 	m := NewManager()
 
-	m.StartVM("vm-1", 1, "deny-all")
+	m.StartVM("vm-1", 1, "deny-all", nil)
 
 	if err := m.StopVM("vm-1"); err != nil {
 		t.Fatalf("StopVM: unexpected error: %v", err)
@@ -72,7 +72,7 @@ func TestStopVM_NotFound(t *testing.T) {
 func TestUpdatePolicy(t *testing.T) {
 	m := NewManager()
 
-	m.StartVM("vm-1", 1, "deny-all")
+	m.StartVM("vm-1", 1, "deny-all", nil)
 
 	if err := m.UpdatePolicy("vm-1", "allow"); err != nil {
 		t.Fatalf("UpdatePolicy: %v", err)
@@ -102,7 +102,7 @@ func TestGetVM(t *testing.T) {
 		t.Error("GetVM should return false for nonexistent VM")
 	}
 
-	m.StartVM("vm-1", 1, "deny-all")
+	m.StartVM("vm-1", 1, "deny-all", nil)
 
 	state, ok := m.GetVM("vm-1")
 	if !ok {
@@ -120,8 +120,8 @@ func TestListVMs(t *testing.T) {
 		t.Errorf("ListVMs on empty manager: got %d, want 0", len(vms))
 	}
 
-	m.StartVM("vm-1", 1, "deny-all")
-	m.StartVM("vm-2", 2, "allow")
+	m.StartVM("vm-1", 1, "deny-all", nil)
+	m.StartVM("vm-2", 2, "allow", nil)
 
 	vms := m.ListVMs()
 	if len(vms) != 2 {
@@ -141,9 +141,9 @@ func TestListVMs(t *testing.T) {
 func TestStopAll(t *testing.T) {
 	m := NewManager()
 
-	m.StartVM("vm-1", 1, "deny-all")
-	m.StartVM("vm-2", 2, "allow")
-	m.StartVM("vm-3", 3, "deny-all")
+	m.StartVM("vm-1", 1, "deny-all", nil)
+	m.StartVM("vm-2", 2, "allow", nil)
+	m.StartVM("vm-3", 3, "deny-all", nil)
 
 	m.StopAll()
 
@@ -166,7 +166,7 @@ func TestConcurrentAccess(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			vmId := "vm-" + itoa(id)
-			m.StartVM(vmId, id, "deny-all")
+			m.StartVM(vmId, id, "deny-all", nil)
 		}(i)
 	}
 	wg.Wait()

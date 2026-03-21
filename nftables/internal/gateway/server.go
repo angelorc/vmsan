@@ -27,9 +27,10 @@ type Config struct {
 
 // Server is the vmsan-gateway Unix socket server.
 type Server struct {
-	config     Config
-	manager    *Manager
-	cancelFunc context.CancelFunc // set by Run(), used by shutdown handler
+	config      Config
+	manager     *Manager
+	meshManager *MeshManager
+	cancelFunc  context.CancelFunc // set by Run(), used by shutdown handler
 }
 
 // Request is the JSON-RPC request envelope.
@@ -58,11 +59,17 @@ type vmStartParams struct {
 	Project        string   `json:"project,omitempty"`
 	Service        string   `json:"service,omitempty"`
 	ConnectTo      []string `json:"connectTo,omitempty"`
+	VethHost       string   `json:"vethHost,omitempty"`
+	NetNS          string   `json:"netns,omitempty"`
+	GuestDev       string   `json:"guestDev,omitempty"`
 }
 
 // vmStopParams holds the parameters for vm.stop.
 type vmStopParams struct {
-	VMId string `json:"vmId"`
+	VMId     string `json:"vmId"`
+	VethHost string `json:"vethHost,omitempty"`
+	NetNS    string `json:"netns,omitempty"`
+	GuestDev string `json:"guestDev,omitempty"`
 }
 
 // vmUpdatePolicyParams holds the parameters for vm.updatePolicy.
@@ -71,8 +78,9 @@ type vmUpdatePolicyParams struct {
 	Policy string `json:"policy"`
 }
 
-// NewServer creates a new gateway server.
-func NewServer(cfg Config) (*Server, error) {
+// NewServer creates a new gateway server. The meshManager may be nil if
+// mesh networking is not enabled.
+func NewServer(cfg Config, meshManager *MeshManager) (*Server, error) {
 	if cfg.SocketPath == "" {
 		return nil, errors.New("socket path is required")
 	}
@@ -80,8 +88,9 @@ func NewServer(cfg Config) (*Server, error) {
 		return nil, errors.New("PID file path is required")
 	}
 	return &Server{
-		config:  cfg,
-		manager: NewManager(),
+		config:      cfg,
+		manager:     NewManager(),
+		meshManager: meshManager,
 	}, nil
 }
 
@@ -213,11 +222,43 @@ func (s *Server) handleVMStart(params json.RawMessage) Response {
 		p.Policy = "deny-all"
 	}
 
-	state, err := s.manager.StartVM(p.VMId, p.Slot, p.Policy)
+	state, err := s.manager.StartVM(p.VMId, p.Slot, p.Policy, p.AllowedDomains)
 	if err != nil {
 		return Response{OK: false, Error: err.Error(), Code: "START_ERROR"}
 	}
-	return Response{OK: true, VM: state}
+
+	// Wire into mesh networking if the VM belongs to a project.
+	var meshResult *VMStartResult
+	if p.Project != "" && s.meshManager != nil {
+		meshResult, err = s.meshManager.OnVMStart(VMStartParams{
+			VMId:      p.VMId,
+			Slot:      p.Slot,
+			Policy:    p.Policy,
+			Project:   p.Project,
+			Service:   p.Service,
+			ConnectTo: p.ConnectTo,
+			VethHost:  p.VethHost,
+			NetNS:     p.NetNS,
+			GuestDev:  p.GuestDev,
+		})
+		if err != nil {
+			slog.Warn("mesh setup failed", "vmId", p.VMId, "error", err)
+		}
+	}
+
+	// Build combined response with mesh info when available.
+	type vmStartResponse struct {
+		*VMState
+		MeshIP  string `json:"meshIp,omitempty"`
+		Service string `json:"meshService,omitempty"`
+	}
+	resp := vmStartResponse{VMState: state}
+	if meshResult != nil {
+		resp.MeshIP = meshResult.MeshIP
+		resp.Service = meshResult.Service
+	}
+
+	return Response{OK: true, VM: resp}
 }
 
 func (s *Server) handleVMStop(params json.RawMessage) Response {
@@ -227,6 +268,13 @@ func (s *Server) handleVMStop(params json.RawMessage) Response {
 	}
 	if p.VMId == "" {
 		return Response{OK: false, Error: "vmId is required", Code: "VALIDATION_ERROR"}
+	}
+
+	// Tear down mesh networking before stopping the VM.
+	if s.meshManager != nil {
+		if err := s.meshManager.OnVMStop(p.VMId, p.VethHost, p.NetNS, p.GuestDev); err != nil {
+			slog.Warn("mesh teardown failed", "vmId", p.VMId, "error", err)
+		}
 	}
 
 	if err := s.manager.StopVM(p.VMId); err != nil {

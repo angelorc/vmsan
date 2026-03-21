@@ -11,6 +11,9 @@ export interface GatewayVmConfig {
   project?: string;
   service?: string;
   connectTo?: string[];
+  vethHost?: string;
+  netns?: string;
+  guestDev?: string;
 }
 
 export interface GatewayVmResult {
@@ -24,6 +27,7 @@ export interface GatewayVmResult {
     dnsPort: number;
     sniPort: number;
     httpPort: number;
+    meshIp?: string;
   };
 }
 

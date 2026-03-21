@@ -217,6 +217,9 @@ export class VMService {
           netnsName,
           skipDnat: opts.skipDnat,
           allowIcmp: opts.allowIcmp,
+          project: opts.project,
+          service: opts.service,
+          connectTo: opts.connectTo,
         });
         networkConfig = net.config;
 
@@ -265,6 +268,18 @@ export class VMService {
       log.success(
         `Network: TAP ${netCfg.tapDevice}, Host ${netCfg.hostIp}, Guest ${netCfg.guestIp}`,
       );
+
+      // Start gateway proxies and capture mesh IP (non-fatal)
+      const gatewayResult = await net.startProxies(vmId);
+      if (gatewayResult?.vm?.meshIp) {
+        this.store.update(vmId, {
+          network: {
+            ...this.store.load(vmId)!.network,
+            meshIp: gatewayResult.vm.meshIp,
+          },
+        });
+        logger.debug(`Mesh IP assigned: ${gatewayResult.vm.meshIp}`);
+      }
 
       // Hook: network:afterSetup
       await hooks.callHook("network:afterSetup", {
@@ -437,6 +452,7 @@ export class VMService {
 
       // 2. Reconstruct network config and re-setup networking
       const mgr = NetworkManager.fromVmNetwork(state.network);
+      mgr.config.project = state.project || undefined;
       networkConfig = mgr.config;
       logger.debug(
         `Reconstructed network config: slot=${networkConfig.slot}, tap=${networkConfig.tapDevice}, host=${networkConfig.hostIp}, guest=${networkConfig.guestIp}`,
@@ -447,6 +463,18 @@ export class VMService {
       log.success(
         `Network: TAP ${networkConfig.tapDevice}, Host ${networkConfig.hostIp}, Guest ${networkConfig.guestIp}`,
       );
+
+      // Start gateway proxies and capture mesh IP (non-fatal)
+      const gatewayResult = await mgr.startProxies(vmId);
+      if (gatewayResult?.vm?.meshIp) {
+        this.store.update(vmId, {
+          network: {
+            ...state.network,
+            meshIp: gatewayResult.vm.meshIp,
+          },
+        });
+        logger.debug(`Mesh IP assigned: ${gatewayResult.vm.meshIp}`);
+      }
 
       // Hook: network:afterSetup
       await hooks.callHook("network:afterSetup", {

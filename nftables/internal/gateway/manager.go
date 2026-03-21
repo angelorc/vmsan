@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+
+	"github.com/angelorc/vmsan/nftables/internal/tcpproxy"
 )
 
 // VMState holds the runtime state of a single VM's proxy resources.
@@ -20,20 +22,22 @@ type VMState struct {
 // Manager tracks per-VM proxy resources. All methods are safe for
 // concurrent use.
 type Manager struct {
-	mu  sync.RWMutex
-	vms map[string]*VMState
+	mu         sync.RWMutex
+	vms        map[string]*VMState
+	sniProxies map[string]*tcpproxy.SNIProxy
 }
 
 // NewManager returns an empty Manager.
 func NewManager() *Manager {
 	return &Manager{
-		vms: make(map[string]*VMState),
+		vms:        make(map[string]*VMState),
+		sniProxies: make(map[string]*tcpproxy.SNIProxy),
 	}
 }
 
 // StartVM registers a VM and allocates stub ports. If the VM is already
 // registered, the existing state is returned (idempotent).
-func (m *Manager) StartVM(vmId string, slot int, policy string) (*VMState, error) {
+func (m *Manager) StartVM(vmId string, slot int, policy string, allowedDomains []string) (*VMState, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -44,7 +48,6 @@ func (m *Manager) StartVM(vmId string, slot int, policy string) (*VMState, error
 
 	// Port allocation uses the same bases as the TypeScript layer.
 	// DNS: 10053+slot, SNI: 10443+slot, HTTP: 10698+slot.
-	// Real listeners will be started in Phase 1/2.
 	state := &VMState{
 		VMId:     vmId,
 		Slot:     slot,
@@ -54,6 +57,18 @@ func (m *Manager) StartVM(vmId string, slot int, policy string) (*VMState, error
 		HTTPPort: 10698 + slot,
 	}
 	m.vms[vmId] = state
+
+	// Start per-VM SNI proxy.
+	sniProxy := tcpproxy.NewSNIProxy(tcpproxy.VmPolicy{
+		VMId:           vmId,
+		Policy:         policy,
+		AllowedDomains: allowedDomains,
+	}, fmt.Sprintf("127.0.0.1:%d", state.SNIPort), slog.Default())
+	if err := sniProxy.Start(); err != nil {
+		slog.Warn("sni proxy start failed", "vmId", vmId, "error", err)
+	} else {
+		m.sniProxies[vmId] = sniProxy
+	}
 
 	slog.Info("vm started", "vmId", vmId, "slot", slot, "policy", policy)
 	return state, nil
@@ -66,6 +81,13 @@ func (m *Manager) StopVM(vmId string) error {
 
 	if _, ok := m.vms[vmId]; !ok {
 		return fmt.Errorf("vm not found: %s", vmId)
+	}
+
+	if proxy, ok := m.sniProxies[vmId]; ok {
+		if err := proxy.Close(); err != nil {
+			slog.Debug("sni proxy close failed", "vmId", vmId, "error", err)
+		}
+		delete(m.sniProxies, vmId)
 	}
 
 	delete(m.vms, vmId)
@@ -84,6 +106,16 @@ func (m *Manager) UpdatePolicy(vmId string, policy string) error {
 	}
 
 	state.Policy = policy
+
+	if proxy, ok := m.sniProxies[vmId]; ok {
+		if err := proxy.UpdatePolicy(tcpproxy.VmPolicy{
+			VMId:   vmId,
+			Policy: policy,
+		}); err != nil {
+			slog.Warn("sni proxy update policy failed", "vmId", vmId, "error", err)
+		}
+	}
+
 	slog.Info("vm policy updated", "vmId", vmId, "policy", policy)
 	return nil
 }
@@ -113,6 +145,13 @@ func (m *Manager) ListVMs() []VMState {
 func (m *Manager) StopAll() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	for vmId, proxy := range m.sniProxies {
+		if err := proxy.Close(); err != nil {
+			slog.Debug("sni proxy close failed", "vmId", vmId, "error", err)
+		}
+	}
+	m.sniProxies = make(map[string]*tcpproxy.SNIProxy)
 
 	count := len(m.vms)
 	m.vms = make(map[string]*VMState)

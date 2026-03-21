@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { consola } from "consola";
 import { defaultInterfaceNotFoundError } from "../errors/index.ts";
 import { vmsanPaths } from "../paths.ts";
-import { GatewayClient, ensureGatewayRunning } from "./gateway-client.ts";
+import { GatewayClient, ensureGatewayRunning, type GatewayVmResult } from "./gateway-client.ts";
 import { toError } from "./utils.ts";
 import type { VmNetwork } from "./vm-state.ts";
 import {
@@ -34,6 +34,9 @@ export interface NetworkConfig {
   allowIcmp?: boolean;
   /** VM identifier, used by nftables backend for per-VM table naming. */
   vmId?: string;
+  project?: string;
+  service?: string;
+  connectTo?: string[];
 }
 
 // DNS resolvers the VM uses (Google Public DNS)
@@ -160,6 +163,9 @@ export class NetworkManager {
       netnsName?: string;
       skipDnat?: boolean;
       allowIcmp?: boolean;
+      project?: string;
+      service?: string;
+      connectTo?: string[];
     },
   ): NetworkManager {
     return new NetworkManager({
@@ -204,6 +210,8 @@ export class NetworkManager {
       netnsName: network.netnsName,
       skipDnat: network.skipDnat,
       allowIcmp: network.allowIcmp,
+      service: network.service,
+      connectTo: network.connectTo,
     });
   }
 
@@ -353,11 +361,6 @@ export class NetworkManager {
         `nftables setup failed: ${result.error || "unknown error"} (code: ${result.code || "none"})`,
       );
     }
-
-    // Start gateway proxies for this VM (non-fatal)
-    this.gatewayVmStart(vmId, slot, policy).catch((err) => {
-      consola.debug(`Gateway proxy start: ${toError(err).message}`);
-    });
   }
 
   setupThrottle(): void {
@@ -380,6 +383,15 @@ export class NetworkManager {
       "latency",
       "400ms",
     ]);
+  }
+
+  /**
+   * Start gateway proxies for this VM and return the result.
+   * Non-fatal — returns null on failure.
+   */
+  async startProxies(vmId: string): Promise<GatewayVmResult | null> {
+    const policy = effectivePolicy(this.config);
+    return this.gatewayVmStart(vmId, this.config.slot, policy);
   }
 
   teardownThrottle(): void {
@@ -437,16 +449,25 @@ export class NetworkManager {
     return this._gateway;
   }
 
-  private async gatewayVmStart(vmId: string, slot: number, policy: string): Promise<void> {
+  private async gatewayVmStart(vmId: string, slot: number, policy: string): Promise<GatewayVmResult | null> {
     try {
-      await this.getGateway().vmStart({
+      const vethHost = this.config.netnsName ? `veth-h-${this.config.slot}` : "";
+      const result = await this.getGateway().vmStart({
         vmId,
         slot,
         policy,
         allowedDomains: this.config.allowedDomains,
+        project: this.config.project,
+        service: this.config.service,
+        connectTo: this.config.connectTo,
+        vethHost,
+        netns: this.config.netnsName,
+        guestDev: "eth0",
       });
+      return result;
     } catch (err) {
       consola.debug(`Gateway proxy start: ${toError(err).message}`);
+      return null;
     }
   }
 
