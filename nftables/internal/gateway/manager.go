@@ -63,7 +63,7 @@ func (m *Manager) StartVM(vmId string, slot int, policy string, allowedDomains [
 		VMId:           vmId,
 		Policy:         policy,
 		AllowedDomains: allowedDomains,
-	}, fmt.Sprintf("127.0.0.1:%d", state.SNIPort), slog.Default())
+	}, fmt.Sprintf("0.0.0.0:%d", state.SNIPort), slog.Default())
 	if err := sniProxy.Start(); err != nil {
 		slog.Warn("sni proxy start failed", "vmId", vmId, "error", err)
 	} else {

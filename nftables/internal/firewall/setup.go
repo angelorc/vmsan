@@ -234,7 +234,10 @@ func addPublishedPortRules(c *nftables.Conn, table *nftables.Table, chain *nftab
 // to the per-VM SNI proxy listener.
 func addTLSDNATRules(c *nftables.Conn, table *nftables.Table, chain *nftables.Chain, opts *types.SetupOptions) {
 	sniPort := uint16(10443 + opts.Slot)
-	dstIP := net.ParseIP("127.0.0.1").To4()
+	dstIP := net.ParseIP(opts.HostIP).To4()
+	if dstIP == nil {
+		dstIP = net.ParseIP("127.0.0.1").To4()
+	}
 	b := rules.NewBuilder(c, table, chain)
 	b.TLSDNAT(dstIP, sniPort)
 }
@@ -243,7 +246,10 @@ func addTLSDNATRules(c *nftables.Conn, table *nftables.Table, chain *nftables.Ch
 // to the per-VM HTTP proxy listener.
 func addHTTPDNATRules(c *nftables.Conn, table *nftables.Table, chain *nftables.Chain, opts *types.SetupOptions) {
 	httpPort := uint16(10698 + opts.Slot)
-	dstIP := net.ParseIP("127.0.0.1").To4()
+	dstIP := net.ParseIP(opts.HostIP).To4()
+	if dstIP == nil {
+		dstIP = net.ParseIP("127.0.0.1").To4()
+	}
 	b := rules.NewBuilder(c, table, chain)
 	b.HTTPDNAT(dstIP, httpPort)
 }
@@ -253,7 +259,12 @@ func addHTTPDNATRules(c *nftables.Conn, table *nftables.Table, chain *nftables.C
 // vmsan.internal names resolve correctly, and non-mesh queries are forwarded upstream.
 func addDNSDNATRules(c *nftables.Conn, table *nftables.Table, chain *nftables.Chain, opts *types.SetupOptions) {
 	const meshDNSPort = 10052
-	dstIP := net.ParseIP("127.0.0.1").To4()
+	// DNAT to the host IP (198.19.X.1) so traffic exits the namespace via veth.
+	// Using 127.0.0.1 would target the namespace's own loopback.
+	dstIP := net.ParseIP(opts.HostIP).To4()
+	if dstIP == nil {
+		dstIP = net.ParseIP("127.0.0.1").To4()
+	}
 	b := rules.NewBuilder(c, table, chain)
 	b.DNSDNAT(dstIP, meshDNSPort)
 }
