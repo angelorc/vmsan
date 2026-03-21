@@ -1,14 +1,15 @@
 import { FileVmStateStore } from "./vm-state.ts";
-import type { VmState } from "./vm-state.ts";
+import type { VmState, VmStateStore } from "./vm-state.ts";
 import type { VmsanPaths } from "../paths.ts";
 import { vmNotFoundError, vmNotRunningError, vmNoAgentTokenError } from "../errors/index.ts";
 import { agentTimeoutError } from "../errors/index.ts";
+import { createStateStore } from "./state/index.ts";
 
 export interface RunningVmContext {
   state: VmState & { agentToken: string };
   guestIp: string;
   port: number;
-  store: FileVmStateStore;
+  store: VmStateStore;
 }
 
 /**
@@ -16,7 +17,7 @@ export interface RunningVmContext {
  * Throws VmError on failure (handled by handleCommandError in the caller).
  */
 export function resolveVmState(vmId: string, paths: VmsanPaths): RunningVmContext {
-  const store = new FileVmStateStore(paths.vmsDir);
+  const store = createStateStore(paths.vmsDir);
   const state = store.load(vmId);
   if (!state) throw vmNotFoundError(vmId);
   if (state.status !== "running") throw vmNotRunningError(vmId, state.status);
