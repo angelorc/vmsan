@@ -1,5 +1,6 @@
 import type { CommandDef } from "citty";
 import { defineCommand } from "citty";
+import { readFileSync } from "node:fs";
 import { consola } from "consola";
 import { createVmsan } from "../context.ts";
 import { createCommandLogger, getOutputMode } from "../lib/logger/index.ts";
@@ -20,12 +21,65 @@ function colorStatus(status: string): string {
   return `${color}${status}${RESET}`;
 }
 
+interface InterfaceStats {
+  rxBytes: number;
+  txBytes: number;
+  rxPackets: number;
+  txPackets: number;
+}
+
+function readStatFile(path: string): number {
+  try {
+    return Number.parseInt(readFileSync(path, "utf-8").trim(), 10) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function getInterfaceStats(iface: string): InterfaceStats {
+  const base = `/sys/class/net/${iface}/statistics`;
+  return {
+    rxBytes: readStatFile(`${base}/rx_bytes`),
+    txBytes: readStatFile(`${base}/tx_bytes`),
+    rxPackets: readStatFile(`${base}/rx_packets`),
+    txPackets: readStatFile(`${base}/tx_packets`),
+  };
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  const index = Math.min(i, units.length - 1);
+  const value = bytes / Math.pow(1024, index);
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[index]}`;
+}
+
+function formatPackets(packets: number): string {
+  if (packets === 0) return "0";
+  if (packets < 1000) return `${packets}`;
+  if (packets < 1_000_000) return `${(packets / 1000).toFixed(1)}k`;
+  return `${(packets / 1_000_000).toFixed(1)}M`;
+}
+
+interface VmWithStats {
+  vm: VmState;
+  stats: InterfaceStats | null;
+}
+
 const listCommand = defineCommand({
   meta: {
     name: "list",
     description: "List all VMs",
   },
-  async run() {
+  args: {
+    detailed: {
+      type: "boolean",
+      default: false,
+      description: "Show per-VM traffic counters (rx/tx bytes and packets)",
+    },
+  },
+  async run({ args }) {
     const cmdLog = createCommandLogger("list");
     const log = consola.withTag("list");
 
@@ -55,11 +109,19 @@ const listCommand = defineCommand({
           .join(", ")}`,
       );
 
+      const detailed = args.detailed;
+
+      // Gather stats for detailed mode
+      const vmsWithStats: VmWithStats[] = vms.map((vm) => ({
+        vm,
+        stats: detailed && vm.status === "running" ? getInterfaceStats(vm.network.tapDevice) : null,
+      }));
+
       if (getOutputMode() === "json") {
         cmdLog.set({
           count: vms.length,
           statuses,
-          vms: vms.map((vm) => ({
+          vms: vmsWithStats.map(({ vm, stats }) => ({
             id: vm.id,
             status: vm.status,
             createdAt: vm.createdAt,
@@ -69,8 +131,52 @@ const listCommand = defineCommand({
             timeoutAt: vm.timeoutAt ?? null,
             snapshot: vm.snapshot ?? null,
             tunnelHostnames: vm.network.tunnelHostnames ?? [],
+            ...(detailed && stats
+              ? {
+                  traffic: {
+                    rxBytes: stats.rxBytes,
+                    txBytes: stats.txBytes,
+                    rxPackets: stats.rxPackets,
+                    txPackets: stats.txPackets,
+                  },
+                }
+              : {}),
           })),
         });
+      } else if (detailed) {
+        const output = table<VmWithStats>({
+          rows: vmsWithStats,
+          columns: {
+            ID: { value: ({ vm }) => vm.id },
+            STATUS: {
+              value: ({ vm }) => vm.status,
+              color: ({ vm }) => colorStatus(vm.status),
+            },
+            CREATED: { value: ({ vm }) => timeAgo(vm.createdAt) },
+            MEMORY: { value: ({ vm }) => `${vm.memSizeMib} MiB` },
+            VCPUS: { value: ({ vm }) => vm.vcpuCount },
+            RUNTIME: { value: ({ vm }) => vm.runtime },
+            RX: {
+              value: ({ stats }) => (stats ? formatBytes(stats.rxBytes) : "-"),
+            },
+            TX: {
+              value: ({ stats }) => (stats ? formatBytes(stats.txBytes) : "-"),
+            },
+            "RX PKT": {
+              value: ({ stats }) => (stats ? formatPackets(stats.rxPackets) : "-"),
+            },
+            "TX PKT": {
+              value: ({ stats }) => (stats ? formatPackets(stats.txPackets) : "-"),
+            },
+            TIMEOUT: {
+              value: ({ vm }) => (vm.timeoutAt ? timeRemaining(vm.timeoutAt) : "-"),
+            },
+            SNAPSHOT: { value: ({ vm }) => vm.snapshot ?? "-" },
+          },
+        });
+
+        log.log(output);
+        cmdLog.set({ count: vms.length, statuses });
       } else {
         const output = table<VmState>({
           rows: vms,

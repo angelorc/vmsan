@@ -15,6 +15,7 @@ import {
   parseDiskSizeGb,
   parseDomains,
   parseBandwidth,
+  parseConnectTo,
 } from "./create/validation.ts";
 
 interface CreateCommandArgs extends CreateCommandRuntimeArgs {
@@ -31,6 +32,8 @@ interface CreateCommandArgs extends CreateCommandRuntimeArgs {
   "no-netns"?: boolean;
   bandwidth?: string;
   "allow-icmp"?: boolean;
+  "connect-to"?: string;
+  service?: string;
 }
 
 const createCommand = defineCommand({
@@ -63,6 +66,7 @@ const createCommand = defineCommand({
       }
 
       const bandwidthMbit = parseBandwidth(commandArgs.bandwidth);
+      const connectTo = parseConnectTo(commandArgs["connect-to"]);
 
       const fromImage = commandArgs["from-image"]
         ? parseImageReference(commandArgs["from-image"])
@@ -90,6 +94,8 @@ const createCommand = defineCommand({
         disableCgroup: commandArgs["no-cgroup"],
         timeoutMs: parsedInput.timeoutMs ?? undefined,
         snapshotId: parsedInput.snapshotId ?? undefined,
+        connectTo: connectTo.length > 0 ? connectTo : undefined,
+        service: commandArgs.service || undefined,
       });
 
       const log = createScopedLogger(result.vmId);
@@ -126,6 +132,8 @@ const createCommand = defineCommand({
         macAddress: state.network.macAddress,
         stateFilePath: join(vmsan.paths.vmsDir, `${result.vmId}.json`),
         tunnelHostnames,
+        connectTo: connectTo.length > 0 ? connectTo : undefined,
+        service: commandArgs.service || undefined,
       });
       log.box(summaryLines.join("\n"));
 

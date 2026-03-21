@@ -50,6 +50,7 @@ export type {
 } from "./lib/jailer.ts";
 export { ShellSession, connectShell } from "./lib/shell/index.ts";
 export type { ShellSessionOptions } from "./lib/shell/index.ts";
+export type { GatewayVmConfig } from "./lib/gateway-client.ts";
 export { FileLock } from "./lib/file-lock.ts";
 export { PidFile } from "./lib/pid-file.ts";
 export {
@@ -177,6 +178,7 @@ export {
   validatePublishedPortsAvailable,
   parseImageReference,
   parseBandwidth,
+  parseConnectTo,
 } from "./commands/create/validation.ts";
 export type { ImageReference } from "./commands/create/validation.ts";
 export { ensureSeccompFilter, compileSeccompFilter } from "./lib/seccomp.ts";

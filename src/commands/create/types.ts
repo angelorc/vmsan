@@ -52,6 +52,8 @@ export interface CreateSummaryInput {
   macAddress: string;
   stateFilePath: string;
   tunnelHostnames?: string[];
+  connectTo?: string[];
+  service?: string;
 }
 
 export interface InitialVmStateInput {
@@ -84,6 +86,8 @@ export interface InitialVmStateInput {
   disableSeccomp?: boolean;
   disablePidNs?: boolean;
   disableCgroup?: boolean;
+  connectTo?: string[];
+  service?: string;
 }
 
 export type CreateState = VmState;

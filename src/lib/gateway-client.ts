@@ -8,6 +8,9 @@ export interface GatewayVmConfig {
   slot: number;
   policy: string;
   allowedDomains?: string[];
+  project?: string;
+  service?: string;
+  connectTo?: string[];
 }
 
 export interface GatewayVmResult {

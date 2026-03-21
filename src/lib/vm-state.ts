@@ -25,6 +25,9 @@ export interface VmNetwork {
   skipDnat?: boolean;
   allowIcmp?: boolean;
   firewallBackend?: "nftables";
+  connectTo?: string[];
+  meshIp?: string;
+  service?: string;
 }
 
 export interface VmState {

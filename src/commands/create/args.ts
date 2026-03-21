@@ -97,6 +97,16 @@ export const createCommandArgs = {
     default: false,
     description: "Allow ICMP traffic (ping) from the VM. Blocked by default.",
   },
+  "connect-to": {
+    type: "string",
+    description:
+      "Mesh connections (comma-separated service:port pairs, e.g. postgres:5432,redis:6379)",
+  },
+  service: {
+    type: "string",
+    description:
+      "Register VM as a service for mesh DNS (e.g. --service web → web.<project>.vmsan.internal)",
+  },
   connect: {
     type: "boolean",
     default: false,

@@ -35,6 +35,8 @@ export function buildInitialVmState(input: InitialVmStateInput): VmState {
       skipDnat: input.skipDnat,
       allowIcmp: input.allowIcmp,
       firewallBackend: "nftables",
+      connectTo: input.connectTo,
+      service: input.service,
     },
     snapshot: input.snapshotId,
     timeoutMs: input.timeoutMs,

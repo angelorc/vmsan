@@ -66,6 +66,8 @@ export interface CreateVmOptions {
   timeoutMs?: number;
   snapshotId?: string;
   skipDnat?: boolean;
+  connectTo?: string[];
+  service?: string;
 }
 
 export interface CreateVmResult {
@@ -249,6 +251,8 @@ export class VMService {
           disableSeccomp: opts.disableSeccomp,
           disablePidNs: opts.disablePidNs,
           disableCgroup: opts.disableCgroup,
+          connectTo: opts.connectTo,
+          service: opts.service,
         });
         this.store.save(state);
 

@@ -228,6 +228,29 @@ export function parseBandwidth(value: string | undefined): number | undefined {
   return mbit;
 }
 
+/**
+ * Parse --connect-to flag value into an array of "service:port" strings.
+ * Validates that each entry has the format "name:port" where port is 1-65535.
+ */
+export function parseConnectTo(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const colonIndex = entry.lastIndexOf(":");
+      if (colonIndex <= 0) {
+        throw invalidPortError(entry);
+      }
+      const port = Number(entry.slice(colonIndex + 1));
+      if (Number.isNaN(port) || port < 1 || port > 65535) {
+        throw invalidPortError(entry);
+      }
+      return entry;
+    });
+}
+
 export function parseDiskSizeGb(value: string | undefined): number {
   const raw = (value || "10gb").trim().toLowerCase();
   const match = raw.match(/^(\d+)(gb|g|gib)?$/i);
