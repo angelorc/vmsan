@@ -32,6 +32,9 @@ Create, manage, and connect to isolated [Firecracker](https://github.com/firecra
 - 🏃 **Command execution** — run commands with streaming output, env injection, and sudo
 - 🧩 **Multiple runtimes** — `base`, `node22`, `node24`, `python3.13`
 - 📸 **VM snapshots** — save and restore VM state
+- 🚀 **Project deployment** — define services in `vmsan.toml`, deploy with `vmsan up`
+- 🗄️ **Built-in accessories** — auto-provision postgres and redis from pre-built rootfs
+- 🔑 **Encrypted secrets** — manage secrets with `vmsan secrets set/list/unset`
 - 📊 **JSON output** — `--json` flag for scripting and automation
 
 ## 📋 Prerequisites
@@ -89,6 +92,27 @@ ln -sf "$(pwd)/dist/bin/cli.mjs" ~/.vmsan/bin/vmsan
 
 ## 📖 Usage
 
+### Project deployment (vmsan.toml)
+
+```bash
+# Initialize a project (creates vmsan.toml)
+vmsan init
+
+# Deploy all services
+sudo vmsan up
+
+# Check service status
+sudo vmsan status
+
+# Re-deploy code without recreating VMs
+sudo vmsan deploy
+
+# Stop all services (--destroy removes everything)
+sudo vmsan down
+```
+
+### Single VM management
+
 ```bash
 # Create and start a VM
 vmsan create --runtime node22 --memory 512 --cpus 2
@@ -141,6 +165,12 @@ vmsan remove <vm-id>
 
 | Command    | Alias | Description                           |
 | ---------- | ----- | ------------------------------------- |
+| `init`     |       | Initialize a project with vmsan.toml  |
+| `up`       |       | Deploy services defined in vmsan.toml |
+| `deploy`   |       | Re-deploy services without recreating VMs |
+| `status`   |       | Show project service status overview  |
+| `down`     |       | Stop all services for the current project |
+| `secrets`  |       | Manage project secrets (set, list, unset) |
 | `create`   |       | Create and start a new microVM        |
 | `list`     | `ls`  | List all VMs                          |
 | `start`    |       | Start a stopped VM                    |
@@ -152,14 +182,64 @@ vmsan remove <vm-id>
 | `download` |       | Download files from a VM              |
 | `network`  |       | Update network policy on a running VM |
 | `logs`     |       | View VM logs (`--dns` for DNS query logs) |
-| `snapshot`  |       | Manage VM snapshots (create, list, delete) |
+| `snapshot` |       | Manage VM snapshots (create, list, delete) |
 | `doctor`   |       | Check system prerequisites and installation health |
+
+## 🚀 Project Deployment
+
+Define your stack in `vmsan.toml` and deploy with a single command.
+
+### Example: multi-service stack
+
+```toml
+[services.web]
+runtime = "node22"
+build = "npm install && npm run build"
+start = "npm start"
+depends_on = ["postgres", "redis"]
+
+[services.web.health_check]
+type = "http"
+path = "/health"
+port = 3000
+
+[accessories.postgres]
+type = "postgres"
+
+[accessories.redis]
+type = "redis"
+
+[deploy]
+release = "npx prisma migrate deploy"
+```
+
+```bash
+vmsan init          # creates vmsan.toml
+sudo vmsan up       # provisions VMs, builds, and starts services
+sudo vmsan status   # shows service health table
+sudo vmsan deploy   # re-deploys code (skips accessory recreation)
+sudo vmsan down     # stops everything (--destroy removes VMs)
+```
+
+### Built-in accessories
+
+Use `type = "postgres"` or `type = "redis"` in the `[accessories]` section to auto-provision databases from pre-built rootfs images. Connection environment variables are injected automatically into dependent services.
+
+### Secrets
+
+```bash
+vmsan secrets set DATABASE_URL=postgres://...
+vmsan secrets list
+vmsan secrets unset DATABASE_URL
+```
+
+Secrets are encrypted at rest and injected into service VMs at deploy time.
 
 ## ⚠️ Known Limitations
 
-- No inter-VM networking (planned for 0.5.0)
-- No declarative config / `vmsan.toml` (planned for 0.6.0)
 - No multi-host support (planned for 0.8.0)
+- Pre-built rootfs layers are large (~500 MB postgres, ~200 MB redis)
+- Blue-green deploys use 2x memory during transition
 - Uses `nftables` with atomic rule application for network isolation (since 0.2.0)
 - Defense-in-depth egress filtering: DNS + SNI + L3/L4 (since 0.4.0)
 - Per-VM dnsproxy sidecar uses ~15-25 MB RSS each (in-process DNS planned for 0.11.0)
