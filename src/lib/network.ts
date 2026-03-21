@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { consola } from "consola";
 import { defaultInterfaceNotFoundError } from "../errors/index.ts";
 import { vmsanPaths } from "../paths.ts";
+import { GatewayClient, ensureGatewayRunning } from "./gateway-client.ts";
 import { toError } from "./utils.ts";
 import type { VmNetwork } from "./vm-state.ts";
 import {
@@ -355,6 +356,11 @@ export class NetworkManager {
         `nftables setup failed: ${result.error || "unknown error"} (code: ${result.code || "none"})`,
       );
     }
+
+    // Start gateway proxies for this VM (non-fatal)
+    this.gatewayVmStart(vmId, slot, policy).catch((err) => {
+      consola.debug(`Gateway proxy start: ${toError(err).message}`);
+    });
   }
 
   setupThrottle(): void {
@@ -392,6 +398,9 @@ export class NetworkManager {
     const { tapDevice, guestIp, netnsName, slot } = this.config;
     const vmId = resolveVmId(this.config);
 
+    // 0. Stop gateway proxies (best-effort, gateway may not be running)
+    this.gatewayVmStop(vmId);
+
     const teardownResult = execNftables("teardown", {
       vmId,
       netnsName: netnsName || "",
@@ -419,9 +428,46 @@ export class NetworkManager {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Gateway proxy helpers (non-fatal — proxies enhance security but are optional)
+  // ---------------------------------------------------------------------------
+
+  private async gatewayVmStart(vmId: string, slot: number, policy: string): Promise<void> {
+    try {
+      const gateway = new GatewayClient();
+      await gateway.vmStart({
+        vmId,
+        slot,
+        policy,
+        allowedDomains: this.config.allowedDomains,
+      });
+    } catch (err) {
+      consola.debug(`Gateway proxy start: ${toError(err).message}`);
+    }
+  }
+
+  private gatewayVmStop(vmId: string): void {
+    const gateway = new GatewayClient();
+    gateway.vmStop(vmId).catch((err) => {
+      consola.debug(`Gateway proxy stop: ${toError(err).message}`);
+    });
+  }
+
+  private gatewayUpdatePolicy(vmId: string, policy: string, allowedDomains?: string[]): void {
+    const gateway = new GatewayClient();
+    gateway.vmUpdatePolicy(vmId, policy, allowedDomains).catch((err) => {
+      consola.debug(`Gateway policy update: ${toError(err).message}`);
+    });
+  }
+
   async setup(): Promise<void> {
     this.setupNamespace();
     this.setupDevice();
+
+    // Ensure gateway is running before setting up rules (non-fatal)
+    const gatewayBin = join(vmsanPaths().binDir, "vmsan-gateway");
+    await ensureGatewayRunning(gatewayBin);
+
     this.setupRules();
     this.setupThrottle();
   }
@@ -468,6 +514,11 @@ export class NetworkManager {
       }
       throw err;
     }
+
+    // Update gateway proxy policy (non-fatal)
+    const vmId = resolveVmId(this.config);
+    const policy = effectivePolicy(this.config);
+    this.gatewayUpdatePolicy(vmId, policy, newDomains);
   }
 }
 

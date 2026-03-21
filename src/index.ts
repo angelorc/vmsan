@@ -39,6 +39,8 @@ export type { VmStateStore, VmState, VmNetwork } from "./lib/vm-state.ts";
 export { MemoryVmStateStore } from "./stores/memory.ts";
 export { NetworkManager } from "./lib/network.ts";
 export type { NetworkConfig } from "./lib/network.ts";
+export { GatewayClient, ensureGatewayRunning } from "./lib/gateway-client.ts";
+export type { GatewayVmConfig, GatewayVmResult, GatewayPingResult } from "./lib/gateway-client.ts";
 export { Jailer, detectCgroupVersion } from "./lib/jailer.ts";
 export type {
   JailerPaths,
