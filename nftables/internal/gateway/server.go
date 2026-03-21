@@ -244,7 +244,7 @@ func (s *Server) handleStatus() Response {
 	return Response{OK: true, VMs: len(vms), List: vms}
 }
 
-func (s *Server) handleShutdown(ctx context.Context) Response {
+func (s *Server) handleShutdown(_ context.Context) Response {
 	s.manager.StopAll()
 	return Response{OK: true}
 }

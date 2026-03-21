@@ -42,14 +42,16 @@ func (m *Manager) StartVM(vmId string, slot int, policy string) (*VMState, error
 		return existing, nil
 	}
 
-	// Stub port allocation — real implementation will bind listeners.
+	// Port allocation uses the same bases as the TypeScript layer.
+	// DNS: 10053+slot, SNI: 10443+slot, HTTP: 10698+slot.
+	// Real listeners will be started in Phase 1/2.
 	state := &VMState{
 		VMId:     vmId,
 		Slot:     slot,
 		Policy:   policy,
-		DNSPort:  10000 + slot*10,
-		SNIPort:  10000 + slot*10 + 1,
-		HTTPPort: 10000 + slot*10 + 2,
+		DNSPort:  10053 + slot,
+		SNIPort:  10443 + slot,
+		HTTPPort: 10698 + slot,
 	}
 	m.vms[vmId] = state
 
