@@ -83,6 +83,8 @@ const main = defineCommand({
     snapshot: () => import("../src/commands/snapshot.ts").then((m) => m.default),
     logs: () => import("../src/commands/logs.ts").then((m) => m.default),
     doctor: () => import("../src/commands/doctor.ts").then((m) => m.default),
+    init: () => import("../src/commands/init.ts").then((m) => m.default),
+    validate: () => import("../src/commands/validate.ts").then((m) => m.default),
   },
 });
 
