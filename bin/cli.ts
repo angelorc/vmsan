@@ -100,6 +100,7 @@ const main = defineCommand({
     deploy: () => import("../src/commands/deploy/deploy.ts").then((m) => m.default),
     status: () => import("../src/commands/status/status.ts").then((m) => m.default),
     down: () => import("../src/commands/down/down.ts").then((m) => m.default),
+    migrate: () => import("../src/commands/migrate/migrate.ts").then((m) => m.default),
   },
 });
 

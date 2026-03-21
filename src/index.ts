@@ -37,6 +37,8 @@ export type {
 export { FileVmStateStore, getActiveTapSlots, findFreeNetworkSlot } from "./lib/vm-state.ts";
 export type { VmStateStore, VmState, VmNetwork } from "./lib/vm-state.ts";
 export { MemoryVmStateStore } from "./stores/memory.ts";
+export { SqliteVmStateStore, createStateStore } from "./lib/state/index.ts";
+export type { HostState, SyncLogEntry } from "./lib/state/index.ts";
 export { NetworkManager } from "./lib/network.ts";
 export type { NetworkConfig } from "./lib/network.ts";
 export { GatewayClient, ensureGatewayRunning } from "./lib/gateway-client.ts";

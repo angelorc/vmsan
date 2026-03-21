@@ -1,6 +1,7 @@
 import { createHooks, type Hookable } from "hookable";
 import { vmsanPaths, type VmsanPaths } from "./paths.ts";
-import { FileVmStateStore, type VmStateStore } from "./lib/vm-state.ts";
+import type { VmStateStore } from "./lib/vm-state.ts";
+import { createStateStore } from "./lib/state/index.ts";
 import type { VmsanHooks } from "./hooks.ts";
 import type { VmsanPlugin } from "./plugin.ts";
 import { createDefaultLogger, type VmsanLogger } from "./vmsan-logger.ts";
@@ -29,7 +30,7 @@ function buildContext(options?: VmsanOptions): VmsanContext {
         ? vmsanPaths(options.paths)
         : options.paths;
 
-  const store = options?.store ?? new FileVmStateStore(paths.vmsDir);
+  const store = options?.store ?? createStateStore(paths.vmsDir);
   const logger = options?.logger ?? createDefaultLogger();
   const hooks = createHooks<VmsanHooks>();
 
