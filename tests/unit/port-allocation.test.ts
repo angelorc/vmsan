@@ -18,8 +18,8 @@ describe("port allocation constants", () => {
     expect(SNI_PORT_BASE).toBe(10443);
   });
 
-  it("exports HTTP_PORT_BASE as 10080", () => {
-    expect(HTTP_PORT_BASE).toBe(10080);
+  it("exports HTTP_PORT_BASE as 10698", () => {
+    expect(HTTP_PORT_BASE).toBe(10698);
   });
 });
 
@@ -76,16 +76,16 @@ describe("sniPortForSlot", () => {
 });
 
 describe("httpPortForSlot", () => {
-  it("returns 10080 for slot 0", () => {
-    expect(httpPortForSlot(0)).toBe(10080);
+  it("returns 10698 for slot 0", () => {
+    expect(httpPortForSlot(0)).toBe(10698);
   });
 
-  it("returns 10334 for slot 254", () => {
-    expect(httpPortForSlot(254)).toBe(10334);
+  it("returns 10952 for slot 254", () => {
+    expect(httpPortForSlot(254)).toBe(10952);
   });
 
   it("returns correct port for mid-range slot", () => {
-    expect(httpPortForSlot(100)).toBe(10180);
+    expect(httpPortForSlot(100)).toBe(10798);
   });
 
   it("rejects negative slot", () => {
@@ -119,17 +119,17 @@ describe("isReservedPort", () => {
   });
 
   it("returns true for HTTP_PORT_BASE (first HTTP port)", () => {
-    expect(isReservedPort(10080)).toBe(true);
+    expect(isReservedPort(10698)).toBe(true);
   });
 
-  it("returns true for last HTTP port (10334)", () => {
-    expect(isReservedPort(10334)).toBe(true);
+  it("returns true for last HTTP port (10952)", () => {
+    expect(isReservedPort(10952)).toBe(true);
   });
 
   it("returns true for mid-range ports in each range", () => {
     expect(isReservedPort(10100)).toBe(true); // DNS range
     expect(isReservedPort(10500)).toBe(true); // SNI range
-    expect(isReservedPort(10200)).toBe(true); // HTTP range
+    expect(isReservedPort(10800)).toBe(true); // HTTP range
   });
 
   it("returns false for port 80", () => {
@@ -152,14 +152,14 @@ describe("isReservedPort", () => {
     expect(isReservedPort(10052)).toBe(false);
   });
 
-  it("returns false for port just above SNI range", () => {
-    // SNI range ends at 10697 (10443+254), so 10698 is outside all ranges
-    expect(isReservedPort(10698)).toBe(false);
+  it("returns false for port just above HTTP range", () => {
+    // HTTP range ends at 10952 (10698+254), so 10953 is outside all ranges
+    expect(isReservedPort(10953)).toBe(false);
   });
 
-  it("returns false for port between ranges (gap above HTTP/DNS, below SNI)", () => {
-    // HTTP range ends at 10334, SNI starts at 10443
-    // Port 10400 is between HTTP and SNI ranges
+  it("returns false for port between DNS and SNI ranges", () => {
+    // DNS range ends at 10307, SNI starts at 10443
+    // Port 10400 is between DNS and SNI ranges
     expect(isReservedPort(10400)).toBe(false);
   });
 });

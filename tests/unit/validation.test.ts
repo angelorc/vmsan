@@ -440,9 +440,9 @@ describe("validatePublishedPortsAvailable", () => {
     expect(() => validatePublishedPortsAvailable([10443], fakePaths)).toThrow("reserved");
   });
 
-  it("rejects port 10080 (HTTP_PORT_BASE) as reserved", () => {
-    expect(() => validatePublishedPortsAvailable([10080], fakePaths)).toThrow(VmsanError);
-    expect(() => validatePublishedPortsAvailable([10080], fakePaths)).toThrow("reserved");
+  it("rejects port 10698 (HTTP_PORT_BASE) as reserved", () => {
+    expect(() => validatePublishedPortsAvailable([10698], fakePaths)).toThrow(VmsanError);
+    expect(() => validatePublishedPortsAvailable([10698], fakePaths)).toThrow("reserved");
   });
 
   it("accepts port 80 (not reserved)", () => {
