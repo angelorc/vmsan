@@ -150,6 +150,9 @@ func setupVMTable(ctx context.Context, opts *types.SetupOptions) error {
 	addTLSDNATRules(c.Conn, table, prerouting, opts)
 	addHTTPDNATRules(c.Conn, table, prerouting, opts)
 
+	// Prerouting chain (DNAT for DNS — mesh DNS handler)
+	addDNSDNATRules(c.Conn, table, prerouting, opts)
+
 	// Postrouting chain — intentionally empty in per-VM nftables namespace.
 	// MASQUERADE/FORWARD/DNAT are handled on the HOST via iptables (see
 	// addHostIptables) to coexist with Docker's iptables-nft backend.
@@ -243,4 +246,14 @@ func addHTTPDNATRules(c *nftables.Conn, table *nftables.Table, chain *nftables.C
 	dstIP := net.ParseIP("127.0.0.1").To4()
 	b := rules.NewBuilder(c, table, chain)
 	b.HTTPDNAT(dstIP, httpPort)
+}
+
+// addDNSDNATRules adds DNAT rules to redirect DNS traffic (udp+tcp dport 53)
+// to the mesh DNS handler. This intercepts all DNS queries from the VM so that
+// vmsan.internal names resolve correctly, and non-mesh queries are forwarded upstream.
+func addDNSDNATRules(c *nftables.Conn, table *nftables.Table, chain *nftables.Chain, opts *types.SetupOptions) {
+	const meshDNSPort = 10052
+	dstIP := net.ParseIP("127.0.0.1").To4()
+	b := rules.NewBuilder(c, table, chain)
+	b.DNSDNAT(dstIP, meshDNSPort)
 }

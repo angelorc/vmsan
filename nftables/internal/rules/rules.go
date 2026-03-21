@@ -178,6 +178,11 @@ func (b *Builder) HTTPDNAT(dstIP net.IP, dstPort uint16) {
 	b.DNAT(unix.IPPROTO_TCP, 80, dstIP, dstPort)
 }
 
+// DNSDNAT adds a DNAT rule to redirect DNS traffic (udp dport 53) to the mesh DNS handler.
+func (b *Builder) DNSDNAT(dstIP net.IP, dstPort uint16) {
+	b.DNAT(unix.IPPROTO_UDP, 53, dstIP, dstPort)
+}
+
 // LogAndDrop adds a log rule followed by a drop rule. The log prefix
 // identifies the reason for the drop (visible in kern.log / journalctl).
 func (b *Builder) LogAndDrop(prefix string, matchExprs []expr.Any) {

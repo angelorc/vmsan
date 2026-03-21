@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/miekg/dns"
 )
@@ -56,6 +57,7 @@ func (h *DNSHandler) Start(ctx context.Context) error {
 
 	mux := dns.NewServeMux()
 	mux.HandleFunc(meshDNSSuffix, h.handleQuery)
+	mux.HandleFunc(".", h.handleForward)
 
 	h.server = &dns.Server{
 		Addr:              fmt.Sprintf(":%d", h.port),
@@ -122,6 +124,22 @@ func (h *DNSHandler) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 	if err := w.WriteMsg(msg); err != nil {
 		h.logger.Debug("failed to write DNS response", "error", err.Error())
 	}
+}
+
+// handleForward proxies non-vmsan DNS queries to an upstream resolver.
+func (h *DNSHandler) handleForward(w dns.ResponseWriter, r *dns.Msg) {
+	const upstream = "8.8.8.8:53"
+	c := new(dns.Client)
+	c.Timeout = 5 * time.Second
+	resp, _, err := c.Exchange(r, upstream)
+	if err != nil {
+		h.logger.Debug("upstream DNS failed", "error", err.Error())
+		msg := new(dns.Msg)
+		msg.SetRcode(r, dns.RcodeServerFailure)
+		w.WriteMsg(msg)
+		return
+	}
+	w.WriteMsg(resp)
 }
 
 // handleA resolves A record queries: <service>.<project>.vmsan.internal.
