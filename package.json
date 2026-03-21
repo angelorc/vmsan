@@ -47,6 +47,7 @@
     "hookable": "^6.0.1",
     "p-retry": "^7.1.1",
     "proper-lockfile": "^4.1.2",
+    "smol-toml": "^1.6.0",
     "tar-stream": "^3.1.8",
     "ws": "^8.19.0"
   },
