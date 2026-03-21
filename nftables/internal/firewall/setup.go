@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"runtime"
 
 	"github.com/google/nftables"
@@ -145,6 +146,10 @@ func setupVMTable(ctx context.Context, opts *types.SetupOptions) error {
 		}
 	}
 
+	// Prerouting chain (DNAT for TLS/HTTP proxy — SNI filtering)
+	addTLSDNATRules(c.Conn, table, prerouting, opts)
+	addHTTPDNATRules(c.Conn, table, prerouting, opts)
+
 	// Postrouting chain — intentionally empty in per-VM nftables namespace.
 	// MASQUERADE/FORWARD/DNAT are handled on the HOST via iptables (see
 	// addHostIptables) to coexist with Docker's iptables-nft backend.
@@ -220,4 +225,22 @@ func addPublishedPortRules(c *nftables.Conn, table *nftables.Table, chain *nftab
 		b.DNAT(proto, pp.HostPort, dstIP, pp.GuestPort)
 	}
 	return nil
+}
+
+// addTLSDNATRules adds a DNAT rule to redirect TLS traffic (tcp dport 443)
+// to the per-VM SNI proxy listener.
+func addTLSDNATRules(c *nftables.Conn, table *nftables.Table, chain *nftables.Chain, opts *types.SetupOptions) {
+	sniPort := uint16(10443 + opts.Slot)
+	dstIP := net.ParseIP("127.0.0.1").To4()
+	b := rules.NewBuilder(c, table, chain)
+	b.TLSDNAT(dstIP, sniPort)
+}
+
+// addHTTPDNATRules adds a DNAT rule to redirect HTTP traffic (tcp dport 80)
+// to the per-VM HTTP proxy listener.
+func addHTTPDNATRules(c *nftables.Conn, table *nftables.Table, chain *nftables.Chain, opts *types.SetupOptions) {
+	httpPort := uint16(10698 + opts.Slot)
+	dstIP := net.ParseIP("127.0.0.1").To4()
+	b := rules.NewBuilder(c, table, chain)
+	b.HTTPDNAT(dstIP, httpPort)
 }

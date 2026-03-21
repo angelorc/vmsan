@@ -168,6 +168,16 @@ func (b *Builder) Accept() {
 	b.add([]expr.Any{verdict(expr.VerdictAccept)})
 }
 
+// TLSDNAT adds a DNAT rule to redirect TLS traffic (tcp dport 443) to the SNI proxy.
+func (b *Builder) TLSDNAT(dstIP net.IP, dstPort uint16) {
+	b.DNAT(unix.IPPROTO_TCP, 443, dstIP, dstPort)
+}
+
+// HTTPDNAT adds a DNAT rule to redirect HTTP traffic (tcp dport 80) to the HTTP proxy.
+func (b *Builder) HTTPDNAT(dstIP net.IP, dstPort uint16) {
+	b.DNAT(unix.IPPROTO_TCP, 80, dstIP, dstPort)
+}
+
 // --- Composite helpers ---
 
 // DoHDropRules blocks TCP 443 to well-known DoH resolver IPs.
