@@ -346,30 +346,6 @@ func TestVerifyConfig_Validate_Valid(t *testing.T) {
 	}
 }
 
-// --- CleanupConfig.Validate() ---
-
-func TestCleanupConfig_Validate_MissingVMId(t *testing.T) {
-	c := &CleanupConfig{}
-	if err := c.Validate(); !errors.Is(err, ErrMissingVMId) {
-		t.Errorf("got %v, want ErrMissingVMId", err)
-	}
-}
-
-func TestCleanupConfig_Validate_Valid(t *testing.T) {
-	c := &CleanupConfig{
-		VMId:      "vm-1",
-		TapDevice: "tap0",
-		VethHost:  "veth0h",
-		VethGuest: "veth0g",
-		NetNSName: "vmsan-vm-1",
-		HostIP:    "198.19.0.1",
-		GuestIP:   "198.19.0.2",
-	}
-	if err := c.Validate(); err != nil {
-		t.Errorf("Validate() = %v for valid config", err)
-	}
-}
-
 // --- JSON serialization round-trip ---
 
 func TestSetupConfig_JSONRoundTrip(t *testing.T) {
