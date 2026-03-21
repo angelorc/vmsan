@@ -35,7 +35,7 @@ function findPackageVersion(): string {
 
 const version = findPackageVersion();
 
-const SUDO_COMMANDS = new Set(["create", "start", "stop", "remove", "rm", "snapshot"]);
+const SUDO_COMMANDS = new Set(["create", "start", "stop", "remove", "rm", "snapshot", "up"]);
 
 const subCommand = process.argv[2];
 if (subCommand && SUDO_COMMANDS.has(subCommand) && process.getuid?.() !== 0) {
@@ -85,6 +85,7 @@ const main = defineCommand({
     doctor: () => import("../src/commands/doctor.ts").then((m) => m.default),
     init: () => import("../src/commands/init.ts").then((m) => m.default),
     validate: () => import("../src/commands/validate.ts").then((m) => m.default),
+    up: () => import("../src/commands/up/up.ts").then((m) => m.default),
   },
 });
 
