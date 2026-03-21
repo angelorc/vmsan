@@ -34,6 +34,7 @@ type SetupOptions struct {
 	AllowedCIDRs     []string
 	DeniedCIDRs      []string
 	SkipDNAT         bool
+	AllowICMP        bool
 	DNSResolvers     []string // maps to DNS1, DNS2
 }
 

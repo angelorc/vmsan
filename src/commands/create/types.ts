@@ -80,6 +80,7 @@ export interface InitialVmStateInput {
   bandwidthMbit?: number;
   netnsName?: string;
   skipDnat?: boolean;
+  allowIcmp?: boolean;
   disableSeccomp?: boolean;
   disablePidNs?: boolean;
   disableCgroup?: boolean;

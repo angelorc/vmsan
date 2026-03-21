@@ -58,6 +58,7 @@ export interface CreateVmOptions {
   deniedCidrs?: string[];
   ports?: number[];
   bandwidthMbit?: number;
+  allowIcmp?: boolean;
   disableNetns?: boolean;
   disableSeccomp?: boolean;
   disablePidNs?: boolean;
@@ -214,6 +215,7 @@ export class VMService {
           bandwidthMbit,
           netnsName,
           opts.skipDnat,
+          opts.allowIcmp,
         );
         networkConfig = net.config;
 
@@ -243,6 +245,7 @@ export class VMService {
           bandwidthMbit,
           netnsName,
           skipDnat: opts.skipDnat,
+          allowIcmp: opts.allowIcmp,
           disableSeccomp: opts.disableSeccomp,
           disablePidNs: opts.disablePidNs,
           disableCgroup: opts.disableCgroup,
@@ -716,6 +719,7 @@ export class VMService {
     domains: string[],
     allowedCidrs: string[],
     deniedCidrs: string[],
+    allowIcmp?: boolean,
   ): Promise<UpdatePolicyResult> {
     const stateFile = join(this.paths.vmsDir, `${vmId}.json`);
     const fileLock = new FileLock(stateFile, `update-policy-${vmId}`);
@@ -745,7 +749,13 @@ export class VMService {
       }
 
       try {
-        const mgr = NetworkManager.fromVmNetwork(state.network);
+        // Resolve allowIcmp: explicit flag wins, otherwise preserve existing
+        const effectiveAllowIcmp = allowIcmp ?? state.network.allowIcmp ?? false;
+
+        const mgr = NetworkManager.fromVmNetwork({
+          ...state.network,
+          allowIcmp: effectiveAllowIcmp,
+        });
         mgr.updatePolicy(policy, domains, allowedCidrs, deniedCidrs);
 
         this.store.update(vmId, {
@@ -755,6 +765,7 @@ export class VMService {
             allowedDomains: domains,
             allowedCidrs,
             deniedCidrs,
+            allowIcmp: effectiveAllowIcmp,
           },
         });
 

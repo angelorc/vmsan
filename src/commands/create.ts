@@ -30,6 +30,7 @@ interface CreateCommandArgs extends CreateCommandRuntimeArgs {
   "no-cgroup"?: boolean;
   "no-netns"?: boolean;
   bandwidth?: string;
+  "allow-icmp"?: boolean;
 }
 
 const createCommand = defineCommand({
@@ -82,6 +83,7 @@ const createCommand = defineCommand({
         deniedCidrs: parsedInput.deniedCidrs,
         ports: parsedInput.ports,
         bandwidthMbit,
+        allowIcmp: commandArgs["allow-icmp"] || false,
         disableNetns: commandArgs["no-netns"],
         disableSeccomp: commandArgs["no-seccomp"],
         disablePidNs: commandArgs["no-pid-ns"],

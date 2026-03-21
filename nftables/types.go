@@ -40,6 +40,7 @@ type SetupConfig struct {
 	AllowedCIDRs   []string        `json:"allowedCidrs,omitempty"`
 	DeniedCIDRs    []string        `json:"deniedCidrs,omitempty"`
 	SkipDNAT       bool            `json:"skipDnat,omitempty"`
+	AllowICMP      bool            `json:"allowIcmp,omitempty"`
 	DNSResolvers   []string        `json:"dnsResolvers,omitempty"`
 }
 
@@ -207,6 +208,7 @@ func (c SetupConfig) ToOptions() *SetupOptions {
 	opts.AllowedCIDRs = c.AllowedCIDRs
 	opts.DeniedCIDRs = c.DeniedCIDRs
 	opts.SkipDNAT = c.SkipDNAT
+	opts.AllowICMP = c.AllowICMP
 	opts.DNSResolvers = c.DNSResolvers
 	return opts
 }

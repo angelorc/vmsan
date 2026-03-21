@@ -3,7 +3,7 @@ import { defineCommand } from "citty";
 import { consola } from "consola";
 import { createVmsan } from "../context.ts";
 import { createCommandLogger, getOutputMode } from "../lib/logger/index.ts";
-import { handleCommandError } from "../errors/index.ts";
+import { handleCommandError, mutuallyExclusiveFlagsError } from "../errors/index.ts";
 import {
   parseNetworkPolicy,
   parseDomains,
@@ -40,6 +40,14 @@ const networkCommand = defineCommand({
       type: "string",
       description: "Address ranges to deny (comma-separated CIDR)",
     },
+    "allow-icmp": {
+      type: "boolean",
+      description: "Allow ICMP traffic (ping) from the VM",
+    },
+    "deny-icmp": {
+      type: "boolean",
+      description: "Deny ICMP traffic (ping) from the VM",
+    },
   },
   async run({ args }) {
     const cmdLog = createCommandLogger("network");
@@ -57,6 +65,13 @@ const networkCommand = defineCommand({
         throw policyConflictError();
       }
 
+      if (args["allow-icmp"] && args["deny-icmp"]) {
+        throw mutuallyExclusiveFlagsError("--allow-icmp", "--deny-icmp");
+      }
+
+      // undefined = no change, true = allow, false = deny
+      const allowIcmp = args["allow-icmp"] ? true : args["deny-icmp"] ? false : undefined;
+
       const vmsan = await createVmsan();
       const result = await vmsan.updateNetworkPolicy(
         args.vmId,
@@ -64,6 +79,7 @@ const networkCommand = defineCommand({
         domains,
         allowedCidrs,
         deniedCidrs,
+        allowIcmp,
       );
 
       if (!result.success) {

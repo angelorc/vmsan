@@ -114,7 +114,9 @@ func setupVMTable(ctx context.Context, opts *types.SetupOptions) error {
 	}
 
 	// 3-6. Security rules (all policies)
-	fwd.MatchProtoVerdict(unix.IPPROTO_ICMP, expr.VerdictDrop)
+	if !opts.AllowICMP {
+		fwd.MatchProtoVerdict(unix.IPPROTO_ICMP, expr.VerdictDrop)
+	}
 	fwd.MatchProtoVerdict(unix.IPPROTO_UDP, expr.VerdictDrop)
 	fwd.MatchDstPort(unix.IPPROTO_TCP, 853, expr.VerdictDrop)
 	if err := fwd.DoHDropRules(); err != nil {

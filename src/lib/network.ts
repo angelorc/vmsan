@@ -30,6 +30,7 @@ export interface NetworkConfig {
   bandwidthMbit?: number;
   netnsName?: string;
   skipDnat?: boolean;
+  allowIcmp?: boolean;
   /** VM identifier, used by nftables backend for per-VM table naming. */
   vmId?: string;
 }
@@ -151,6 +152,7 @@ export class NetworkManager {
     bandwidthMbit?: number,
     netnsName?: string,
     skipDnat?: boolean,
+    allowIcmp?: boolean,
   ) {
     this.config = {
       slot,
@@ -167,6 +169,7 @@ export class NetworkManager {
       bandwidthMbit,
       netnsName,
       skipDnat,
+      allowIcmp,
     };
   }
 
@@ -202,6 +205,7 @@ export class NetworkManager {
       bandwidthMbit: network.bandwidthMbit,
       netnsName: network.netnsName,
       skipDnat: network.skipDnat,
+      allowIcmp: network.allowIcmp,
     });
   }
 
@@ -341,6 +345,7 @@ export class NetworkManager {
       allowedCidrs: this.config.allowedCidrs,
       deniedCidrs: this.config.deniedCidrs,
       skipDnat: this.config.skipDnat || false,
+      allowIcmp: this.config.allowIcmp ?? false,
       dnsResolvers: DNS_RESOLVERS,
     };
 

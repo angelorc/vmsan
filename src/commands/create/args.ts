@@ -92,6 +92,11 @@ export const createCommandArgs = {
     type: "string",
     description: "Max bandwidth per VM (e.g., 50mbit, 100mbit). Default: unlimited.",
   },
+  "allow-icmp": {
+    type: "boolean",
+    default: false,
+    description: "Allow ICMP traffic (ping) from the VM. Blocked by default.",
+  },
   connect: {
     type: "boolean",
     default: false,
