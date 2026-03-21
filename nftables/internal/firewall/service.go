@@ -2,20 +2,18 @@ package firewall
 
 import (
 	"log/slog"
-
-	"github.com/angelorc/vmsan/nftables/internal/compat"
 )
 
 // FirewallService provides a high-level interface for firewall operations.
 // It abstracts the underlying nftables client and iptables executor.
 type FirewallService struct {
 	client   NftablesClient
-	executor compat.IptablesExecutor
+	executor IptablesExecutor
 	logger   *slog.Logger
 }
 
 // NewFirewallService creates a new FirewallService with the given dependencies.
-func NewFirewallService(client NftablesClient, executor compat.IptablesExecutor, logger *slog.Logger) *FirewallService {
+func NewFirewallService(client NftablesClient, executor IptablesExecutor, logger *slog.Logger) *FirewallService {
 	return &FirewallService{
 		client:   client,
 		executor: executor,
@@ -29,7 +27,7 @@ func (s *FirewallService) Client() NftablesClient {
 }
 
 // Executor returns the underlying iptables executor.
-func (s *FirewallService) Executor() compat.IptablesExecutor {
+func (s *FirewallService) Executor() IptablesExecutor {
 	return s.executor
 }
 

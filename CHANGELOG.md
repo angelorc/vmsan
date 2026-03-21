@@ -33,7 +33,6 @@
   - Deterministic port allocation for future DNS/SNI proxy
   - Per-namespace `ip_forward` setting
   - `vmsan doctor` checks for nftables kernel support and host firewall detection
-  - Backward compatibility: `VMSAN_LEGACY_IPTABLES=1` env var for iptables fallback
 
 ## 0.1.1
 

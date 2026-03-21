@@ -8,14 +8,13 @@ import (
 	"strings"
 
 	types "github.com/angelorc/vmsan/nftables"
-	"github.com/angelorc/vmsan/nftables/internal/compat"
 )
 
 // addHostIptables adds host-side FORWARD, MASQUERADE, and DNAT rules via
 // iptables. These must use iptables (not nftables) to coexist with Docker's
 // iptables-nft backend, which may set a FORWARD policy of DROP that a
 // separate nftables chain cannot override.
-func addHostIptables(ctx context.Context, opts *types.SetupOptions, executor compat.IptablesExecutor) error {
+func addHostIptables(ctx context.Context, opts *types.SetupOptions, executor IptablesExecutor) error {
 	fwd := fwdDevice(opts)
 	subnet := opts.VmIP + "/30"
 
@@ -85,7 +84,7 @@ func addHostIptables(ctx context.Context, opts *types.SetupOptions, executor com
 // iptables-save output for the VM's device names and guest IP, then issuing
 // corresponding -D commands. Best-effort: logs warnings but does not error.
 // Also removes per-port DNAT rules when PublishedPorts are provided.
-func removeHostIptables(ctx context.Context, opts *types.TeardownOptions, executor compat.IptablesExecutor) error {
+func removeHostIptables(ctx context.Context, opts *types.TeardownOptions, executor IptablesExecutor) error {
 	dev := opts.TapDevice
 	if opts.VethHost != "" {
 		dev = opts.VethHost
@@ -126,7 +125,7 @@ func removeHostIptables(ctx context.Context, opts *types.TeardownOptions, execut
 
 // removeMatchingRules lists rules in the given iptables table, finds lines
 // matching any pattern, and deletes them.
-func removeMatchingRules(ctx context.Context, table string, patterns []string, executor compat.IptablesExecutor) {
+func removeMatchingRules(ctx context.Context, table string, patterns []string, executor IptablesExecutor) {
 	out, err := executor.Execute(ctx, "-t", table, "-S")
 	if err != nil {
 		slog.WarnContext(ctx, "failed to list iptables rules", "table", table, "error", err)

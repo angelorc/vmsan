@@ -12,7 +12,6 @@ import (
 	"golang.org/x/sys/unix"
 
 	types "github.com/angelorc/vmsan/nftables"
-	"github.com/angelorc/vmsan/nftables/internal/compat"
 	"github.com/angelorc/vmsan/nftables/internal/netns"
 	"github.com/angelorc/vmsan/nftables/internal/rules"
 )
@@ -66,7 +65,7 @@ func Setup(ctx context.Context, opts *types.SetupOptions) error {
 	// Required for Docker coexistence: nftables chains can't override
 	// iptables-nft FORWARD DROP policy.
 	if opts.Policy != types.PolicyDenyAll {
-		executor := compat.NewRealIptablesExecutor()
+		executor := NewRealIptablesExecutor()
 		if err := addHostIptables(ctx, opts, executor); err != nil {
 			// Rollback: clean up previous steps
 			if hostBypassSetup {

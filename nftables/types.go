@@ -191,25 +191,6 @@ func (c *VerifyConfig) Validate() error {
 	return nil
 }
 
-// CleanupConfig is the JSON input for the "cleanup-iptables" command.
-type CleanupConfig struct {
-	VMId      string `json:"vmId"`
-	TapDevice string `json:"tapDevice"`
-	VethHost  string `json:"vethHost"`
-	VethGuest string `json:"vethGuest"`
-	NetNSName string `json:"netnsName"`
-	HostIP    string `json:"hostIp"`
-	GuestIP   string `json:"guestIp"`
-}
-
-// Validate checks that required fields are present.
-func (c *CleanupConfig) Validate() error {
-	if c.VMId == "" {
-		return ErrMissingVMId
-	}
-	return nil
-}
-
 // ToOptions converts SetupConfig to SetupOptions for the functional options API.
 func (c SetupConfig) ToOptions() *SetupOptions {
 	opts := NewSetupOptions(c.VMId)
@@ -247,18 +228,6 @@ func (c TeardownConfig) ToOptions() *TeardownOptions {
 func (c VerifyConfig) ToOptions() *VerifyOptions {
 	opts := NewVerifyOptions(c.VMId)
 	opts.NetNSName = c.NetNSName
-	return opts
-}
-
-// ToOptions converts CleanupConfig to CleanupOptions for the functional options API.
-func (c CleanupConfig) ToOptions() *CleanupOptions {
-	opts := NewCleanupOptions(c.VMId)
-	opts.NetNSName = c.NetNSName
-	opts.TapDevice = c.TapDevice
-	opts.VethHost = c.VethHost
-	opts.VethGuest = c.VethGuest
-	opts.HostIP = c.HostIP
-	opts.GuestIP = c.GuestIP
 	return opts
 }
 

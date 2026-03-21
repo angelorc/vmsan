@@ -12,7 +12,6 @@ import (
 	"time"
 
 	types "github.com/angelorc/vmsan/nftables"
-	"github.com/angelorc/vmsan/nftables/internal/compat"
 	"github.com/angelorc/vmsan/nftables/internal/firewall"
 )
 
@@ -40,7 +39,7 @@ func run() int {
 	slog.SetDefault(logger)
 
 	if len(os.Args) < 2 {
-		writeResult(&types.NftResult{OK: false, Error: "usage: vmsan-nftables <setup|teardown|verify|cleanup-iptables>", Code: "MISSING_COMMAND"})
+		writeResult(&types.NftResult{OK: false, Error: "usage: vmsan-nftables <setup|teardown|verify>", Code: "MISSING_COMMAND"})
 		return exitParseError
 	}
 
@@ -60,8 +59,6 @@ func run() int {
 		return handleTeardown(ctx, input)
 	case "verify":
 		return handleVerify(ctx, input)
-	case "cleanup-iptables":
-		return handleCleanupIptables(ctx, input)
 	default:
 		writeResult(&types.NftResult{OK: false, Error: fmt.Sprintf("unknown command: %s", os.Args[1]), Code: "UNKNOWN_COMMAND"})
 		return exitParseError
@@ -130,29 +127,6 @@ func handleVerify(ctx context.Context, input []byte) int {
 	}
 	slog.DebugContext(ctx, "verify complete", "vm_id", cfg.VMId, "table_exists", result.TableExists, "chain_count", result.ChainCount)
 	if err := writeResult(result); err != nil {
-		return writeNftError(err)
-	}
-	return exitSuccess
-}
-
-func handleCleanupIptables(ctx context.Context, input []byte) int {
-	var cfg types.CleanupConfig
-	if err := json.Unmarshal(input, &cfg); err != nil {
-		return writeParseError(fmt.Errorf("parse config: %w", err))
-	}
-	if err := cfg.Validate(); err != nil {
-		return writeValidationError(err)
-	}
-
-	opts := cfg.ToOptions()
-	slog.InfoContext(ctx, "starting legacy iptables cleanup", "vm_id", opts.VMId, "netns", opts.NetNSName)
-	executor := compat.NewRealIptablesExecutor()
-	if err := compat.CleanupLegacyIptables(ctx, opts, executor); err != nil {
-		slog.ErrorContext(ctx, "legacy iptables cleanup failed", "vm_id", opts.VMId, "error", err)
-		return writeNftError(err)
-	}
-	slog.InfoContext(ctx, "legacy iptables cleanup complete", "vm_id", opts.VMId)
-	if err := writeResult(&types.NftResult{OK: true}); err != nil {
 		return writeNftError(err)
 	}
 	return exitSuccess

@@ -10,7 +10,6 @@ import (
 	"github.com/google/nftables"
 
 	types "github.com/angelorc/vmsan/nftables"
-	"github.com/angelorc/vmsan/nftables/internal/compat"
 	"github.com/angelorc/vmsan/nftables/internal/netns"
 )
 
@@ -37,7 +36,7 @@ func Teardown(ctx context.Context, opts *types.TeardownOptions) error {
 
 	// Host-side iptables cleanup (best-effort)
 	if opts.GuestIP != "" || opts.TapDevice != "" {
-		executor := compat.NewRealIptablesExecutor()
+		executor := NewRealIptablesExecutor()
 		if err := removeHostIptables(ctx, opts, executor); err != nil {
 			errs = append(errs, fmt.Errorf("host iptables cleanup: %w", err))
 		}
