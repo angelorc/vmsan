@@ -201,6 +201,7 @@ func (c SetupConfig) ToOptions() *SetupOptions {
 	opts.NetNSName = c.NetNSName
 	opts.VmIP = c.GuestIP
 	opts.HostBridgeIP = c.HostIP
+	opts.HostIP = c.HostIP
 	opts.VethHost = c.VethHost
 	opts.VethGuest = c.VethGuest
 	opts.HostIface = c.DefaultInterface
