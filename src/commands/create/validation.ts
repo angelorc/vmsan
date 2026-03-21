@@ -147,7 +147,7 @@ export function validateCidr(cidr: string): void {
 export function validatePublishedPortsAvailable(ports: number[], paths: VmsanPaths): void {
   if (ports.length === 0) return;
 
-  // Check reserved port ranges (DNS/SNI/HTTP proxy ports for 0.3.0)
+  // Check reserved port ranges (DNS/SNI/HTTP proxy ports)
   for (const port of ports) {
     if (isReservedPort(port)) {
       throw portConflictError(`${port} (reserved for vmsan internal use)`);

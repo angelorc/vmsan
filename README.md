@@ -25,6 +25,7 @@ Create, manage, and connect to isolated [Firecracker](https://github.com/firecra
 
 - ⚡ **Millisecond boot** — Firecracker microVMs start in < 200ms
 - 🔒 **Security isolation** — jailer, seccomp, cgroups, and per-VM network namespaces
+- 🛡️ **Defense-in-depth egress filtering** — DNS + SNI + L3/L4 (since 0.4.0)
 - 🖥️ **Interactive shell** — WebSocket PTY with full terminal support
 - 📂 **File transfer** — upload and download without SSH
 - 🐳 **Docker images** — build rootfs from any OCI image with `--from-image`
@@ -150,17 +151,21 @@ vmsan remove <vm-id>
 | `upload`   |       | Upload files to a VM                  |
 | `download` |       | Download files from a VM              |
 | `network`  |       | Update network policy on a running VM |
+| `logs`     |       | View VM logs (`--dns` for DNS query logs) |
 | `snapshot`  |       | Manage VM snapshots (create, list, delete) |
 | `doctor`   |       | Check system prerequisites and installation health |
 
 ## ⚠️ Known Limitations
 
-- No inter-VM networking (planned for 0.4.0)
-- No declarative config / `vmsan.toml` (planned for 0.5.0)
-- No multi-host support (planned for 0.7.0)
+- No inter-VM networking (planned for 0.5.0)
+- No declarative config / `vmsan.toml` (planned for 0.6.0)
+- No multi-host support (planned for 0.8.0)
 - Uses `nftables` with atomic rule application for network isolation (since 0.2.0)
-- No DNS or SNI filtering (planned for 0.3.0)
-- ICMP blocked by default from VMs (prevents ICMP tunneling)
+- Defense-in-depth egress filtering: DNS + SNI + L3/L4 (since 0.4.0)
+- Per-VM dnsproxy sidecar uses ~15-25 MB RSS each (in-process DNS planned for 0.11.0)
+- TLS without SNI is denied by default (no escape hatch yet)
+- Domain fronting via shared CDN IPs is an accepted risk
+- ICMP blocked by default from VMs (use `--allow-icmp` to enable)
 - UDP blocked by default except DNS (prevents UDP exfiltration; QUIC/HTTP3 will not work)
 - NTP (UDP 123) blocked — kvm-clock used for time sync, long-running VMs may drift
 - Host firewall (ufw/firewalld) may need explicit allow rules for vmsan traffic
