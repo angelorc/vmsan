@@ -8,6 +8,7 @@ dist/
 # Go binaries
 agent/vmsan-agent
 nftables/vmsan-nftables*
+nftables/vmsan-gateway*
 
 # IDE
 .vscode/
