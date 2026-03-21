@@ -120,12 +120,28 @@ jobs:
         run: go build -ldflags="-s -w -X main.version=v${{ steps.meta.outputs.version }}" -o vmsan-nftables-${{ matrix.arch }} ./cmd/vmsan-nftables
 
       - name: Build vmsan-gateway
-        working-directory: gateway
+        working-directory: nftables
         env:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-        run: go build -ldflags="-s -w -X main.version=v${{ steps.meta.outputs.version }}" -o vmsan-gateway-${{ matrix.arch }} ./cmd/vmsan-gateway
+        run: go build -ldflags="-s -w -X main.version=v${{ steps.meta.outputs.version }}" -o vmsan-gateway-${{ matrix.arch }} ./cmd/gateway
+
+      - name: Build vmsan-server
+        working-directory: nftables
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -ldflags="-s -w -X main.version=v${{ steps.meta.outputs.version }}" -o vmsan-server-${{ matrix.arch }} ./cmd/server
+
+      - name: Build vmsan-agent-host
+        working-directory: nftables
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -ldflags="-s -w -X main.version=v${{ steps.meta.outputs.version }}" -o vmsan-agent-host-${{ matrix.arch }} ./cmd/agent-host
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
@@ -134,4 +150,6 @@ jobs:
           files: |
             agent/vmsan-agent-${{ matrix.arch }}
             nftables/vmsan-nftables-${{ matrix.arch }}
-            gateway/vmsan-gateway-${{ matrix.arch }}
+            nftables/vmsan-gateway-${{ matrix.arch }}
+            nftables/vmsan-server-${{ matrix.arch }}
+            nftables/vmsan-agent-host-${{ matrix.arch }}

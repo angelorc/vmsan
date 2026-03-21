@@ -101,6 +101,7 @@ const main = defineCommand({
     status: () => import("../src/commands/status/status.ts").then((m) => m.default),
     down: () => import("../src/commands/down/down.ts").then((m) => m.default),
     migrate: () => import("../src/commands/migrate/migrate.ts").then((m) => m.default),
+    hosts: () => import("../src/commands/hosts/hosts.ts").then((m) => m.default),
   },
 });
 

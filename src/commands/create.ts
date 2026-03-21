@@ -17,6 +17,7 @@ import {
   parseBandwidth,
   parseConnectTo,
 } from "./create/validation.ts";
+import { ServerClient } from "../lib/server-client.ts";
 
 interface CreateCommandArgs extends CreateCommandRuntimeArgs {
   kernel?: string;
@@ -26,6 +27,7 @@ interface CreateCommandArgs extends CreateCommandRuntimeArgs {
   timeout?: string;
   silent?: boolean;
   connect?: boolean;
+  host?: string;
   "no-seccomp"?: boolean;
   "no-pid-ns"?: boolean;
   "no-cgroup"?: boolean;
@@ -54,6 +56,43 @@ const createCommand = defineCommand({
       // --from-image is incompatible with --connect (no agent installed)
       if (commandArgs["from-image"] && commandArgs.connect) {
         throw mutuallyExclusiveFlagsError("--from-image", "--connect");
+      }
+
+      // Remote host creation via server control plane
+      if (commandArgs.host) {
+        const client = ServerClient.fromEnv();
+        const host = await client.findHostByName(commandArgs.host);
+        if (!host) {
+          throw new Error(`Host "${commandArgs.host}" not found. Run "vmsan hosts list" to see available hosts.`);
+        }
+
+        const vcpus = Number(commandArgs.vcpus ?? 1);
+        const memMib = Number(commandArgs.memory ?? 128);
+        const diskSizeGb = parseDiskSizeGb(commandArgs.disk ?? "10gb");
+        const bandwidthMbit = parseBandwidth(commandArgs.bandwidth);
+        const connectTo = parseConnectTo(commandArgs["connect-to"]);
+
+        const result = await client.createVM({
+          host_id: host.id,
+          vcpus,
+          memory_mib: memMib,
+          disk_size_gb: diskSizeGb,
+          runtime: commandArgs.runtime ?? "base",
+          project: commandArgs.project || undefined,
+          network_policy: commandArgs["network-policy"] ?? "allow-all",
+          bandwidth_mbit: bandwidthMbit ?? undefined,
+          allow_icmp: commandArgs["allow-icmp"] || false,
+          snapshot_id: commandArgs.snapshot || undefined,
+          connect_to: connectTo.length > 0 ? connectTo : undefined,
+          service: commandArgs.service || undefined,
+        });
+
+        const log = createScopedLogger(result.id);
+        log.success(`VM ${result.id} created on host "${commandArgs.host}" (${host.address})`);
+
+        cmdLog.set({ vmId: result.id, host: commandArgs.host, hostId: host.id, remote: true });
+        cmdLog.emit();
+        return;
       }
 
       const vmsan = await createVmsan();

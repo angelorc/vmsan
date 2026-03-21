@@ -35,6 +35,7 @@ Create, manage, and connect to isolated [Firecracker](https://github.com/firecra
 - 🚀 **Project deployment** — define services in `vmsan.toml`, deploy with `vmsan up`
 - 🗄️ **Built-in accessories** — auto-provision postgres and redis from pre-built rootfs
 - 🔑 **Encrypted secrets** — manage secrets with `vmsan secrets set/list/unset`
+- 🌐 **Multi-host** — server/agent architecture for running VMs across hosts
 - 📊 **JSON output** — `--json` flag for scripting and automation
 
 ## 📋 Prerequisites
@@ -183,6 +184,10 @@ vmsan remove <vm-id>
 | `network`  |       | Update network policy on a running VM |
 | `logs`     |       | View VM logs (`--dns` for DNS query logs) |
 | `snapshot` |       | Manage VM snapshots (create, list, delete) |
+| `hosts`    |       | Manage remote hosts (add, list, remove)            |
+| `server`   |       | Start the control plane server                     |
+| `agent`    |       | Join a worker node to the control plane             |
+| `migrate`  |       | Migrate state from JSON to SQLite                  |
 | `doctor`   |       | Check system prerequisites and installation health |
 
 ## 🚀 Project Deployment
@@ -235,9 +240,31 @@ vmsan secrets unset DATABASE_URL
 
 Secrets are encrypted at rest and injected into service VMs at deploy time.
 
+### Multi-Host
+
+Run VMs across multiple hosts with a server/agent architecture:
+
+**On the control node (server):**
+```bash
+vmsan server                  # Start control plane on :6443
+vmsan hosts add worker-1      # Generate join command for a worker
+```
+
+**On the worker node:**
+```bash
+vmsan agent join --server http://10.88.0.1:6443 --token <TOKEN>
+```
+
+**Deploy to a specific host:**
+```bash
+sudo vmsan create --name my-vm --host worker-1 --runtime base --vcpus 2 --memory 1024
+vmsan hosts list              # Show all hosts and their VMs
+```
+
 ## ⚠️ Known Limitations
 
-- No multi-host support (planned for 0.8.0)
+- No WireGuard mesh yet — cross-host VM communication requires manual networking (0.9.0)
+- No scheduler — manual host assignment with `--host` flag (0.9.0)
 - Pre-built rootfs layers are large (~500 MB postgres, ~200 MB redis)
 - Blue-green deploys use 2x memory during transition
 - Uses `nftables` with atomic rule application for network isolation (since 0.2.0)
@@ -300,9 +327,10 @@ State is persisted in `~/.vmsan/`:
 
 ```
 ~/.vmsan/
-  vms/          VM state files (JSON)
+  state.db      SQLite state store (since 0.8.0)
+  vms/          VM state files (legacy JSON, migrated with `vmsan migrate`)
   jailer/       Chroot directories
-  bin/          Agent binary
+  bin/          Agent binary + host binaries
   kernels/      VM kernel images
   rootfs/       Base root filesystems
   registry/     Docker image rootfs cache

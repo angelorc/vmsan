@@ -107,6 +107,10 @@ export const createCommandArgs = {
     description:
       "Register VM as a service for mesh DNS (e.g. --service web → web.<project>.vmsan.internal)",
   },
+  host: {
+    type: "string",
+    description: "Target host for VM creation (requires server mode)",
+  },
   connect: {
     type: "boolean",
     default: false,
