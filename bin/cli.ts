@@ -35,7 +35,17 @@ function findPackageVersion(): string {
 
 const version = findPackageVersion();
 
-const SUDO_COMMANDS = new Set(["create", "start", "stop", "remove", "rm", "snapshot", "up"]);
+const SUDO_COMMANDS = new Set([
+  "create",
+  "start",
+  "stop",
+  "remove",
+  "rm",
+  "snapshot",
+  "up",
+  "deploy",
+  "down",
+]);
 
 const subCommand = process.argv[2];
 if (subCommand && SUDO_COMMANDS.has(subCommand) && process.getuid?.() !== 0) {
@@ -82,10 +92,14 @@ const main = defineCommand({
     network: () => import("../src/commands/network.ts").then((m) => m.default),
     snapshot: () => import("../src/commands/snapshot.ts").then((m) => m.default),
     logs: () => import("../src/commands/logs.ts").then((m) => m.default),
+    secrets: () => import("../src/commands/secrets/secrets.ts").then((m) => m.default),
     doctor: () => import("../src/commands/doctor.ts").then((m) => m.default),
     init: () => import("../src/commands/init.ts").then((m) => m.default),
     validate: () => import("../src/commands/validate.ts").then((m) => m.default),
     up: () => import("../src/commands/up/up.ts").then((m) => m.default),
+    deploy: () => import("../src/commands/deploy/deploy.ts").then((m) => m.default),
+    status: () => import("../src/commands/status/status.ts").then((m) => m.default),
+    down: () => import("../src/commands/down/down.ts").then((m) => m.default),
   },
 });
 

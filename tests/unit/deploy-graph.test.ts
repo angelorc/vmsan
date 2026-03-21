@@ -24,9 +24,7 @@ describe("buildDependencyGraph – empty & minimal", () => {
       worker: {},
       cron: {},
     });
-    expect(graph.groups).toEqual([
-      { services: ["cron", "web", "worker"], level: 0 },
-    ]);
+    expect(graph.groups).toEqual([{ services: ["cron", "web", "worker"], level: 0 }]);
     expect(graph.order).toEqual(["cron", "web", "worker"]);
   });
 });
@@ -113,14 +111,9 @@ describe("buildDependencyGraph – accessories", () => {
   });
 
   it("accessories with no dependent services still appear", () => {
-    const graph = buildDependencyGraph(
-      { web: {} },
-      { cache: { type: "redis" } },
-    );
+    const graph = buildDependencyGraph({ web: {} }, { cache: { type: "redis" } });
     // Both are level 0 since web has no deps and cache is an accessory
-    expect(graph.groups).toEqual([
-      { services: ["cache", "web"], level: 0 },
-    ]);
+    expect(graph.groups).toEqual([{ services: ["cache", "web"], level: 0 }]);
   });
 
   it("service can depend on accessory", () => {

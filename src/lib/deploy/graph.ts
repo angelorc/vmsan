@@ -29,10 +29,7 @@ const enum Color {
  * Detect cycles using DFS with three-color marking.
  * If a cycle is found, throws an error with the full cycle path.
  */
-function detectCycles(
-  nodes: Set<string>,
-  adjacency: Map<string, string[]>,
-): void {
+function detectCycles(nodes: Set<string>, adjacency: Map<string, string[]>): void {
   const color = new Map<string, Color>();
   const parent = new Map<string, string | null>();
 
@@ -70,9 +67,7 @@ function dfsVisit(
       }
       cycle.push(neighbor);
       cycle.reverse();
-      throw new Error(
-        `Circular dependency detected: ${cycle.join(" \u2192 ")}`,
-      );
+      throw new Error(`Circular dependency detected: ${cycle.join(" \u2192 ")}`);
     }
 
     if (color.get(neighbor) === Color.White) {

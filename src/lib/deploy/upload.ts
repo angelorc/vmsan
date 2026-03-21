@@ -62,7 +62,9 @@ export async function uploadSource(opts: UploadOptions): Promise<UploadResult> {
     }
 
     const durationMs = Date.now() - startTime;
-    consola.success(`Uploaded ${files.length} files (${formatBytes(totalBytes)}) in ${Math.round(durationMs / 1000)}s`);
+    consola.success(
+      `Uploaded ${files.length} files (${formatBytes(totalBytes)}) in ${Math.round(durationMs / 1000)}s`,
+    );
 
     return { filesUploaded: files.length, bytesUploaded: totalBytes, durationMs };
   } catch (err) {

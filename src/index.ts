@@ -184,6 +184,9 @@ export type { ImageReference } from "./commands/create/validation.ts";
 export { ensureSeccompFilter, compileSeccompFilter } from "./lib/seccomp.ts";
 export { resolveImageRootfs } from "./commands/create/image-rootfs.ts";
 
+// Secrets
+export { SecretsStore } from "./lib/secrets/index.ts";
+
 // Cloudflare plugin
 export { cloudflarePlugin } from "./plugins/cloudflare.ts";
 export { CloudflareService, resolveTunnelHostnames } from "./services/cloudflare.ts";

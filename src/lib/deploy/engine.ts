@@ -200,7 +200,8 @@ async function waitForHealthy(
 // ── Main deploy function ────────────────────────────────────────────────────
 
 export async function deployService(opts: DeployServiceOptions): Promise<ServiceDeployResult> {
-  const { name, config, deployConfig, project, sourceDir, vmService, env, onStatus, accessory } = opts;
+  const { name, config, deployConfig, project, sourceDir, vmService, env, onStatus, accessory } =
+    opts;
   const startTime = Date.now();
   const isAccessory = !!accessory;
 

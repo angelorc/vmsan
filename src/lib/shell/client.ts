@@ -122,9 +122,7 @@ export class ShellSession {
             `Connection lost. Could not reconnect after ${MAX_RECONNECT_ATTEMPTS} attempts.`,
           );
           if (this._sessionId) {
-            writeStatus(
-              `Resume manually with: vmsan connect <vm-id> --session ${this._sessionId}`,
-            );
+            writeStatus(`Resume manually with: vmsan connect <vm-id> --session ${this._sessionId}`);
           }
           cleanup();
           resolve({ sessionDestroyed: false });
@@ -219,10 +217,7 @@ export class ShellSession {
    * When `detailedHttpErrors` is true (first connection), HTTP upgrade
    * failures include the status code and response body in the error.
    */
-  private openWebSocket(
-    setRawMode: () => void,
-    detailedHttpErrors = false,
-  ): Promise<void> {
+  private openWebSocket(setRawMode: () => void, detailedHttpErrors = false): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const url = this.buildUrl();
       const ws = new WebSocket(url);

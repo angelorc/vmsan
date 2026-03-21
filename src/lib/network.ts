@@ -451,15 +451,19 @@ export class NetworkManager {
   }
 
   private gatewayVmStop(vmId: string): void {
-    this.getGateway().vmStop(vmId).catch((err) => {
-      consola.debug(`Gateway proxy stop: ${toError(err).message}`);
-    });
+    this.getGateway()
+      .vmStop(vmId)
+      .catch((err) => {
+        consola.debug(`Gateway proxy stop: ${toError(err).message}`);
+      });
   }
 
   private gatewayUpdatePolicy(vmId: string, policy: string, allowedDomains?: string[]): void {
-    this.getGateway().vmUpdatePolicy(vmId, policy, allowedDomains).catch((err) => {
-      consola.debug(`Gateway policy update: ${toError(err).message}`);
-    });
+    this.getGateway()
+      .vmUpdatePolicy(vmId, policy, allowedDomains)
+      .catch((err) => {
+        consola.debug(`Gateway policy update: ${toError(err).message}`);
+      });
   }
 
   async setup(): Promise<void> {

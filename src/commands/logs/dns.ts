@@ -41,11 +41,7 @@ function formatHumanLine(entry: DNSLogEntry): string {
   return `${DIM}[${time}]${RESET} ${color}${label}${RESET}  ${entry.domain} → ${result} ${latency}`;
 }
 
-function shouldInclude(
-  entry: DNSLogEntry,
-  allowedOnly: boolean,
-  deniedOnly: boolean,
-): boolean {
+function shouldInclude(entry: DNSLogEntry, allowedOnly: boolean, deniedOnly: boolean): boolean {
   if (allowedOnly && entry.policy !== "allow") return false;
   if (deniedOnly && entry.policy !== "deny") return false;
   return true;
