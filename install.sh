@@ -695,6 +695,49 @@ else
   success "vmsan-nftables ${LATEST_TAG} installed"
 fi
 
+# --- vmsan-gateway ---
+
+GATEWAY_PATH="$VMSAN_DIR/bin/vmsan-gateway"
+
+if [ "$INSTALL_MODE" = "source" ]; then
+  ensure_go
+  info "Building vmsan-gateway from source (${SOURCE_SHA})..."
+  (cd "$VMSAN_SRC/nftables" && CGO_ENABLED=0 GOOS=linux GOARCH="$(go_arch)" go build -ldflags="-s -w" -o "$GATEWAY_PATH" ./cmd/gateway)
+  chmod +x "$GATEWAY_PATH"
+  success "vmsan-gateway built from ${SOURCE_LABEL}"
+elif [ -x "$GATEWAY_PATH" ]; then
+  success "vmsan-gateway already installed"
+else
+  GATEWAY_URL="https://github.com/$VMSAN_REPO/releases/download/${LATEST_TAG}/vmsan-gateway-${ARCH}"
+  download "$GATEWAY_URL" "$GATEWAY_PATH"
+  chmod +x "$GATEWAY_PATH"
+  success "vmsan-gateway ${LATEST_TAG} installed"
+fi
+
+# --- dnsproxy ---
+
+DNSPROXY_VERSION="v0.73.3"
+DNSPROXY_PATH="$VMSAN_DIR/bin/dnsproxy"
+
+if [ -x "$DNSPROXY_PATH" ]; then
+  success "dnsproxy already installed"
+else
+  DNSPROXY_ARCH="$(go_arch)"
+  DNSPROXY_URL="https://github.com/AdguardTeam/dnsproxy/releases/download/${DNSPROXY_VERSION}/dnsproxy-linux-${DNSPROXY_ARCH}-${DNSPROXY_VERSION}.tar.gz"
+  DNSPROXY_TMP="$(mktemp -d)"
+  info "Downloading dnsproxy ${DNSPROXY_VERSION}..."
+  if ! curl -fsSL -o "$DNSPROXY_TMP/dnsproxy.tar.gz" "$DNSPROXY_URL"; then
+    rm -rf "$DNSPROXY_TMP"
+    error "Failed to download dnsproxy from $DNSPROXY_URL"
+  fi
+  tar -xzf "$DNSPROXY_TMP/dnsproxy.tar.gz" -C "$DNSPROXY_TMP"
+  # The archive contains linux-<arch>/dnsproxy
+  find "$DNSPROXY_TMP" -name "dnsproxy" -type f -exec mv {} "$DNSPROXY_PATH" \;
+  chmod +x "$DNSPROXY_PATH"
+  rm -rf "$DNSPROXY_TMP"
+  success "dnsproxy ${DNSPROXY_VERSION} installed"
+fi
+
 # --- cloudflared ---
 
 CLOUDFLARED_PATH="$VMSAN_DIR/bin/cloudflared"

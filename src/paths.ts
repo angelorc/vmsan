@@ -9,6 +9,8 @@ export interface VmsanPaths {
   binDir: string;
   agentBin: string;
   nftablesBin: string;
+  gatewayBin: string;
+  dnsproxyBin: string;
   kernelsDir: string;
   rootfsDir: string;
   registryDir: string;
@@ -50,6 +52,8 @@ export function vmsanPaths(baseDir?: string): VmsanPaths {
     binDir: join(base, "bin"),
     agentBin: join(base, "bin", "vmsan-agent"),
     nftablesBin: join(base, "bin", "vmsan-nftables"),
+    gatewayBin: join(base, "bin", "vmsan-gateway"),
+    dnsproxyBin: join(base, "bin", "dnsproxy"),
     kernelsDir: join(base, "kernels"),
     rootfsDir: join(base, "rootfs"),
     registryDir: join(base, "registry", "rootfs"),
