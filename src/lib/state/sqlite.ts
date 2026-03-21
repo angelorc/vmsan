@@ -1,4 +1,3 @@
-import Database from "better-sqlite3";
 import { dirname } from "node:path";
 import consola from "consola";
 import {
@@ -10,6 +9,25 @@ import {
 import { vmStateNotFoundError } from "../../errors/index.ts";
 import { mkdirSecure } from "../utils.ts";
 import type { HostState, SyncLogEntry } from "./types.ts";
+
+// Runtime-adaptive SQLite: use bun:sqlite under Bun, better-sqlite3 under Node.js
+interface SqliteDb {
+  exec(sql: string): void;
+  prepare(sql: string): { run(...params: unknown[]): unknown; get(...params: unknown[]): unknown; all(...params: unknown[]): unknown[] };
+  close(): void;
+}
+
+function openDatabase(dbPath: string): SqliteDb {
+  // @ts-expect-error — Bun global detection
+  if (typeof Bun !== "undefined") {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { Database } = require("bun:sqlite");
+    return new Database(dbPath) as SqliteDb;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const BetterSqlite3 = require("better-sqlite3");
+  return new BetterSqlite3(dbPath) as SqliteDb;
+}
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS vms (
@@ -67,11 +85,11 @@ CREATE INDEX IF NOT EXISTS idx_mesh_project ON mesh_allocations(project);
 `;
 
 export class SqliteVmStateStore implements VmStateStore {
-  private db: Database;
+  private db: SqliteDb;
 
   constructor(dbPath: string) {
     mkdirSecure(dirname(dbPath));
-    this.db = new Database(dbPath);
+    this.db = openDatabase(dbPath);
     this.db.exec("PRAGMA journal_mode=WAL");
     this.db.exec("PRAGMA busy_timeout=5000");
     this.initSchema();
