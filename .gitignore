@@ -9,6 +9,8 @@ dist/
 agent/vmsan-agent
 nftables/vmsan-nftables*
 nftables/vmsan-gateway*
+nftables/vmsan-agent-host*
+nftables/vmsan-server*
 
 # IDE
 .vscode/
