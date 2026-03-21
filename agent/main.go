@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/angelorc/vmsan/agent/internal/health"
 	"github.com/angelorc/vmsan/agent/shell"
 )
 
@@ -80,15 +81,18 @@ func main() {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
+	checker := health.NewChecker(logger)
+
 	mux := http.NewServeMux()
 
 	// Unauthenticated
-	mux.HandleFunc("GET /health", handleHealth)
+	mux.HandleFunc("GET /health", makeHealthHandler(checker))
 
 	// Authenticated with audit logging.
 	// Note: audit middleware is inside authMiddleware intentionally — only
 	// authenticated requests are logged. Auth failures are rejected before
 	// reaching the audit layer.
+	mux.Handle("POST /health/configure", authMiddleware(*token, auditMiddleware(logger, http.HandlerFunc(makeConfigureHealthHandler(checker)))))
 	mux.Handle("POST /exec", authMiddleware(*token, auditMiddleware(logger, http.HandlerFunc(makeRunHandler(logger, defaultUser)))))
 	mux.Handle("POST /exec/{id}/kill", authMiddleware(*token, auditMiddleware(logger, http.HandlerFunc(handleKill))))
 	mux.Handle("POST /files/write", authMiddleware(*token, auditMiddleware(logger, http.HandlerFunc(makeFilesWriteHandler(logger)))))
