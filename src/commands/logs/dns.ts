@@ -93,7 +93,12 @@ async function tailFile(
   let offset = startOffset;
 
   return new Promise((_resolve, _reject) => {
+    let reading = false;
+
     const onChange = () => {
+      if (reading) return; // Prevent concurrent reads
+      reading = true;
+
       const stream = createReadStream(filePath, {
         encoding: "utf-8",
         start: offset,
@@ -114,6 +119,11 @@ async function tailFile(
         } catch {
           // Skip malformed lines
         }
+      });
+
+      rl.on("close", () => {
+        stream.destroy();
+        reading = false;
       });
     };
 

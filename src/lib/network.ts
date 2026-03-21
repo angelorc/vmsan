@@ -143,35 +143,34 @@ function effectivePolicy(config: NetworkConfig): string {
 export class NetworkManager {
   config: NetworkConfig;
 
-  constructor(
+  constructor(config: NetworkConfig) {
+    this.config = config;
+  }
+
+  /** Create a NetworkManager from a slot and policy options. */
+  static fromSlot(
     slot: number,
-    networkPolicy: string,
-    allowedDomains: string[],
-    allowedCidrs: string[],
-    deniedCidrs: string[],
-    publishedPorts: number[],
-    bandwidthMbit?: number,
-    netnsName?: string,
-    skipDnat?: boolean,
-    allowIcmp?: boolean,
-  ) {
-    this.config = {
+    opts: {
+      networkPolicy: string;
+      allowedDomains: string[];
+      allowedCidrs: string[];
+      deniedCidrs: string[];
+      publishedPorts: number[];
+      bandwidthMbit?: number;
+      netnsName?: string;
+      skipDnat?: boolean;
+      allowIcmp?: boolean;
+    },
+  ): NetworkManager {
+    return new NetworkManager({
       slot,
       tapDevice: `fhvm${slot}`,
       hostIp: vmHostIp(slot),
       guestIp: vmGuestIp(slot),
       subnetMask: VM_SUBNET_MASK,
       macAddress: `AA:FC:00:00:00:${(slot + 1).toString(16).padStart(2, "0").toUpperCase()}`,
-      networkPolicy,
-      allowedDomains,
-      allowedCidrs,
-      deniedCidrs,
-      publishedPorts,
-      bandwidthMbit,
-      netnsName,
-      skipDnat,
-      allowIcmp,
-    };
+      ...opts,
+    });
   }
 
   static bootArgs(config: Pick<NetworkConfig, "guestIp" | "hostIp" | "subnetMask">): string {
@@ -179,9 +178,7 @@ export class NetworkManager {
   }
 
   static fromConfig(config: NetworkConfig): NetworkManager {
-    const mgr = Object.create(NetworkManager.prototype) as NetworkManager;
-    mgr.config = config;
-    return mgr;
+    return new NetworkManager(config);
   }
 
   static fromVmNetwork(network: VmNetwork): NetworkManager {
@@ -432,10 +429,17 @@ export class NetworkManager {
   // Gateway proxy helpers (non-fatal — proxies enhance security but are optional)
   // ---------------------------------------------------------------------------
 
+  private _gateway: GatewayClient | null = null;
+  private getGateway(): GatewayClient {
+    if (!this._gateway) {
+      this._gateway = new GatewayClient();
+    }
+    return this._gateway;
+  }
+
   private async gatewayVmStart(vmId: string, slot: number, policy: string): Promise<void> {
     try {
-      const gateway = new GatewayClient();
-      await gateway.vmStart({
+      await this.getGateway().vmStart({
         vmId,
         slot,
         policy,
@@ -447,15 +451,13 @@ export class NetworkManager {
   }
 
   private gatewayVmStop(vmId: string): void {
-    const gateway = new GatewayClient();
-    gateway.vmStop(vmId).catch((err) => {
+    this.getGateway().vmStop(vmId).catch((err) => {
       consola.debug(`Gateway proxy stop: ${toError(err).message}`);
     });
   }
 
   private gatewayUpdatePolicy(vmId: string, policy: string, allowedDomains?: string[]): void {
-    const gateway = new GatewayClient();
-    gateway.vmUpdatePolicy(vmId, policy, allowedDomains).catch((err) => {
+    this.getGateway().vmUpdatePolicy(vmId, policy, allowedDomains).catch((err) => {
       consola.debug(`Gateway policy update: ${toError(err).message}`);
     });
   }

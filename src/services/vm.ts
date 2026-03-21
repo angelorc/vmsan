@@ -207,18 +207,17 @@ export class VMService {
       const { net } = slotLock.run(() => {
         const slot = this.store.allocateNetworkSlot();
         logger.debug(`Network slot allocated: ${slot}`);
-        const net = new NetworkManager(
-          slot,
+        const net = NetworkManager.fromSlot(slot, {
           networkPolicy,
-          domains,
+          allowedDomains: domains,
           allowedCidrs,
           deniedCidrs,
-          ports,
+          publishedPorts: ports,
           bandwidthMbit,
           netnsName,
-          opts.skipDnat,
-          opts.allowIcmp,
-        );
+          skipDnat: opts.skipDnat,
+          allowIcmp: opts.allowIcmp,
+        });
         networkConfig = net.config;
 
         const state = buildInitialVmState({

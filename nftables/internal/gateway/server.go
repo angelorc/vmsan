@@ -15,6 +15,10 @@ import (
 	"sync"
 )
 
+// Version is reported by the ping handler. Set at build time via ldflags or
+// bump manually with each release.
+var Version = "0.4.0"
+
 // Config holds the server configuration.
 type Config struct {
 	SocketPath string
@@ -192,7 +196,7 @@ func (s *Server) dispatch(ctx context.Context, req *Request) Response {
 func (s *Server) handlePing() Response {
 	return Response{
 		OK:      true,
-		Version: "0.4.0",
+		Version: Version,
 		VMs:     len(s.manager.ListVMs()),
 	}
 }

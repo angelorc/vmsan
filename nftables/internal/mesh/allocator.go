@@ -19,11 +19,12 @@ const maxVMIndex = 253
 
 // Allocator manages mesh IP assignments per project.
 type Allocator struct {
-	mu          sync.RWMutex
-	assignments map[string]*ProjectAllocation // projectName -> allocation
-	vmIndex     map[string]string             // vmId -> projectName (reverse lookup)
-	cidr        string
-	nextProject int // next project index to assign
+	mu           sync.RWMutex
+	assignments  map[string]*ProjectAllocation // projectName -> allocation
+	vmIndex      map[string]string             // vmId -> projectName (reverse lookup)
+	serviceIndex map[string]map[string]string  // project -> (service -> vmId) for O(1) lookup
+	cidr         string
+	nextProject  int // next project index to assign
 }
 
 // ProjectAllocation tracks mesh IP assignments for a single project.
@@ -49,9 +50,10 @@ func NewAllocator(cidr string) *Allocator {
 		cidr = MeshCIDR
 	}
 	return &Allocator{
-		assignments: make(map[string]*ProjectAllocation),
-		vmIndex:     make(map[string]string),
-		cidr:        cidr,
+		assignments:  make(map[string]*ProjectAllocation),
+		vmIndex:      make(map[string]string),
+		serviceIndex: make(map[string]map[string]string),
+		cidr:         cidr,
 	}
 }
 
@@ -102,6 +104,14 @@ func (a *Allocator) Allocate(project string, vmId string, service string) (MeshI
 	pa.VMs[vmId] = assignment
 	a.vmIndex[vmId] = project
 
+	// Maintain service index for O(1) lookup.
+	if service != "" {
+		if a.serviceIndex[project] == nil {
+			a.serviceIndex[project] = make(map[string]string)
+		}
+		a.serviceIndex[project][service] = vmId
+	}
+
 	return assignment, nil
 }
 
@@ -118,6 +128,12 @@ func (a *Allocator) Release(vmId string) error {
 	pa := a.assignments[project]
 	if assignment, ok := pa.VMs[vmId]; ok {
 		pa.freeVMs = append(pa.freeVMs, assignment.VMIndex)
+		// Remove from service index.
+		if assignment.Service != "" {
+			if svcMap, exists := a.serviceIndex[project]; exists {
+				delete(svcMap, assignment.Service)
+			}
+		}
 	}
 	delete(pa.VMs, vmId)
 	delete(a.vmIndex, vmId)
@@ -141,22 +157,24 @@ func (a *Allocator) GetByVMId(vmId string) (MeshIPAssignment, bool) {
 }
 
 // GetByService returns the mesh IP assignment for a service within a project.
+// Uses an O(1) index lookup instead of iterating all VMs.
 func (a *Allocator) GetByService(project string, service string) (MeshIPAssignment, bool) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
-	pa, ok := a.assignments[project]
+	svcMap, ok := a.serviceIndex[project]
 	if !ok {
 		return MeshIPAssignment{}, false
 	}
 
-	for _, assignment := range pa.VMs {
-		if assignment.Service == service {
-			return assignment, true
-		}
+	vmId, ok := svcMap[service]
+	if !ok {
+		return MeshIPAssignment{}, false
 	}
 
-	return MeshIPAssignment{}, false
+	pa := a.assignments[project]
+	assignment, found := pa.VMs[vmId]
+	return assignment, found
 }
 
 // ListByProject returns all mesh IP assignments for a project.
