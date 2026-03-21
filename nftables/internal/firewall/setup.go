@@ -114,12 +114,12 @@ func setupVMTable(ctx context.Context, opts *types.SetupOptions) error {
 		return err
 	}
 
-	// 3-6. Security rules (all policies)
+	// 3-6. Security rules with logging (all policies)
 	if !opts.AllowICMP {
-		fwd.MatchProtoVerdict(unix.IPPROTO_ICMP, expr.VerdictDrop)
+		fwd.LogDropProto("vmsan-deny-icmp: ", unix.IPPROTO_ICMP)
 	}
-	fwd.MatchProtoVerdict(unix.IPPROTO_UDP, expr.VerdictDrop)
-	fwd.MatchDstPort(unix.IPPROTO_TCP, 853, expr.VerdictDrop)
+	fwd.LogDropProto("vmsan-deny-udp: ", unix.IPPROTO_UDP)
+	fwd.LogDropDstPort("vmsan-deny-dot: ", unix.IPPROTO_TCP, 853)
 	if err := fwd.DoHDropRules(); err != nil {
 		return err
 	}

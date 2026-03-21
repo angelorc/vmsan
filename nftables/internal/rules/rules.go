@@ -178,16 +178,54 @@ func (b *Builder) HTTPDNAT(dstIP net.IP, dstPort uint16) {
 	b.DNAT(unix.IPPROTO_TCP, 80, dstIP, dstPort)
 }
 
+// LogAndDrop adds a log rule followed by a drop rule. The log prefix
+// identifies the reason for the drop (visible in kern.log / journalctl).
+func (b *Builder) LogAndDrop(prefix string, matchExprs []expr.Any) {
+	// Log rule: match expressions + log action (no verdict — continues to next rule).
+	logExprs := make([]expr.Any, len(matchExprs), len(matchExprs)+1)
+	copy(logExprs, matchExprs)
+	logExprs = append(logExprs, logExpr(prefix))
+	b.add(logExprs)
+
+	// Drop rule: same match expressions + drop verdict.
+	dropExprs := make([]expr.Any, len(matchExprs), len(matchExprs)+1)
+	copy(dropExprs, matchExprs)
+	dropExprs = append(dropExprs, verdict(expr.VerdictDrop))
+	b.add(dropExprs)
+}
+
+// LogDropProto adds a log+drop rule pair matching an IP protocol.
+func (b *Builder) LogDropProto(prefix string, proto byte) {
+	b.LogAndDrop(prefix, matchIPv4Proto(proto))
+}
+
+// LogDropDstPort adds a log+drop rule pair matching a destination port.
+func (b *Builder) LogDropDstPort(prefix string, proto byte, port uint16) {
+	exprs := make([]expr.Any, 0, 4)
+	exprs = append(exprs, matchL4Proto(proto)...)
+	exprs = append(exprs, matchDstPort(port)...)
+	b.LogAndDrop(prefix, exprs)
+}
+
+// LogDropDstIPPort adds a log+drop rule pair matching destination IP + port.
+func (b *Builder) LogDropDstIPPort(prefix string, ip net.IP, proto byte, port uint16) {
+	exprs := make([]expr.Any, 0, 6)
+	exprs = append(exprs, matchDstIP(ip)...)
+	exprs = append(exprs, matchL4Proto(proto)...)
+	exprs = append(exprs, matchDstPort(port)...)
+	b.LogAndDrop(prefix, exprs)
+}
+
 // --- Composite helpers ---
 
-// DoHDropRules blocks TCP 443 to well-known DoH resolver IPs.
+// DoHDropRules blocks TCP 443 to well-known DoH resolver IPs with logging.
 func (b *Builder) DoHDropRules() error {
 	for _, ipStr := range DoHResolverIPs {
 		ip, err := ParseIPv4(ipStr)
 		if err != nil {
 			return fmt.Errorf("invalid DoH resolver IP %q: %w", ipStr, err)
 		}
-		b.MatchDstIPPort(ip, unix.IPPROTO_TCP, 443, expr.VerdictDrop)
+		b.LogDropDstIPPort("vmsan-deny-doh: ", ip, unix.IPPROTO_TCP, 443)
 	}
 	return nil
 }
@@ -376,6 +414,15 @@ func dnatExprs(proto byte, srcPort uint16, dstIP net.IP, dstPort uint16) []expr.
 		},
 	)
 	return exprs
+}
+
+// logExpr returns a log expression with the given prefix.
+func logExpr(prefix string) expr.Any {
+	return &expr.Log{
+		Key:  (1 << unix.NFTA_LOG_PREFIX) | (1 << unix.NFTA_LOG_LEVEL),
+		Data: []byte(prefix),
+		Level: expr.LogLevelWarning,
+	}
 }
 
 // --- Byte encoding helpers ---

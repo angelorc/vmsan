@@ -32,6 +32,8 @@ const fakePaths: VmsanPaths = {
   binDir: "/fake/.vmsan/bin",
   agentBin: "/fake/.vmsan/bin/vmsan-agent",
   nftablesBin: "/fake/.vmsan/bin/vmsan-nftables",
+  gatewayBin: "/fake/.vmsan/bin/vmsan-gateway",
+  dnsproxyBin: "/fake/.vmsan/bin/dnsproxy",
   kernelsDir: "/fake/.vmsan/kernels",
   rootfsDir: "/fake/.vmsan/rootfs",
   registryDir: "/fake/.vmsan/registry/rootfs",
@@ -85,13 +87,17 @@ describe("runDoctorChecks", () => {
       throw new Error("Command failed");
     });
 
-    // existsSync: firecracker, jailer, agent, vmsan-nftables, rootfs all exist
+    // existsSync: all binaries exist, no PID file
     vi.mocked(existsSync).mockImplementation((p) => {
       const path = String(p);
+      // PID file check must come before vmsan-gateway (substring match)
+      if (path === "/run/vmsan-gateway.pid") return false;
       if (path.includes("firecracker")) return true;
       if (path.includes("jailer")) return true;
       if (path.includes("vmsan-nftables")) return true;
       if (path.includes("vmsan-agent")) return true;
+      if (path.includes("vmsan-gateway")) return true;
+      if (path.includes("dnsproxy")) return true;
       if (path.includes("kernels")) return true;
       if (path.includes("ubuntu-24.04.ext4")) return true;
       return false;
@@ -107,14 +113,14 @@ describe("runDoctorChecks", () => {
     setupAllPassing();
     const checks = runDoctorChecks(fakePaths);
 
-    expect(checks).toHaveLength(13);
+    expect(checks).toHaveLength(16);
     expect(checks.every((c) => c.status === "pass")).toBe(true);
 
     const summary = {
       passed: checks.filter((c) => c.status === "pass").length,
       failed: checks.filter((c) => c.status === "fail").length,
     };
-    expect(summary).toEqual({ passed: 13, failed: 0 });
+    expect(summary).toEqual({ passed: 16, failed: 0 });
   });
 
   test("KVM check fails when /dev/kvm is not accessible", () => {
@@ -169,6 +175,8 @@ describe("runDoctorChecks", () => {
       if (path.includes("jailer")) return true;
       if (path.includes("vmsan-nftables")) return true;
       if (path.includes("vmsan-agent")) return true;
+      if (path.includes("vmsan-gateway")) return true;
+      if (path.includes("dnsproxy")) return true;
       if (path.includes("kernels")) return true;
       if (path.includes("ubuntu-24.04.ext4")) return true;
       return false;
@@ -188,6 +196,8 @@ describe("runDoctorChecks", () => {
       if (path.includes("jailer")) return false;
       if (path.includes("vmsan-nftables")) return true;
       if (path.includes("vmsan-agent")) return true;
+      if (path.includes("vmsan-gateway")) return true;
+      if (path.includes("dnsproxy")) return true;
       if (path.includes("kernels")) return true;
       if (path.includes("ubuntu-24.04.ext4")) return true;
       return false;
@@ -207,6 +217,8 @@ describe("runDoctorChecks", () => {
       if (path.includes("jailer")) return true;
       if (path.includes("vmsan-nftables")) return true;
       if (path.includes("vmsan-agent")) return false;
+      if (path.includes("vmsan-gateway")) return true;
+      if (path.includes("dnsproxy")) return true;
       if (path.includes("kernels")) return true;
       if (path.includes("ubuntu-24.04.ext4")) return true;
       return false;
@@ -237,6 +249,8 @@ describe("runDoctorChecks", () => {
       if (path.includes("jailer")) return true;
       if (path.includes("vmsan-nftables")) return true;
       if (path.includes("vmsan-agent")) return true;
+      if (path.includes("vmsan-gateway")) return true;
+      if (path.includes("dnsproxy")) return true;
       if (path.includes("kernels")) return true;
       return false;
     });
@@ -263,15 +277,16 @@ describe("runDoctorChecks", () => {
 
     const checks = runDoctorChecks(fakePaths);
 
-    // All 13 checks should still run
-    expect(checks).toHaveLength(13);
+    // All 16 checks should still run
+    expect(checks).toHaveLength(16);
     // Host firewall passes (exec throws = no ufw/firewalld active)
-    // Jailer filesystem passes (readFileSync returns undefined, caught → "Check skipped")
+    // Jailer filesystem passes (readFileSync returns undefined, caught -> "Check skipped")
+    // Gateway process passes (PID file not found = no active VMs)
     const summary = {
       passed: checks.filter((c) => c.status === "pass").length,
       failed: checks.filter((c) => c.status === "fail").length,
     };
-    expect(summary).toEqual({ passed: 2, failed: 11 });
+    expect(summary).toEqual({ passed: 3, failed: 13 });
   });
 
   test("summary counts are correct with mixed results", () => {
@@ -289,10 +304,10 @@ describe("runDoctorChecks", () => {
     const passed = checks.filter((c) => c.status === "pass").length;
     const failed = checks.filter((c) => c.status === "fail").length;
 
-    // accessSync throws → KVM + TUN fail; statfsSync low → Disk fails
-    expect(passed).toBe(10);
+    // accessSync throws -> KVM + TUN fail; statfsSync low -> Disk fails
+    expect(passed).toBe(13);
     expect(failed).toBe(3);
-    expect(passed + failed).toBe(13);
+    expect(passed + failed).toBe(16);
   });
 
   test("checks are categorized correctly", () => {
@@ -301,10 +316,12 @@ describe("runDoctorChecks", () => {
 
     const systemChecks = checks.filter((c) => c.category === "System");
     const binaryChecks = checks.filter((c) => c.category === "Binaries");
+    const serviceChecks = checks.filter((c) => c.category === "Services");
     const imageChecks = checks.filter((c) => c.category === "Images");
 
     expect(systemChecks).toHaveLength(7);
-    expect(binaryChecks).toHaveLength(4);
+    expect(binaryChecks).toHaveLength(6);
+    expect(serviceChecks).toHaveLength(1);
     expect(imageChecks).toHaveLength(2);
   });
 
@@ -350,6 +367,8 @@ describe("runDoctorChecks", () => {
       if (path.includes("firecracker")) return true;
       if (path.includes("jailer")) return true;
       if (path.includes("vmsan-agent")) return true;
+      if (path.includes("vmsan-gateway")) return true;
+      if (path.includes("dnsproxy")) return true;
       if (path.includes("kernels")) return true;
       if (path.includes("ubuntu-24.04.ext4")) return true;
       return false;
@@ -497,7 +516,7 @@ describe("runDoctorChecks", () => {
       return "" as unknown as ReturnType<typeof readFileSync>;
     });
 
-    // fakePaths.jailerBaseDir = /fake/.vmsan/jailer — doesn't start with /home
+    // fakePaths.jailerBaseDir = /fake/.vmsan/jailer -- doesn't start with /home
     // so it matches / (no nodev). Let's use a paths object where jailer is under /home
     const homePaths = { ...fakePaths, jailerBaseDir: "/home/user/.vmsan/jailer" };
     const checks = runDoctorChecks(homePaths);
@@ -516,7 +535,7 @@ describe("runDoctorChecks", () => {
 
   test("jailer filesystem check does not match sibling prefix mountpoints", () => {
     setupAllPassing();
-    // /home has nodev but /home2 does not — jailer is under /home2
+    // /home has nodev but /home2 does not -- jailer is under /home2
     vi.mocked(readFileSync).mockImplementation((p) => {
       if (String(p) === "/proc/mounts") {
         return "/dev/sda1 / ext4 rw,relatime 0 0\n/dev/sda2 /home ext4 rw,nodev,nosuid 0 0\n/dev/sda3 /home2 ext4 rw,relatime 0 0\n" as unknown as ReturnType<
@@ -531,5 +550,146 @@ describe("runDoctorChecks", () => {
     const fsCheck = checks.find((c) => c.name === "Jailer filesystem")!;
     expect(fsCheck.status).toBe("pass");
     expect(fsCheck.detail).toBe("/home2");
+  });
+
+  // ---------- vmsan-gateway binary check ----------
+
+  test("vmsan-gateway check fails when binary missing", () => {
+    setupAllPassing();
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path.includes("vmsan-gateway")) return false;
+      if (path.includes("firecracker")) return true;
+      if (path.includes("jailer")) return true;
+      if (path.includes("vmsan-nftables")) return true;
+      if (path.includes("vmsan-agent")) return true;
+      if (path.includes("dnsproxy")) return true;
+      if (path.includes("kernels")) return true;
+      if (path.includes("ubuntu-24.04.ext4")) return true;
+      return false;
+    });
+
+    const checks = runDoctorChecks(fakePaths);
+    const gwCheck = checks.find((c) => c.name === "vmsan-gateway")!;
+    expect(gwCheck.status).toBe("fail");
+    expect(gwCheck.detail).toBe("Not found");
+    expect(gwCheck.fix).toContain("install");
+  });
+
+  test("vmsan-gateway check passes when binary exists", () => {
+    setupAllPassing();
+    const checks = runDoctorChecks(fakePaths);
+    const gwCheck = checks.find((c) => c.name === "vmsan-gateway")!;
+    expect(gwCheck.status).toBe("pass");
+    expect(gwCheck.detail).toBe("Found");
+  });
+
+  // ---------- dnsproxy binary check ----------
+
+  test("dnsproxy check fails when binary missing", () => {
+    setupAllPassing();
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path.includes("dnsproxy")) return false;
+      if (path.includes("firecracker")) return true;
+      if (path.includes("jailer")) return true;
+      if (path.includes("vmsan-nftables")) return true;
+      if (path.includes("vmsan-agent")) return true;
+      if (path.includes("vmsan-gateway")) return true;
+      if (path.includes("kernels")) return true;
+      if (path.includes("ubuntu-24.04.ext4")) return true;
+      return false;
+    });
+
+    const checks = runDoctorChecks(fakePaths);
+    const dnsCheck = checks.find((c) => c.name === "dnsproxy")!;
+    expect(dnsCheck.status).toBe("fail");
+    expect(dnsCheck.detail).toBe("Not found");
+    expect(dnsCheck.fix).toContain("install");
+  });
+
+  test("dnsproxy check passes when binary exists", () => {
+    setupAllPassing();
+    const checks = runDoctorChecks(fakePaths);
+    const dnsCheck = checks.find((c) => c.name === "dnsproxy")!;
+    expect(dnsCheck.status).toBe("pass");
+    expect(dnsCheck.detail).toBe("Found");
+  });
+
+  // ---------- vmsan-gateway process check ----------
+
+  test("gateway process check passes when no PID file (no active VMs)", () => {
+    setupAllPassing();
+    const checks = runDoctorChecks(fakePaths);
+    const gwProcCheck = checks.find((c) => c.name === "vmsan-gateway process")!;
+    expect(gwProcCheck.status).toBe("pass");
+    expect(gwProcCheck.detail).toBe("Not running (no active VMs)");
+  });
+
+  test("gateway process check passes when PID file exists and process running", () => {
+    setupAllPassing();
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === "/run/vmsan-gateway.pid") return true;
+      if (path === "/proc/12345") return true;
+      if (path.includes("firecracker")) return true;
+      if (path.includes("jailer")) return true;
+      if (path.includes("vmsan-nftables")) return true;
+      if (path.includes("vmsan-agent")) return true;
+      if (path.includes("vmsan-gateway")) return true;
+      if (path.includes("dnsproxy")) return true;
+      if (path.includes("kernels")) return true;
+      if (path.includes("ubuntu-24.04.ext4")) return true;
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === "/run/vmsan-gateway.pid") {
+        return "12345\n" as unknown as ReturnType<typeof readFileSync>;
+      }
+      if (path === "/proc/mounts") {
+        return "/dev/sda1 / ext4 rw,relatime 0 0\n" as unknown as ReturnType<typeof readFileSync>;
+      }
+      return "" as unknown as ReturnType<typeof readFileSync>;
+    });
+
+    const checks = runDoctorChecks(fakePaths);
+    const gwProcCheck = checks.find((c) => c.name === "vmsan-gateway process")!;
+    expect(gwProcCheck.status).toBe("pass");
+    expect(gwProcCheck.detail).toBe("Running (PID 12345)");
+  });
+
+  test("gateway process check fails when PID file exists but process not running", () => {
+    setupAllPassing();
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === "/run/vmsan-gateway.pid") return true;
+      if (path === "/proc/99999") return false;
+      if (path.includes("firecracker")) return true;
+      if (path.includes("jailer")) return true;
+      if (path.includes("vmsan-nftables")) return true;
+      if (path.includes("vmsan-agent")) return true;
+      if (path.includes("vmsan-gateway")) return true;
+      if (path.includes("dnsproxy")) return true;
+      if (path.includes("kernels")) return true;
+      if (path.includes("ubuntu-24.04.ext4")) return true;
+      return false;
+    });
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === "/run/vmsan-gateway.pid") {
+        return "99999\n" as unknown as ReturnType<typeof readFileSync>;
+      }
+      if (path === "/proc/mounts") {
+        return "/dev/sda1 / ext4 rw,relatime 0 0\n" as unknown as ReturnType<typeof readFileSync>;
+      }
+      return "" as unknown as ReturnType<typeof readFileSync>;
+    });
+
+    const checks = runDoctorChecks(fakePaths);
+    const gwProcCheck = checks.find((c) => c.name === "vmsan-gateway process")!;
+    expect(gwProcCheck.status).toBe("fail");
+    expect(gwProcCheck.detail).toContain("Stale PID");
+    expect(gwProcCheck.fix).toContain("rm");
   });
 });

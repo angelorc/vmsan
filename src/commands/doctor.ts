@@ -316,6 +316,70 @@ function checkRootfs(rootfsDir: string): CheckResult {
   };
 }
 
+function checkGatewayBinary(gatewayBin: string): CheckResult {
+  if (!existsSync(gatewayBin)) {
+    return {
+      category: "Binaries",
+      name: "vmsan-gateway",
+      status: "fail",
+      detail: "Not found",
+      fix: 'Run "curl -fsSL https://vmsan.dev/install | bash" to install.',
+    };
+  }
+  return { category: "Binaries", name: "vmsan-gateway", status: "pass", detail: "Found" };
+}
+
+function checkDnsproxyBinary(dnsproxyBin: string): CheckResult {
+  if (!existsSync(dnsproxyBin)) {
+    return {
+      category: "Binaries",
+      name: "dnsproxy",
+      status: "fail",
+      detail: "Not found",
+      fix: 'Run "curl -fsSL https://vmsan.dev/install | bash" to install.',
+    };
+  }
+  return { category: "Binaries", name: "dnsproxy", status: "pass", detail: "Found" };
+}
+
+function checkGatewayProcess(): CheckResult {
+  const pidFile = "/run/vmsan-gateway.pid";
+  if (!existsSync(pidFile)) {
+    return {
+      category: "Services",
+      name: "vmsan-gateway process",
+      status: "pass",
+      detail: "Not running (no active VMs)",
+    };
+  }
+  try {
+    const pid = readFileSync(pidFile, "utf-8").trim();
+    const procPath = `/proc/${pid}`;
+    if (existsSync(procPath)) {
+      return {
+        category: "Services",
+        name: "vmsan-gateway process",
+        status: "pass",
+        detail: `Running (PID ${pid})`,
+      };
+    }
+    return {
+      category: "Services",
+      name: "vmsan-gateway process",
+      status: "fail",
+      detail: `Stale PID file (PID ${pid} not running)`,
+      fix: `Remove stale PID file: sudo rm ${pidFile}`,
+    };
+  } catch {
+    return {
+      category: "Services",
+      name: "vmsan-gateway process",
+      status: "pass",
+      detail: "Check skipped",
+    };
+  }
+}
+
 export function runDoctorChecks(paths?: VmsanPaths): CheckResult[] {
   const p = paths ?? vmsanPaths();
   return [
@@ -330,6 +394,9 @@ export function runDoctorChecks(paths?: VmsanPaths): CheckResult[] {
     checkJailer(p.binDir),
     checkAgent(p.agentBin),
     checkNftablesBinary(p.nftablesBin),
+    checkGatewayBinary(p.gatewayBin),
+    checkDnsproxyBinary(p.dnsproxyBin),
+    checkGatewayProcess(),
     checkKernel(p.kernelsDir),
     checkRootfs(p.rootfsDir),
   ];
