@@ -23,8 +23,9 @@ type Config struct {
 
 // Server is the vmsan-gateway Unix socket server.
 type Server struct {
-	config  Config
-	manager *Manager
+	config     Config
+	manager    *Manager
+	cancelFunc context.CancelFunc // set by Run(), used by shutdown handler
 }
 
 // Request is the JSON-RPC request envelope.
@@ -46,9 +47,13 @@ type Response struct {
 
 // vmStartParams holds the parameters for vm.start.
 type vmStartParams struct {
-	VMId   string `json:"vmId"`
-	Slot   int    `json:"slot"`
-	Policy string `json:"policy"`
+	VMId           string   `json:"vmId"`
+	Slot           int      `json:"slot"`
+	Policy         string   `json:"policy"`
+	AllowedDomains []string `json:"allowedDomains,omitempty"`
+	Project        string   `json:"project,omitempty"`
+	Service        string   `json:"service,omitempty"`
+	ConnectTo      []string `json:"connectTo,omitempty"`
 }
 
 // vmStopParams holds the parameters for vm.stop.
@@ -80,6 +85,11 @@ func NewServer(cfg Config) (*Server, error) {
 // It removes stale socket and PID files on startup, writes the PID file,
 // and cleans up on shutdown.
 func (s *Server) Run(ctx context.Context) error {
+	// Wrap context so shutdown handler can cancel it.
+	ctx, cancel := context.WithCancel(ctx)
+	s.cancelFunc = cancel
+	defer cancel()
+
 	// Remove stale socket file.
 	if err := removeIfExists(s.config.SocketPath); err != nil {
 		return fmt.Errorf("remove stale socket: %w", err)
@@ -196,7 +206,7 @@ func (s *Server) handleVMStart(params json.RawMessage) Response {
 		return Response{OK: false, Error: "vmId is required", Code: "VALIDATION_ERROR"}
 	}
 	if p.Policy == "" {
-		p.Policy = "block"
+		p.Policy = "deny-all"
 	}
 
 	state, err := s.manager.StartVM(p.VMId, p.Slot, p.Policy)
@@ -246,6 +256,9 @@ func (s *Server) handleStatus() Response {
 
 func (s *Server) handleShutdown(_ context.Context) Response {
 	s.manager.StopAll()
+	if s.cancelFunc != nil {
+		s.cancelFunc()
+	}
 	return Response{OK: true}
 }
 

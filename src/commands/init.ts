@@ -75,7 +75,7 @@ const initCommand = defineCommand({
     const dirName = basename(cwd);
 
     if (detected) {
-      consola.info(`Detected: ${detected.label}`);
+      consola.info(`Detected: ${detected.reason}`);
       if (detected.build) consola.info(`  Build: ${detected.build}`);
       if (detected.start) consola.info(`  Start: ${detected.start}`);
       consola.log("");

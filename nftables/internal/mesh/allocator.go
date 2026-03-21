@@ -31,6 +31,7 @@ type ProjectAllocation struct {
 	ProjectIndex int
 	VMs          map[string]MeshIPAssignment // vmId -> assignment
 	nextVM       int                         // next VM index to assign
+	freeVMs      []int                       // recycled VM indices
 }
 
 // MeshIPAssignment represents a single VM's mesh IP assignment.
@@ -74,12 +75,18 @@ func (a *Allocator) Allocate(project string, vmId string, service string) (MeshI
 		return MeshIPAssignment{}, err
 	}
 
-	// Assign next VM index
-	vmIdx := pa.nextVM
-	if vmIdx > maxVMIndex {
-		return MeshIPAssignment{}, fmt.Errorf("project %q has reached maximum VM count (%d)", project, maxVMIndex+1)
+	// Assign VM index — reuse freed indices first, then bump counter.
+	var vmIdx int
+	if len(pa.freeVMs) > 0 {
+		vmIdx = pa.freeVMs[len(pa.freeVMs)-1]
+		pa.freeVMs = pa.freeVMs[:len(pa.freeVMs)-1]
+	} else {
+		vmIdx = pa.nextVM
+		if vmIdx > maxVMIndex {
+			return MeshIPAssignment{}, fmt.Errorf("project %q has reached maximum VM count (%d)", project, maxVMIndex+1)
+		}
+		pa.nextVM++
 	}
-	pa.nextVM++
 
 	// Build mesh IP: 10.90.{projectIndex}.{vmIndex+1}
 	meshIP := fmt.Sprintf("10.90.%d.%d", pa.ProjectIndex, vmIdx+1)
@@ -109,6 +116,9 @@ func (a *Allocator) Release(vmId string) error {
 	}
 
 	pa := a.assignments[project]
+	if assignment, ok := pa.VMs[vmId]; ok {
+		pa.freeVMs = append(pa.freeVMs, assignment.VMIndex)
+	}
 	delete(pa.VMs, vmId)
 	delete(a.vmIndex, vmId)
 

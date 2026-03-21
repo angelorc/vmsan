@@ -104,17 +104,23 @@ func (f *MeshFirewall) RemoveVM(meshIP string) error {
 		return fmt.Errorf("list mesh ACL set: %w: %s", err, out)
 	}
 
-	// Parse and find entries matching this IP.
+	// Parse and find entries matching this IP by exact field comparison.
+	// Lines look like: "10.90.0.1 . 10.90.0.2 . tcp . 5432,"
 	var toRemove []string
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
-		if !strings.Contains(line, meshIP) {
+		line = strings.TrimSuffix(line, ",")
+		if !strings.Contains(line, " . ") {
 			continue
 		}
-		// Lines look like: "10.90.0.1 . 10.90.0.2 . tcp . 5432,"
-		// or "10.90.0.1 . 10.90.0.2 . tcp . 5432"
-		line = strings.TrimSuffix(line, ",")
-		if strings.Contains(line, " . ") {
+		// Split into fields and match exact IPs (src or dst).
+		fields := strings.Split(line, " . ")
+		if len(fields) < 2 {
+			continue
+		}
+		srcIP := strings.TrimSpace(fields[0])
+		dstIP := strings.TrimSpace(fields[1])
+		if srcIP == meshIP || dstIP == meshIP {
 			toRemove = append(toRemove, line)
 		}
 	}
@@ -151,9 +157,11 @@ func (f *MeshFirewall) applyRuleset(ruleset string) error {
 	return nil
 }
 
-// nftCmd runs a single nft command.
+// nftCmd runs a single nft command. The command string is split into
+// separate arguments since exec.Command does not invoke a shell.
 func (f *MeshFirewall) nftCmd(command string) error {
-	out, err := exec.Command("nft", command).CombinedOutput()
+	args := strings.Fields(command)
+	out, err := exec.Command("nft", args...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("nft %q: %w: %s", command, err, out)
 	}

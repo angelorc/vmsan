@@ -48,15 +48,19 @@ func (m *MeshManager) Start(ctx context.Context) error {
 		m.mu.Unlock()
 		return nil
 	}
-	m.started = true
 
 	dnsCtx, cancel := context.WithCancel(ctx)
 	m.cancel = cancel
 	m.mu.Unlock()
 
 	if err := m.firewall.Init(); err != nil {
+		cancel()
 		return fmt.Errorf("init mesh firewall: %w", err)
 	}
+
+	m.mu.Lock()
+	m.started = true
+	m.mu.Unlock()
 
 	// Start DNS server in background.
 	go func() {

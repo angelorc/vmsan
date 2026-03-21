@@ -97,14 +97,14 @@ func (m *Manager) GetVM(vmId string) (*VMState, bool) {
 	return state, ok
 }
 
-// ListVMs returns a snapshot of all VM states.
-func (m *Manager) ListVMs() []*VMState {
+// ListVMs returns a snapshot of all VM states (copies, not internal pointers).
+func (m *Manager) ListVMs() []VMState {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	list := make([]*VMState, 0, len(m.vms))
+	list := make([]VMState, 0, len(m.vms))
 	for _, state := range m.vms {
-		list = append(list, state)
+		list = append(list, *state)
 	}
 	return list
 }

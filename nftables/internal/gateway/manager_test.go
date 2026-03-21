@@ -8,7 +8,7 @@ import (
 func TestStartVM(t *testing.T) {
 	m := NewManager()
 
-	state, err := m.StartVM("vm-1", 1, "block")
+	state, err := m.StartVM("vm-1", 1, "deny-all")
 	if err != nil {
 		t.Fatalf("StartVM: unexpected error: %v", err)
 	}
@@ -18,8 +18,8 @@ func TestStartVM(t *testing.T) {
 	if state.Slot != 1 {
 		t.Errorf("Slot = %d, want %d", state.Slot, 1)
 	}
-	if state.Policy != "block" {
-		t.Errorf("Policy = %q, want %q", state.Policy, "block")
+	if state.Policy != "deny-all" {
+		t.Errorf("Policy = %q, want %q", state.Policy, "deny-all")
 	}
 	if state.DNSPort == 0 || state.SNIPort == 0 || state.HTTPPort == 0 {
 		t.Error("ports should be non-zero")
@@ -29,7 +29,7 @@ func TestStartVM(t *testing.T) {
 func TestStartVM_Idempotent(t *testing.T) {
 	m := NewManager()
 
-	first, err := m.StartVM("vm-1", 1, "block")
+	first, err := m.StartVM("vm-1", 1, "deny-all")
 	if err != nil {
 		t.Fatalf("first StartVM: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestStartVM_Idempotent(t *testing.T) {
 func TestStopVM(t *testing.T) {
 	m := NewManager()
 
-	m.StartVM("vm-1", 1, "block")
+	m.StartVM("vm-1", 1, "deny-all")
 
 	if err := m.StopVM("vm-1"); err != nil {
 		t.Fatalf("StopVM: unexpected error: %v", err)
@@ -72,7 +72,7 @@ func TestStopVM_NotFound(t *testing.T) {
 func TestUpdatePolicy(t *testing.T) {
 	m := NewManager()
 
-	m.StartVM("vm-1", 1, "block")
+	m.StartVM("vm-1", 1, "deny-all")
 
 	if err := m.UpdatePolicy("vm-1", "allow"); err != nil {
 		t.Fatalf("UpdatePolicy: %v", err)
@@ -102,7 +102,7 @@ func TestGetVM(t *testing.T) {
 		t.Error("GetVM should return false for nonexistent VM")
 	}
 
-	m.StartVM("vm-1", 1, "block")
+	m.StartVM("vm-1", 1, "deny-all")
 
 	state, ok := m.GetVM("vm-1")
 	if !ok {
@@ -120,7 +120,7 @@ func TestListVMs(t *testing.T) {
 		t.Errorf("ListVMs on empty manager: got %d, want 0", len(vms))
 	}
 
-	m.StartVM("vm-1", 1, "block")
+	m.StartVM("vm-1", 1, "deny-all")
 	m.StartVM("vm-2", 2, "allow")
 
 	vms := m.ListVMs()
@@ -141,9 +141,9 @@ func TestListVMs(t *testing.T) {
 func TestStopAll(t *testing.T) {
 	m := NewManager()
 
-	m.StartVM("vm-1", 1, "block")
+	m.StartVM("vm-1", 1, "deny-all")
 	m.StartVM("vm-2", 2, "allow")
-	m.StartVM("vm-3", 3, "block")
+	m.StartVM("vm-3", 3, "deny-all")
 
 	m.StopAll()
 
@@ -166,7 +166,7 @@ func TestConcurrentAccess(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			vmId := "vm-" + itoa(id)
-			m.StartVM(vmId, id, "block")
+			m.StartVM(vmId, id, "deny-all")
 		}(i)
 	}
 	wg.Wait()
