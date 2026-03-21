@@ -117,6 +117,15 @@ func (b *Builder) MatchDstIPPort(ip net.IP, proto byte, port uint16, v expr.Verd
 	b.add(exprs)
 }
 
+// AcceptDstIPPort adds: ip daddr <ip> <proto> dport <port> accept
+func (b *Builder) AcceptDstIPPort(ipStr string, proto byte, port uint16) {
+	ip := net.ParseIP(ipStr).To4()
+	if ip == nil {
+		return
+	}
+	b.MatchDstIPPort(ip, proto, port, expr.VerdictAccept)
+}
+
 // MatchIface adds: iifname <iif> oifname <oif> accept
 func (b *Builder) MatchIface(iifname, oifname string) {
 	b.add(append(matchIface(iifname, oifname), verdict(expr.VerdictAccept)))

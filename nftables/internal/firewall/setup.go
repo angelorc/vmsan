@@ -114,6 +114,12 @@ func setupVMTable(ctx context.Context, opts *types.SetupOptions) error {
 		return err
 	}
 
+	// 2b. Allow DNAT'd DNS traffic to the mesh handler (UDP to hostIP:10052).
+	// Must come before the blanket UDP drop rule so DNS-via-DNAT isn't blocked.
+	if opts.HostIP != "" {
+		fwd.AcceptDstIPPort(opts.HostIP, unix.IPPROTO_UDP, 10052)
+	}
+
 	// 3-6. Security rules with logging (all policies)
 	if !opts.AllowICMP {
 		fwd.LogDropProto("vmsan-deny-icmp: ", unix.IPPROTO_ICMP)
