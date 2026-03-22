@@ -243,7 +243,7 @@ describe("GatewayClient", () => {
 
   // ---- Default socket path ----
 
-  it("uses /run/vmsan-gateway.sock as default socket path", async () => {
+  it("uses /run/vmsan/gateway.sock as default socket path", async () => {
     const client = new GatewayClient();
     // Verify it tries the default path by checking the connection error
     await expect(client.ping()).rejects.toThrow("Gateway connection error");

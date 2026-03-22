@@ -120,28 +120,28 @@ jobs:
         run: go build -ldflags="-s -w -X main.version=v${{ steps.meta.outputs.version }}" -o vmsan-nftables-${{ matrix.arch }} ./cmd/vmsan-nftables
 
       - name: Build vmsan-gateway
-        working-directory: nftables
+        working-directory: hostd
         env:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-        run: go build -ldflags="-s -w -X main.version=v${{ steps.meta.outputs.version }}" -o vmsan-gateway-${{ matrix.arch }} ./cmd/gateway
+        run: go build -ldflags="-s -w -X main.version=v${{ steps.meta.outputs.version }}" -o vmsan-gateway-${{ matrix.arch }} ./cmd/vmsan-gateway
 
       - name: Build vmsan-server
-        working-directory: nftables
+        working-directory: hostd
         env:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-        run: go build -ldflags="-s -w -X main.version=v${{ steps.meta.outputs.version }}" -o vmsan-server-${{ matrix.arch }} ./cmd/server
+        run: go build -ldflags="-s -w -X main.version=v${{ steps.meta.outputs.version }}" -o vmsan-server-${{ matrix.arch }} ./cmd/vmsan-server
 
       - name: Build vmsan-agent-host
-        working-directory: nftables
+        working-directory: hostd
         env:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-        run: go build -ldflags="-s -w -X main.version=v${{ steps.meta.outputs.version }}" -o vmsan-agent-host-${{ matrix.arch }} ./cmd/agent-host
+        run: go build -ldflags="-s -w -X main.version=v${{ steps.meta.outputs.version }}" -o vmsan-agent-host-${{ matrix.arch }} ./cmd/vmsan-agent-host
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
@@ -150,6 +150,6 @@ jobs:
           files: |
             agent/vmsan-agent-${{ matrix.arch }}
             nftables/vmsan-nftables-${{ matrix.arch }}
-            nftables/vmsan-gateway-${{ matrix.arch }}
-            nftables/vmsan-server-${{ matrix.arch }}
-            nftables/vmsan-agent-host-${{ matrix.arch }}
+            hostd/vmsan-gateway-${{ matrix.arch }}
+            hostd/vmsan-server-${{ matrix.arch }}
+            hostd/vmsan-agent-host-${{ matrix.arch }}

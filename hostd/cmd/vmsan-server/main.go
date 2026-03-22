@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/angelorc/vmsan/nftables/internal/server"
+	"github.com/angelorc/vmsan/hostd/internal/server"
 )
 
 func main() {

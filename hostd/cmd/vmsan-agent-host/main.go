@@ -15,7 +15,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/angelorc/vmsan/nftables/internal/agent"
+	"github.com/angelorc/vmsan/hostd/internal/agent"
 )
 
 func main() {

@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/angelorc/vmsan/nftables/internal/gateway"
+	"github.com/angelorc/vmsan/hostd/internal/gateway"
 )
 
 func main() {
@@ -17,10 +17,14 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	if len(os.Args) < 2 || os.Args[1] != "start" {
-		fmt.Fprintf(os.Stderr, "usage: vmsan-gateway start\n")
+	// Accept "start" subcommand or no args (for systemd ExecStart)
+	if len(os.Args) > 1 && os.Args[1] != "start" {
+		fmt.Fprintf(os.Stderr, "usage: vmsan-gateway [start]\n")
 		os.Exit(1)
 	}
+
+	socketPath := envOr("VMSAN_SOCKET", "/run/vmsan/gateway.sock")
+	pidFile := envOr("VMSAN_PID_FILE", "/run/vmsan/gateway.pid")
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
@@ -31,8 +35,8 @@ func main() {
 	}
 
 	srv, err := gateway.NewServer(gateway.Config{
-		SocketPath: "/run/vmsan-gateway.sock",
-		PIDFile:    "/run/vmsan-gateway.pid",
+		SocketPath: socketPath,
+		PIDFile:    pidFile,
 	}, meshManager)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)
@@ -47,4 +51,11 @@ func main() {
 	if err := meshManager.Stop(); err != nil {
 		slog.Debug("mesh manager stop error", "error", err)
 	}
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }

@@ -38,7 +38,7 @@ export interface GatewayPingResult {
 }
 
 export class GatewayClient {
-  constructor(private socketPath: string = "/run/vmsan-gateway.sock") {}
+  constructor(private socketPath: string = "/run/vmsan/gateway.sock") {}
 
   async vmStart(config: GatewayVmConfig): Promise<GatewayVmResult> {
     return this.send("vm.start", config);
@@ -108,15 +108,34 @@ export async function ensureGatewayRunning(gatewayBin: string): Promise<void> {
     await client.ping();
     return; // Already running
   } catch {
-    // Not running, start it
+    // Not running, try to start it
   }
 
+  // Try systemctl first (preferred for systemd-managed daemon)
+  try {
+    const { execSync } = await import("node:child_process");
+    execSync("systemctl start vmsan-gateway", { stdio: "pipe", timeout: 5000 });
+    // Wait for socket to appear
+    for (let i = 0; i < 25; i++) {
+      await new Promise((r) => setTimeout(r, 200));
+      try {
+        await client.ping();
+        return;
+      } catch {
+        // Still starting
+      }
+    }
+    return; // systemctl started it or timed out
+  } catch {
+    // systemctl failed (not installed, no service file, etc.)
+  }
+
+  // Fallback: direct spawn
   if (!existsSync(gatewayBin)) {
     consola.debug("vmsan-gateway binary not found, skipping proxy layer");
     return;
   }
 
-  // Start gateway in background
   const child = spawn(gatewayBin, ["start"], {
     detached: true,
     stdio: "ignore",
@@ -133,5 +152,5 @@ export async function ensureGatewayRunning(gatewayBin: string): Promise<void> {
       // Still starting
     }
   }
-  consola.debug("vmsan-gateway failed to start within 2 seconds");
+  consola.debug("vmsan-gateway failed to start within timeout");
 }

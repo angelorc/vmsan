@@ -11,8 +11,10 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"os/user"
 	"strconv"
 	"sync"
+	"time"
 )
 
 // Version is reported by the ping handler. Set at build time via ldflags or
@@ -27,10 +29,13 @@ type Config struct {
 
 // Server is the vmsan-gateway Unix socket server.
 type Server struct {
-	config      Config
-	manager     *Manager
-	meshManager *MeshManager
-	cancelFunc  context.CancelFunc // set by Run(), used by shutdown handler
+	config         Config
+	manager        *Manager
+	meshManager    *MeshManager
+	dnsSupervisor  *DNSSupervisor
+	slots          *SlotAllocator
+	startTime      time.Time
+	cancelFunc     context.CancelFunc // set by Run(), used by shutdown handler
 }
 
 // Request is the JSON-RPC request envelope.
@@ -88,9 +93,11 @@ func NewServer(cfg Config, meshManager *MeshManager) (*Server, error) {
 		return nil, errors.New("PID file path is required")
 	}
 	return &Server{
-		config:      cfg,
-		manager:     NewManager(),
-		meshManager: meshManager,
+		config:        cfg,
+		manager:       NewManager(),
+		meshManager:   meshManager,
+		dnsSupervisor: NewDNSSupervisor(slog.Default()),
+		slots:         NewSlotAllocator(254, "/run/vmsan/slots.json"),
 	}, nil
 }
 
@@ -98,6 +105,9 @@ func NewServer(cfg Config, meshManager *MeshManager) (*Server, error) {
 // It removes stale socket and PID files on startup, writes the PID file,
 // and cleans up on shutdown.
 func (s *Server) Run(ctx context.Context) error {
+	// Record startup time for health reporting.
+	s.startTime = time.Now()
+
 	// Wrap context so shutdown handler can cancel it.
 	ctx, cancel := context.WithCancel(ctx)
 	s.cancelFunc = cancel
@@ -118,6 +128,18 @@ func (s *Server) Run(ctx context.Context) error {
 		listener.Close()
 		return fmt.Errorf("chmod socket: %w", err)
 	}
+
+	// Try to set socket group to "vmsan" for non-root access.
+	if grp, err := user.LookupGroup("vmsan"); err == nil {
+		if gid, err := strconv.Atoi(grp.Gid); err == nil {
+			os.Chown(s.config.SocketPath, -1, gid)
+		}
+	}
+
+	// Backward compat: symlink old path → new path
+	oldSocket := "/run/vmsan-gateway.sock"
+	os.Remove(oldSocket) // ignore error
+	os.Symlink(s.config.SocketPath, oldSocket)
 
 	if err := writePIDFile(s.config.PIDFile); err != nil {
 		listener.Close()
@@ -156,9 +178,11 @@ func (s *Server) Run(ctx context.Context) error {
 	// Wait for in-flight connections to finish.
 	wg.Wait()
 
-	// Graceful shutdown: stop all VMs, remove socket and PID file.
+	// Graceful shutdown: stop supervised DNS processes, VMs, remove socket, symlink, and PID file.
+	s.dnsSupervisor.StopAll()
 	s.manager.StopAll()
 	removeIfExists(s.config.SocketPath)
+	removeIfExists("/run/vmsan-gateway.sock") // backward compat symlink
 	removeIfExists(s.config.PIDFile)
 
 	slog.Info("gateway stopped")
@@ -195,6 +219,16 @@ func (s *Server) dispatch(ctx context.Context, req *Request) Response {
 		return s.handleVMUpdatePolicy(req.Params)
 	case "status":
 		return s.handleStatus()
+	case "vm.create":
+		return s.handleVMCreate(ctx, req.Params)
+	case "vm.delete":
+		return s.handleVMDelete(ctx, req.Params)
+	case "network.setup":
+		return s.handleNetworkSetup(ctx, req.Params)
+	case "network.teardown":
+		return s.handleNetworkTeardown(ctx, req.Params)
+	case "health":
+		return s.handleHealth()
 	case "shutdown":
 		return s.handleShutdown(ctx)
 	default:
@@ -312,6 +346,45 @@ func (s *Server) handleShutdown(_ context.Context) Response {
 		s.cancelFunc()
 	}
 	return Response{OK: true}
+}
+
+func (s *Server) handleVMCreate(ctx context.Context, params json.RawMessage) Response {
+	return s.handleVMCreateImpl(ctx, params)
+}
+
+func (s *Server) handleVMDelete(ctx context.Context, params json.RawMessage) Response {
+	return s.handleVMDeleteImpl(ctx, params)
+}
+
+func (s *Server) handleNetworkSetup(ctx context.Context, params json.RawMessage) Response {
+	return s.handleNetworkSetupImpl(ctx, params)
+}
+
+func (s *Server) handleNetworkTeardown(ctx context.Context, params json.RawMessage) Response {
+	return s.handleNetworkTeardownImpl(ctx, params)
+}
+
+func (s *Server) handleHealth() Response {
+	vms := s.manager.ListVMs()
+
+	type healthResponse struct {
+		Version    string `json:"version"`
+		VMs        int    `json:"vms"`
+		Uptime     string `json:"uptime"`
+		DNSProxies int    `json:"dnsProxies,omitempty"`
+		SNIProxies int    `json:"sniProxies,omitempty"`
+	}
+
+	return Response{
+		OK: true,
+		VM: healthResponse{
+			Version:    Version,
+			VMs:        len(vms),
+			Uptime:     time.Since(s.startTime).Truncate(time.Second).String(),
+			DNSProxies: s.dnsSupervisor.Count(),
+			SNIProxies: len(vms), // one per VM
+		},
+	}
 }
 
 // writeJSON encodes v as JSON and writes it to the connection.

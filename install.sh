@@ -1131,6 +1131,29 @@ local_runtime_build=$LOCAL_RUNTIME_BUILD
 installed_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
 
+# --- systemd service ---
+
+if command -v systemctl >/dev/null 2>&1; then
+  # Create vmsan system group (for socket access)
+  groupadd -r vmsan 2>/dev/null || true
+  usermod -aG vmsan "$(whoami)" 2>/dev/null || true
+
+  # Install gateway service unit
+  GATEWAY_SERVICE_SRC=""
+  if [ "$INSTALL_MODE" = "source" ] && [ -f "$VMSAN_SRC/hostd/cmd/vmsan-gateway/vmsan-gateway.service" ]; then
+    GATEWAY_SERVICE_SRC="$VMSAN_SRC/hostd/cmd/vmsan-gateway/vmsan-gateway.service"
+  fi
+
+  if [ -n "$GATEWAY_SERVICE_SRC" ]; then
+    # Patch ExecStart to point to the actual binary path
+    sed "s|ExecStart=.*|ExecStart=$GATEWAY_PATH start|" "$GATEWAY_SERVICE_SRC" \
+      > /etc/systemd/system/vmsan-gateway.service
+    systemctl daemon-reload
+    systemctl enable vmsan-gateway 2>/dev/null || true
+    success "vmsan-gateway systemd service installed and enabled"
+  fi
+fi
+
 # --- summary ---
 
 CF_STATUS="not configured"

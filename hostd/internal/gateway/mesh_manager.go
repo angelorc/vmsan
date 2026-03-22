@@ -11,7 +11,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/angelorc/vmsan/nftables/internal/mesh"
+	"github.com/angelorc/vmsan/hostd/internal/mesh"
 )
 
 // Manager coordinates mesh networking lifecycle for VMs.

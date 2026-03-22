@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/angelorc/vmsan/nftables/internal/tcpproxy"
+	"github.com/angelorc/vmsan/hostd/internal/tcpproxy"
 )
 
 // VMState holds the runtime state of a single VM's proxy resources.

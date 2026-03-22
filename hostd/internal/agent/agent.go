@@ -10,11 +10,15 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
-	vmsync "github.com/angelorc/vmsan/nftables/internal/sync"
+	vmsync "github.com/angelorc/vmsan/hostd/internal/sync"
 )
+
+// gatewaySocketPath is the default Unix socket path for the local gateway.
+const gatewaySocketPath = "/run/vmsan/gateway.sock"
 
 // Config holds the persisted agent configuration, written during join and
 // loaded on subsequent starts.
@@ -97,21 +101,47 @@ func New(logger *slog.Logger) (*Agent, error) {
 		return nil, fmt.Errorf("load agent config: %w", err)
 	}
 
+	gw := NewGatewayClient(gatewaySocketPath)
+
 	handlers := vmsync.Handlers{
 		OnVMCreate: func(payload json.RawMessage) error {
-			logger.Info("vm create received", "payload", string(payload))
-			// TODO: invoke Firecracker to start VM
+			logger.Info("vm create received", "payload_size", len(payload))
+
+			var params VMCreateParams
+			if err := json.Unmarshal(payload, &params); err != nil {
+				return fmt.Errorf("unmarshal vm create params: %w", err)
+			}
+
+			result, err := gw.VMCreate(params)
+			if err != nil {
+				return fmt.Errorf("gateway vm.create: %w", err)
+			}
+
+			logger.Info("vm created via gateway",
+				"vmId", result.VMId,
+				"pid", result.PID,
+				"guestIp", result.GuestIP,
+			)
 			return nil
 		},
+
 		OnVMUpdate: func(payload json.RawMessage) error {
-			logger.Info("vm update received", "payload", string(payload))
-			// TODO: apply VM config changes
-			return nil
+			logger.Info("vm update received")
+
+			var params struct {
+				VMId   string `json:"vmId"`
+				Policy string `json:"policy"`
+			}
+			if err := json.Unmarshal(payload, &params); err != nil {
+				return fmt.Errorf("unmarshal vm update: %w", err)
+			}
+
+			return gw.VMUpdatePolicy(params.VMId, params.Policy)
 		},
+
 		OnVMDelete: func(id string) error {
 			logger.Info("vm delete received", "id", id)
-			// TODO: stop and clean up VM
-			return nil
+			return gw.VMDelete(id)
 		},
 	}
 
@@ -128,6 +158,11 @@ func New(logger *slog.Logger) (*Agent, error) {
 // Run starts the agent's sync and heartbeat loops. It blocks until
 // Stop is called or an unrecoverable error occurs.
 func (a *Agent) Run() error {
+	// Ensure the local gateway is running before processing sync commands.
+	if err := a.ensureGateway(); err != nil {
+		return fmt.Errorf("ensure gateway: %w", err)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	a.cancel = cancel
 
@@ -150,4 +185,32 @@ func (a *Agent) Stop() {
 	if a.cancel != nil {
 		a.cancel()
 	}
+}
+
+// ensureGateway checks that the local gateway is running.
+// If not, tries to start it via systemctl.
+func (a *Agent) ensureGateway() error {
+	gw := NewGatewayClient(gatewaySocketPath)
+	if err := gw.Ping(); err == nil {
+		return nil // already running
+	}
+
+	// Try systemctl
+	a.logger.Info("gateway not running, attempting to start via systemctl")
+	cmd := exec.Command("systemctl", "start", "vmsan-gateway")
+	if err := cmd.Run(); err != nil {
+		a.logger.Warn("systemctl start vmsan-gateway failed", "error", err)
+		return fmt.Errorf("gateway not running and could not start: %w", err)
+	}
+
+	// Wait for socket
+	for i := 0; i < 25; i++ {
+		time.Sleep(200 * time.Millisecond)
+		if err := gw.Ping(); err == nil {
+			a.logger.Info("gateway started successfully")
+			return nil
+		}
+	}
+
+	return fmt.Errorf("gateway did not become ready after 5 seconds")
 }
