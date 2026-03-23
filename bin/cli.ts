@@ -35,25 +35,8 @@ function findPackageVersion(): string {
 
 const version = findPackageVersion();
 
-const SUDO_COMMANDS = new Set([
-  "create",
-  "start",
-  "stop",
-  "remove",
-  "rm",
-  "snapshot",
-  "up",
-  "deploy",
-  "down",
-]);
-
-const subCommand = process.argv[2];
-if (subCommand && SUDO_COMMANDS.has(subCommand) && process.getuid?.() !== 0) {
-  consola.error(
-    `"vmsan ${subCommand}" requires root. Run with: sudo env "PATH=$PATH" vmsan ${subCommand}`,
-  );
-  process.exit(1);
-}
+// Root check removed — the vmsan-gateway daemon handles all privileged
+// operations. The CLI is now an unprivileged thin client.
 
 const main = defineCommand({
   meta: {
