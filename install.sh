@@ -851,6 +851,77 @@ EOF
   fi
 fi
 
+# --- seccomp filter ---
+
+SECCOMP_DIR="$VMSAN_DIR/seccomp"
+SECCOMP_JSON="$SECCOMP_DIR/default.json"
+SECCOMP_BPF="$SECCOMP_DIR/default.bpf"
+
+mkdir -p "$SECCOMP_DIR"
+
+# Copy bundled filter if not present or if installing from source
+if [ "$INSTALL_MODE" = "source" ] && [ -f "$VMSAN_SRC/seccomp/default.json" ]; then
+  cp "$VMSAN_SRC/seccomp/default.json" "$SECCOMP_JSON"
+  chmod 600 "$SECCOMP_JSON"
+elif [ ! -f "$SECCOMP_JSON" ]; then
+  # Download from repo
+  SECCOMP_URL="https://raw.githubusercontent.com/$VMSAN_REPO/main/seccomp/default.json"
+  if curl -fsSL -o "$SECCOMP_JSON" "$SECCOMP_URL" 2>/dev/null; then
+    chmod 600 "$SECCOMP_JSON"
+  else
+    warn "Could not download seccomp filter — VMs will run without seccomp"
+  fi
+else
+  chmod 600 "$SECCOMP_JSON" 2>/dev/null || true
+fi
+
+# Compile JSON to BPF if seccompiler-bin is available
+if [ -f "$SECCOMP_JSON" ] && [ ! -f "$SECCOMP_BPF" ]; then
+  SECCOMPILER=""
+  if command -v seccompiler-bin >/dev/null 2>&1; then
+    SECCOMPILER="seccompiler-bin"
+  elif [ -x "$HOME/.cargo/bin/seccompiler-bin" ]; then
+    SECCOMPILER="$HOME/.cargo/bin/seccompiler-bin"
+  fi
+
+  if [ -n "$SECCOMPILER" ]; then
+    SECCOMP_ARCH="x86_64"
+    [ "$ARCH" = "aarch64" ] && SECCOMP_ARCH="aarch64"
+    if "$SECCOMPILER" --input-file "$SECCOMP_JSON" --target-arch "$SECCOMP_ARCH" --output-file "$SECCOMP_BPF" 2>/dev/null; then
+      chmod 600 "$SECCOMP_BPF"
+      success "Seccomp BPF filter compiled"
+    else
+      warn "Seccomp BPF compilation failed — VMs will run without seccomp"
+    fi
+  else
+    # Try installing seccompiler-bin via cargo if Rust is available
+    if command -v cargo >/dev/null 2>&1; then
+      info "Installing seccompiler-bin via cargo..."
+      if cargo install seccompiler 2>/dev/null; then
+        SECCOMPILER="$HOME/.cargo/bin/seccompiler-bin"
+        SECCOMP_ARCH="x86_64"
+        [ "$ARCH" = "aarch64" ] && SECCOMP_ARCH="aarch64"
+        if "$SECCOMPILER" --input-file "$SECCOMP_JSON" --target-arch "$SECCOMP_ARCH" --output-file "$SECCOMP_BPF" 2>/dev/null; then
+          chmod 600 "$SECCOMP_BPF"
+          success "Seccomp BPF filter compiled"
+        fi
+      else
+        warn "cargo install seccompiler failed — VMs will run without seccomp (install Rust to enable)"
+      fi
+    else
+      info "seccompiler-bin not found — VMs will run without seccomp. Install Rust and run: cargo install seccompiler"
+    fi
+  fi
+fi
+
+# Fix ownership for SUDO_USER
+if [ -n "${SUDO_USER:-}" ]; then
+  SUDO_HOME="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || true)"
+  if [ -n "$SUDO_HOME" ] && [ -d "$SECCOMP_DIR" ]; then
+    chown -R "$SUDO_USER":"$(id -gn "$SUDO_USER")" "$SECCOMP_DIR" 2>/dev/null || true
+  fi
+fi
+
 # --- runtime images ---
 
 BUILTIN_RUNTIMES=(node22 node24 python3.13)
