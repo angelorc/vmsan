@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/angelorc/vmsan/hostd/internal/gateway"
+	"github.com/angelorc/vmsan/hostd/internal/netsetup"
 )
 
 func main() {
@@ -25,6 +26,46 @@ func main() {
 
 	socketPath := envOr("VMSAN_SOCKET", "/run/vmsan/gateway.sock")
 	pidFile := envOr("VMSAN_PID_FILE", "/run/vmsan/gateway.pid")
+
+	// Configure vmsan-nftables binary location. The gateway runs as root
+	// and may not have the user's ~/.vmsan/bin in its PATH.
+	nftBinDir := envOr("VMSAN_NFTABLES_BIN_DIR", "")
+	if nftBinDir == "" {
+		// Auto-detect from common install locations
+		for _, dir := range []string{
+			"/usr/local/bin",
+			"/usr/bin",
+		} {
+			if _, err := os.Stat(dir + "/vmsan-nftables"); err == nil {
+				nftBinDir = dir
+				break
+			}
+		}
+		// Check SUDO_USER's ~/.vmsan/bin (installer puts it there)
+		if nftBinDir == "" {
+			if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+				candidateDir := fmt.Sprintf("/home/%s/.vmsan/bin", sudoUser)
+				if _, err := os.Stat(candidateDir + "/vmsan-nftables"); err == nil {
+					nftBinDir = candidateDir
+				}
+			}
+		}
+		// Fallback: check all /home/*/.vmsan/bin
+		if nftBinDir == "" {
+			entries, _ := os.ReadDir("/home")
+			for _, e := range entries {
+				candidateDir := fmt.Sprintf("/home/%s/.vmsan/bin", e.Name())
+				if _, err := os.Stat(candidateDir + "/vmsan-nftables"); err == nil {
+					nftBinDir = candidateDir
+					break
+				}
+			}
+		}
+	}
+	if nftBinDir != "" {
+		netsetup.SetNftablesBinDir(nftBinDir)
+		slog.Info("nftables binary dir", "dir", nftBinDir)
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
