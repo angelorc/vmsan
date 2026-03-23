@@ -27,44 +27,13 @@ func main() {
 	socketPath := envOr("VMSAN_SOCKET", "/run/vmsan/gateway.sock")
 	pidFile := envOr("VMSAN_PID_FILE", "/run/vmsan/gateway.pid")
 
-	// Configure vmsan-nftables binary location. The gateway runs as root
-	// and may not have the user's ~/.vmsan/bin in its PATH.
-	nftBinDir := envOr("VMSAN_NFTABLES_BIN_DIR", "")
-	if nftBinDir == "" {
-		// Auto-detect from common install locations
-		for _, dir := range []string{
-			"/usr/local/bin",
-			"/usr/bin",
-		} {
-			if _, err := os.Stat(dir + "/vmsan-nftables"); err == nil {
-				nftBinDir = dir
-				break
-			}
-		}
-		// Check SUDO_USER's ~/.vmsan/bin (installer puts it there)
-		if nftBinDir == "" {
-			if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
-				candidateDir := fmt.Sprintf("/home/%s/.vmsan/bin", sudoUser)
-				if _, err := os.Stat(candidateDir + "/vmsan-nftables"); err == nil {
-					nftBinDir = candidateDir
-				}
-			}
-		}
-		// Fallback: check all /home/*/.vmsan/bin
-		if nftBinDir == "" {
-			entries, _ := os.ReadDir("/home")
-			for _, e := range entries {
-				candidateDir := fmt.Sprintf("/home/%s/.vmsan/bin", e.Name())
-				if _, err := os.Stat(candidateDir + "/vmsan-nftables"); err == nil {
-					nftBinDir = candidateDir
-					break
-				}
-			}
-		}
-	}
-	if nftBinDir != "" {
-		netsetup.SetNftablesBinDir(nftBinDir)
-		slog.Info("nftables binary dir", "dir", nftBinDir)
+	// Configure binary locations. The gateway runs as root via systemd
+	// and doesn't have the user's ~/.vmsan/bin in its PATH.
+	binDir := findBinDir(envOr("VMSAN_BIN_DIR", ""))
+	if binDir != "" {
+		netsetup.SetNftablesBinDir(binDir)
+		gateway.SetBinDir(binDir)
+		slog.Info("binary dir", "dir", binDir)
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
@@ -99,4 +68,35 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// findBinDir locates the directory containing vmsan binaries (firecracker,
+// jailer, vmsan-nftables). It checks: explicit override, /usr/local/bin,
+// /usr/bin, SUDO_USER's ~/.vmsan/bin, any user's ~/.vmsan/bin.
+func findBinDir(override string) string {
+	if override != "" {
+		return override
+	}
+	// Check standard system paths
+	for _, dir := range []string{"/usr/local/bin", "/usr/bin"} {
+		if _, err := os.Stat(dir + "/firecracker"); err == nil {
+			return dir
+		}
+	}
+	// Check SUDO_USER's ~/.vmsan/bin
+	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+		dir := fmt.Sprintf("/home/%s/.vmsan/bin", sudoUser)
+		if _, err := os.Stat(dir + "/firecracker"); err == nil {
+			return dir
+		}
+	}
+	// Scan /home/*/.vmsan/bin
+	entries, _ := os.ReadDir("/home")
+	for _, e := range entries {
+		dir := fmt.Sprintf("/home/%s/.vmsan/bin", e.Name())
+		if _, err := os.Stat(dir + "/firecracker"); err == nil {
+			return dir
+		}
+	}
+	return ""
 }

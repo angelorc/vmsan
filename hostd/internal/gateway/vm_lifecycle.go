@@ -31,11 +31,24 @@ const (
 	defaultPolicy     = "deny-all"
 	agentPort         = 9119
 	jailerBaseDir     = "/srv/jailer"
-	firecrackerBin    = "/usr/bin/firecracker"
-	jailerBin         = "/usr/bin/jailer"
 	jailerUID         = 123
 	jailerGID         = 100
 )
+
+// Binary paths — configurable at startup via SetBinDir().
+var (
+	firecrackerBin = "/usr/bin/firecracker"
+	jailerBin      = "/usr/bin/jailer"
+)
+
+// SetBinDir configures the directory containing firecracker and jailer binaries.
+func SetBinDir(dir string) {
+	if dir == "" {
+		return
+	}
+	firecrackerBin = dir + "/firecracker"
+	jailerBin = dir + "/jailer"
+}
 
 // vmCreateParams holds the parameters for vm.create.
 type vmCreateParams struct {
