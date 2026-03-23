@@ -1,8 +1,5 @@
 import {
-  copyFileSync,
-  chmodSync,
   existsSync,
-  mkdirSync,
   readFileSync,
   readdirSync,
   rmSync,
@@ -10,14 +7,14 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import type { VmsanContext } from "../context.ts";
-import { FirecrackerClient } from "./firecracker.ts";
 import {
   vmNotFoundError,
   vmNotRunningError,
   snapshotNotFoundError,
   snapshotCreateFailedError,
 } from "../errors/index.ts";
-import { mkdirSecure, writeSecure, chownToSudoUser, toError } from "../lib/utils.ts";
+import { mkdirSecure, writeSecure, toError } from "../lib/utils.ts";
+import { GatewayClient } from "../lib/gateway-client.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -51,12 +48,6 @@ export interface SnapshotMetadata {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function copyFileSecure(src: string, dst: string): void {
-  copyFileSync(src, dst);
-  chmodSync(dst, 0o600);
-  chownToSudoUser(dst);
-}
-
 function dirSizeMb(dir: string): number {
   let total = 0;
   for (const file of readdirSync(dir)) {
@@ -89,7 +80,7 @@ export class SnapshotService {
   // -----------------------------------------------------------------------
 
   async create(opts: CreateSnapshotOptions): Promise<CreateSnapshotResult> {
-    const { vmId, resume = true } = opts;
+    const { vmId } = opts;
     const log = this.logger.withTag(vmId);
 
     // Validate VM exists and is running
@@ -97,47 +88,31 @@ export class SnapshotService {
     if (!state) throw vmNotFoundError(vmId);
     if (state.status !== "running") throw vmNotRunningError(vmId, state.status);
 
-    const fc = new FirecrackerClient(state.apiSocket);
     const timestamp = Date.now();
     const snapshotId = `${vmId}-${timestamp}`;
-
-    // Paths inside the chroot (relative to jailer root)
-    const chrootSnapshotFile = "snapshot/snapshot_file";
-    const chrootMemFile = "snapshot/mem_file";
-
-    // Absolute path to the chroot's snapshot dir (chrootDir/root/snapshot)
-    const chrootSnapshotDir = join(state.chrootDir, "root", "snapshot");
-
-    // Destination in ~/.vmsan/snapshots/<snapshotId>/
     const destDir = join(this.paths.snapshotsDir, snapshotId);
 
     try {
-      // 1. Pause VM
-      log.start("Pausing VM...");
-      await fc.pause();
-      log.success("VM paused");
+      log.start("Creating snapshot via gateway...");
 
-      // 2. Ensure chroot snapshot directory exists
-      mkdirSync(chrootSnapshotDir, { recursive: true });
+      // Delegate to gateway: pause → snapshot → copy → chown → resume
+      const gateway = new GatewayClient();
+      const result = await gateway.snapshotCreate({
+        vmId,
+        snapshotId,
+        socketPath: state.apiSocket,
+        destDir,
+        chrootDir: state.chrootDir || undefined,
+      });
 
-      // 3. Create snapshot via Firecracker API
-      log.start("Creating snapshot...");
-      await fc.createSnapshot(chrootSnapshotFile, chrootMemFile);
-      log.success("Snapshot created in chroot");
+      if (!result.ok) {
+        throw new Error(result.error ?? "Gateway snapshot.create failed");
+      }
 
-      // 4. Copy files to persistent storage
-      log.start("Copying snapshot files...");
+      log.success("Snapshot files saved");
+
+      // Save metadata (agent token needed for restore) — TS owns metadata
       mkdirSecure(destDir);
-
-      const srcSnapshotFile = join(chrootSnapshotDir, "snapshot_file");
-      const srcMemFile = join(chrootSnapshotDir, "mem_file");
-      const dstSnapshotFile = join(destDir, "snapshot_file");
-      const dstMemFile = join(destDir, "mem_file");
-
-      copyFileSecure(srcSnapshotFile, dstSnapshotFile);
-      copyFileSecure(srcMemFile, dstMemFile);
-
-      // 5. Save metadata (agent token needed for restore)
       const metadata: SnapshotMetadata = {
         vmId,
         agentToken: state.agentToken,
@@ -145,17 +120,10 @@ export class SnapshotService {
       };
       writeSecure(join(destDir, "metadata.json"), JSON.stringify(metadata, null, 2));
 
-      log.success(`Snapshot files saved to ${destDir}`);
+      const dstSnapshotFile = join(destDir, "snapshot_file");
+      const dstMemFile = join(destDir, "mem_file");
 
-      // 6. Resume VM (unless --no-resume)
-      if (resume) {
-        try {
-          await fc.resume();
-          log.success("VM resumed");
-        } catch (err) {
-          log.warn(`Failed to resume VM: ${toError(err).message}`);
-        }
-      }
+      log.success(`Snapshot ${snapshotId} created`);
 
       return {
         snapshotId,
@@ -164,15 +132,6 @@ export class SnapshotService {
         memPath: dstMemFile,
       };
     } catch (error) {
-      // Always try to resume on failure
-      if (resume) {
-        try {
-          await fc.resume();
-        } catch (resumeErr) {
-          this.logger.debug(`Resume after error failed: ${toError(resumeErr).message}`);
-        }
-      }
-
       // Clean up partial snapshot dir
       try {
         rmSync(destDir, { recursive: true, force: true });

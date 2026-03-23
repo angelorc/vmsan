@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { ImageReference } from "./validation.ts";
 import { dockerUnavailableError } from "./docker-errors.ts";
 import { toError } from "../../lib/utils.ts";
+import { GatewayClient } from "../../lib/gateway-client.ts";
 
 const APT_PACKAGES = [
   "bind9-utils",
@@ -135,70 +136,6 @@ function verifyDocker(): void {
   }
 }
 
-function buildImageRootfs(imageRef: ImageReference, cacheDir: string, minimal = false): string {
-  const ext4Path = join(cacheDir, "rootfs.ext4");
-
-  verifyDocker();
-
-  const buildTag = `vmsan-rootfs-${imageRef.name.replace(/[^a-z0-9._-]/gi, "-")}:${imageRef.tag}`;
-  const containerName = `vmsan-export-${Date.now()}`;
-  const tmpTar = join(cacheDir, "rootfs.tar");
-
-  mkdirSync(cacheDir, { recursive: true });
-
-  try {
-    consola.start(`Building image from ${imageRef.full}...`);
-    const dockerfile = generateDockerfile(imageRef.full, minimal);
-    execSync(`docker build -t "${buildTag}" -f - . <<'DOCKERFILE'\n${dockerfile}\nDOCKERFILE`, {
-      stdio: "pipe",
-      shell: "/bin/bash",
-    });
-
-    consola.start("Exporting filesystem...");
-    execSync(`docker create --name "${containerName}" "${buildTag}"`, { stdio: "pipe" });
-    execSync(`docker export "${containerName}" -o "${tmpTar}"`, { stdio: "pipe" });
-
-    consola.start("Converting to ext4...");
-    const tarSizeOutput = execSync(`stat -c %s "${tmpTar}"`, { encoding: "utf-8" }).trim();
-    const tarBytes = Number(tarSizeOutput);
-    const tarMb = tarBytes / 1024 / 1024;
-    const imageSizeMb = Math.max(1024, Math.ceil(tarMb + 512));
-
-    const tmpExtract = join(cacheDir, "rootfs-extracted");
-    mkdirSync(tmpExtract, { recursive: true });
-    execSync(`tar -xf "${tmpTar}" -C "${tmpExtract}"`, { stdio: "pipe" });
-
-    execSync(`mkfs.ext4 -q -d "${tmpExtract}" "${ext4Path}" "${imageSizeMb}M"`, {
-      stdio: "pipe",
-    });
-    execSync(`tune2fs -m 0 "${ext4Path}"`, { stdio: "pipe" });
-
-    writeFileSync(
-      join(cacheDir, "metadata.json"),
-      JSON.stringify({ image: imageRef.full, builtAt: new Date().toISOString() }, null, 2),
-    );
-
-    consola.success(`Rootfs built from ${imageRef.full} (${imageSizeMb} MB)`);
-    return ext4Path;
-  } finally {
-    try {
-      execSync(`docker rm -f "${containerName}" 2>/dev/null`, { stdio: "pipe" });
-    } catch (err) {
-      consola.debug(`Failed to remove docker container ${containerName}: ${toError(err).message}`);
-    }
-    try {
-      execSync(`rm -f "${tmpTar}"`, { stdio: "pipe" });
-    } catch (err) {
-      consola.debug(`Failed to remove temp tar ${tmpTar}: ${toError(err).message}`);
-    }
-    try {
-      execSync(`rm -rf "${join(cacheDir, "rootfs-extracted")}"`, { stdio: "pipe" });
-    } catch (err) {
-      consola.debug(`Failed to remove extraction dir: ${toError(err).message}`);
-    }
-  }
-}
-
 export function resolveImageRootfs(
   imageRef: ImageReference,
   registryDir: string,
@@ -213,5 +150,79 @@ export function resolveImageRootfs(
     return ext4Path;
   }
 
-  return buildImageRootfs(imageRef, cacheDir, minimal);
+  // Cache miss — build the Docker image (not privileged, just needs docker group)
+  verifyDocker();
+  mkdirSync(cacheDir, { recursive: true });
+
+  const buildTag = `vmsan-rootfs-${imageRef.name.replace(/[^a-z0-9._-]/gi, "-")}:${imageRef.tag}`;
+
+  consola.start(`Building image from ${imageRef.full}...`);
+  const dockerfile = generateDockerfile(imageRef.full, minimal);
+  try {
+    execSync(`docker build -t "${buildTag}" -f - . <<'DOCKERFILE'\n${dockerfile}\nDOCKERFILE`, {
+      stdio: "pipe",
+      shell: "/bin/bash",
+    });
+  } catch (err) {
+    throw new Error(`Docker build failed: ${toError(err).message}`);
+  }
+
+  // Delegate the privileged ext4 conversion to the gateway daemon
+  // (docker create/export + mkfs.ext4 + mount + copy + chown)
+  consola.start("Converting to ext4 via gateway...");
+  const gateway = new GatewayClient();
+
+  // Use sync wrapper since resolveImageRootfs is called synchronously
+  // Fall back to direct build if gateway is unavailable
+  try {
+    const { execSync: execSyncImport } = require("node:child_process");
+    const request = JSON.stringify({
+      method: "rootfs.build",
+      params: { imageRef: buildTag, outputDir: cacheDir },
+    });
+    execSyncImport(
+      `echo '${request.replace(/'/g, "'\\''")}' | socat - UNIX-CONNECT:/run/vmsan/gateway.sock`,
+      { stdio: "pipe", timeout: 120000 },
+    );
+  } catch {
+    // Gateway unavailable — fall back to direct build (needs sudo)
+    consola.debug("Gateway unavailable for rootfs build, falling back to direct build");
+    const containerName = `vmsan-export-${Date.now()}`;
+    const tmpTar = join(cacheDir, "rootfs.tar");
+
+    try {
+      consola.start("Exporting filesystem...");
+      execSync(`docker create --name "${containerName}" "${buildTag}"`, { stdio: "pipe" });
+      execSync(`docker export "${containerName}" -o "${tmpTar}"`, { stdio: "pipe" });
+
+      consola.start("Converting to ext4...");
+      const tarSizeOutput = execSync(`stat -c %s "${tmpTar}"`, { encoding: "utf-8" }).trim();
+      const tarBytes = Number(tarSizeOutput);
+      const tarMb = tarBytes / 1024 / 1024;
+      const imageSizeMb = Math.max(1024, Math.ceil(tarMb + 512));
+
+      const tmpExtract = join(cacheDir, "rootfs-extracted");
+      mkdirSync(tmpExtract, { recursive: true });
+      execSync(`tar -xf "${tmpTar}" -C "${tmpExtract}"`, { stdio: "pipe" });
+      execSync(`mkfs.ext4 -q -d "${tmpExtract}" "${ext4Path}" "${imageSizeMb}M"`, {
+        stdio: "pipe",
+      });
+      execSync(`tune2fs -m 0 "${ext4Path}"`, { stdio: "pipe" });
+      execSync(`rm -rf "${tmpExtract}" "${tmpTar}"`, { stdio: "pipe" });
+    } finally {
+      try {
+        execSync(`docker rm -f "${containerName}" 2>/dev/null`, { stdio: "pipe" });
+      } catch (err) {
+        consola.debug(`Failed to remove docker container: ${toError(err).message}`);
+      }
+    }
+  }
+
+  writeFileSync(
+    join(cacheDir, "metadata.json"),
+    JSON.stringify({ image: imageRef.full, builtAt: new Date().toISOString() }, null, 2),
+  );
+
+  consola.success(`Rootfs built from ${imageRef.full}`);
+  return ext4Path;
 }
