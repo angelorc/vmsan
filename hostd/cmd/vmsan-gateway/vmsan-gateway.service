@@ -8,7 +8,8 @@ ExecStart=/usr/local/bin/vmsan-gateway start
 Restart=on-failure
 RestartSec=5
 RuntimeDirectory=vmsan
-RuntimeDirectoryMode=0750
+RuntimeDirectoryMode=0770
+Group=vmsan
 
 [Install]
 WantedBy=multi-user.target
