@@ -1,5 +1,4 @@
-import { accessSync, constants, existsSync, readFileSync, readdirSync } from "node:fs";
-import { connect } from "node:net";
+import { accessSync, constants, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { VmsanPaths } from "../../paths.ts";
 import type { Runtime } from "./types.ts";
@@ -12,7 +11,7 @@ import {
   snapshotNotFoundError,
   kvmUnavailableError,
 } from "../../errors/index.ts";
-import { socketTimeoutError, SetupError } from "../../errors/index.ts";
+import { SetupError } from "../../errors/index.ts";
 
 export function validateEnvironment(baseDir: string): void {
   const firecrackerPath = join(baseDir, "bin", "firecracker");
@@ -96,63 +95,6 @@ export function findRootfs(baseDir: string): string {
     throw noExt4RootfsError();
   }
   return join(rootfsDir, files.sort().at(-1)!);
-}
-
-export async function waitForSocket(socketPath: string, timeoutMs: number = 5000): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (existsSync(socketPath)) {
-      const isConnectable = await new Promise<boolean>((resolve) => {
-        const socket = connect(socketPath);
-        socket.on("connect", () => {
-          socket.destroy();
-          resolve(true);
-        });
-        socket.on("error", () => resolve(false));
-      });
-      if (isConnectable) return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw socketTimeoutError(socketPath);
-}
-
-export function getVmPid(vmId: string): number | null {
-  try {
-    const entries = readdirSync("/proc").filter((entry) => /^\d+$/.test(entry));
-    for (const entry of entries) {
-      try {
-        const cmdline = readFileSync(`/proc/${entry}/cmdline`, "utf-8");
-        if (cmdline.includes("firecracker") && cmdline.includes(vmId)) {
-          return Number(entry);
-        }
-      } catch {
-        // Process exited between readdir and readFileSync
-      }
-    }
-  } catch {
-    // /proc may not be readable
-  }
-  return null;
-}
-
-export function getVmJailerPid(vmId: string): number | null {
-  try {
-    const entries = readdirSync("/proc").filter((entry) => /^\d+$/.test(entry));
-    for (const entry of entries) {
-      try {
-        const cmdline = readFileSync(`/proc/${entry}/cmdline`, "utf-8");
-        if (cmdline.includes("jailer") && cmdline.includes(vmId)) {
-          return Number(entry);
-        }
-      } catch {
-        // Process exited between readdir and readFileSync
-      }
-    }
-  } catch {
-    // /proc may not be readable
-  }
-  return null;
 }
 
 export function assertSnapshotExists(snapshotId: string, paths: VmsanPaths): void {

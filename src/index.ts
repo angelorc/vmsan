@@ -43,7 +43,6 @@ export { NetworkManager } from "./lib/network.ts";
 export type { NetworkConfig } from "./lib/network.ts";
 export { GatewayClient, ensureGatewayRunning } from "./lib/gateway-client.ts";
 export type { GatewayVmConfig, GatewayVmResult, GatewayPingResult } from "./lib/gateway-client.ts";
-export { Jailer, detectCgroupVersion } from "./lib/jailer.ts";
 export type {
   JailerPaths,
   PrepareChrootConfig,
@@ -52,7 +51,6 @@ export type {
 } from "./lib/jailer.ts";
 export { ShellSession, connectShell } from "./lib/shell/index.ts";
 export type { ShellSessionOptions } from "./lib/shell/index.ts";
-export type { GatewayVmConfig } from "./lib/gateway-client.ts";
 export { FileLock } from "./lib/file-lock.ts";
 export { PidFile } from "./lib/pid-file.ts";
 export {
@@ -156,17 +154,9 @@ export {
   findKernel,
   findRootfs,
   findRuntimeRootfs,
-  waitForSocket,
-  getVmPid,
-  getVmJailerPid,
 } from "./commands/create/environment.ts";
 export { waitForAgent } from "./lib/vm-context.ts";
-export {
-  killOrphanVmProcess,
-  markVmAsError,
-  cleanupNetwork,
-  cleanupChroot,
-} from "./commands/create/cleanup.ts";
+export { markVmAsError } from "./commands/create/cleanup.ts";
 export {
   parseVcpuCount,
   parseMemoryMib,

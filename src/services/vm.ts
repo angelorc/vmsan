@@ -2,9 +2,6 @@ import { join } from "node:path";
 import { existsSync } from "node:fs";
 import type { VmsanContext } from "../context.ts";
 import type { VmState, VmStateStore } from "../lib/vm-state.ts";
-import type { CgroupConfig } from "../lib/jailer.ts";
-import { CGROUP_VMM_OVERHEAD_MIB } from "../lib/jailer.ts";
-import { NetworkManager, type NetworkConfig } from "../lib/network.ts";
 import {
   validateEnvironment,
   findKernel,
@@ -641,30 +638,6 @@ export class VMService {
   // -----------------------------------------------------------------------
   // Private helpers
   // -----------------------------------------------------------------------
-
-  private buildCgroupConfig(vcpus: number, memMib: number): CgroupConfig {
-    return {
-      cpuQuotaUs: vcpus * 100000,
-      cpuPeriodUs: 100000,
-      memoryBytes: (memMib + CGROUP_VMM_OVERHEAD_MIB) * 1024 * 1024,
-    };
-  }
-
-  private async bootVm(
-    socketPath: string,
-    netCfg: NetworkConfig,
-    vcpus: number,
-    memMib: number,
-  ): Promise<void> {
-    const { FirecrackerClient } = await import("./firecracker.ts");
-    const vm = new FirecrackerClient(socketPath);
-    const bootArgs = NetworkManager.bootArgs(netCfg);
-    this.logger.debug(`Boot args: ${bootArgs}`);
-    await vm.boot("kernel/vmlinux", bootArgs);
-    await vm.addDrive("rootfs", "rootfs/rootfs.ext4", true, false);
-    await vm.configure(vcpus, memMib);
-    await vm.addNetwork("eth0", netCfg.tapDevice, netCfg.macAddress);
-  }
 
   /**
    * Set up iptables DNAT rules inside the VM so that traffic arriving on
