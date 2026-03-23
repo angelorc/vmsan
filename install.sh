@@ -583,6 +583,15 @@ else
   cp "$FC_TMP"/release-*/jailer-*-"$ARCH" "$VMSAN_DIR/bin/jailer"
   chmod +x "$VMSAN_DIR/bin/firecracker" "$VMSAN_DIR/bin/jailer"
 
+  # Extract seccompiler-bin and official seccomp filter from the same tarball
+  mkdir -p "$VMSAN_DIR/seccomp"
+  if cp "$FC_TMP"/release-*/seccompiler-bin-*-"$ARCH" "$VMSAN_DIR/bin/seccompiler-bin" 2>/dev/null; then
+    chmod +x "$VMSAN_DIR/bin/seccompiler-bin"
+  fi
+  if cp "$FC_TMP"/release-*/seccomp-filter-*-"$ARCH".json "$VMSAN_DIR/seccomp/firecracker-default.json" 2>/dev/null; then
+    chmod 600 "$VMSAN_DIR/seccomp/firecracker-default.json"
+  fi
+
   rm -rf "$FC_TMP"
   trap - EXIT
   success "Firecracker $FC_VER installed"
@@ -856,32 +865,31 @@ fi
 SECCOMP_DIR="$VMSAN_DIR/seccomp"
 SECCOMP_JSON="$SECCOMP_DIR/default.json"
 SECCOMP_BPF="$SECCOMP_DIR/default.bpf"
+SECCOMPILER_BIN="$VMSAN_DIR/bin/seccompiler-bin"
 
 mkdir -p "$SECCOMP_DIR"
 
-# Copy bundled filter if not present or if installing from source
+# Copy bundled filter (from source or Firecracker tarball)
 if [ "$INSTALL_MODE" = "source" ] && [ -f "$VMSAN_SRC/seccomp/default.json" ]; then
   cp "$VMSAN_SRC/seccomp/default.json" "$SECCOMP_JSON"
   chmod 600 "$SECCOMP_JSON"
 elif [ ! -f "$SECCOMP_JSON" ]; then
-  # Download from repo
-  SECCOMP_URL="https://raw.githubusercontent.com/$VMSAN_REPO/main/seccomp/default.json"
-  if curl -fsSL -o "$SECCOMP_JSON" "$SECCOMP_URL" 2>/dev/null; then
+  # Use the official Firecracker filter extracted during FC download
+  if [ -f "$SECCOMP_DIR/firecracker-default.json" ]; then
+    cp "$SECCOMP_DIR/firecracker-default.json" "$SECCOMP_JSON"
     chmod 600 "$SECCOMP_JSON"
-  else
-    warn "Could not download seccomp filter — VMs will run without seccomp"
   fi
 else
   chmod 600 "$SECCOMP_JSON" 2>/dev/null || true
 fi
 
-# Compile JSON to BPF if seccompiler-bin is available
+# Compile JSON to BPF using seccompiler-bin (extracted from Firecracker tarball)
 if [ -f "$SECCOMP_JSON" ] && [ ! -f "$SECCOMP_BPF" ]; then
   SECCOMPILER=""
-  if command -v seccompiler-bin >/dev/null 2>&1; then
+  if [ -x "$SECCOMPILER_BIN" ]; then
+    SECCOMPILER="$SECCOMPILER_BIN"
+  elif command -v seccompiler-bin >/dev/null 2>&1; then
     SECCOMPILER="seccompiler-bin"
-  elif [ -x "$HOME/.cargo/bin/seccompiler-bin" ]; then
-    SECCOMPILER="$HOME/.cargo/bin/seccompiler-bin"
   fi
 
   if [ -n "$SECCOMPILER" ]; then
@@ -894,23 +902,7 @@ if [ -f "$SECCOMP_JSON" ] && [ ! -f "$SECCOMP_BPF" ]; then
       warn "Seccomp BPF compilation failed — VMs will run without seccomp"
     fi
   else
-    # Try installing seccompiler-bin via cargo if Rust is available
-    if command -v cargo >/dev/null 2>&1; then
-      info "Installing seccompiler-bin via cargo..."
-      if cargo install seccompiler 2>/dev/null; then
-        SECCOMPILER="$HOME/.cargo/bin/seccompiler-bin"
-        SECCOMP_ARCH="x86_64"
-        [ "$ARCH" = "aarch64" ] && SECCOMP_ARCH="aarch64"
-        if "$SECCOMPILER" --input-file "$SECCOMP_JSON" --target-arch "$SECCOMP_ARCH" --output-file "$SECCOMP_BPF" 2>/dev/null; then
-          chmod 600 "$SECCOMP_BPF"
-          success "Seccomp BPF filter compiled"
-        fi
-      else
-        warn "cargo install seccompiler failed — VMs will run without seccomp (install Rust to enable)"
-      fi
-    else
-      info "seccompiler-bin not found — VMs will run without seccomp. Install Rust and run: cargo install seccompiler"
-    fi
+    warn "seccompiler-bin not found — VMs will run without seccomp"
   fi
 fi
 
