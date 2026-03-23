@@ -1,7 +1,28 @@
 import { connect } from "node:net";
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
+import process from "node:process";
 import { consola } from "consola";
+
+// ---------------------------------------------------------------------------
+// Timeouts (ms) — per-method instead of global 10s
+// ---------------------------------------------------------------------------
+
+const TIMEOUT_PING = 5_000;
+const TIMEOUT_STATUS = 5_000;
+const TIMEOUT_HEALTH = 5_000;
+const TIMEOUT_CREATE = 120_000;
+const TIMEOUT_RESTART = 120_000;
+const TIMEOUT_STOP = 30_000;
+const TIMEOUT_DELETE = 30_000;
+const TIMEOUT_SNAPSHOT = 60_000;
+const TIMEOUT_ROOTFS_BUILD = 120_000;
+const TIMEOUT_UPDATE_POLICY = 10_000;
+const TIMEOUT_SHUTDOWN = 5_000;
+
+// ---------------------------------------------------------------------------
+// Existing interfaces (backward-compatible)
+// ---------------------------------------------------------------------------
 
 export interface GatewayVmConfig {
   vmId: string;
@@ -37,30 +58,231 @@ export interface GatewayPingResult {
   vms: number;
 }
 
+// ---------------------------------------------------------------------------
+// New interfaces — matching Go param/response structs
+// ---------------------------------------------------------------------------
+
+export interface GatewayVmCreateParams {
+  vcpus?: number;
+  memMib?: number;
+  runtime?: string;
+  diskSizeGb?: number;
+  networkPolicy?: string;
+  domains?: string[];
+  allowedCidrs?: string[];
+  deniedCidrs?: string[];
+  ports?: number[];
+  bandwidthMbit?: number;
+  allowIcmp?: boolean;
+  project?: string;
+  service?: string;
+  connectTo?: string[];
+  skipDnat?: boolean;
+  kernelPath?: string;
+  rootfsPath?: string;
+  snapshotId?: string;
+  agentBinary?: string;
+  agentToken?: string;
+  vmId?: string;
+  disableSeccomp?: boolean;
+  disablePidNs?: boolean;
+  disableCgroup?: boolean;
+  seccompFilter?: string;
+  ownerUid?: number;
+  ownerGid?: number;
+}
+
+export interface GatewayVmCreateResult {
+  ok: boolean;
+  error?: string;
+  code?: string;
+  vm?: {
+    vmId: string;
+    slot: number;
+    hostIp: string;
+    guestIp: string;
+    meshIp?: string;
+    tapDevice: string;
+    macAddress: string;
+    netnsName: string;
+    vethHost: string;
+    vethGuest: string;
+    subnetMask: string;
+    chrootDir: string;
+    socketPath: string;
+    pid: number;
+    agentToken?: string;
+    dnsPort: number;
+    sniPort: number;
+    httpPort: number;
+  };
+}
+
+export interface GatewayVmRestartParams {
+  vmId: string;
+  slot: number;
+  chrootDir?: string;
+  socketPath?: string;
+  networkPolicy?: string;
+  domains?: string[];
+  allowedCidrs?: string[];
+  deniedCidrs?: string[];
+  ports?: number[];
+  bandwidthMbit?: number;
+  allowIcmp?: boolean;
+  skipDnat?: boolean;
+  project?: string;
+  service?: string;
+  connectTo?: string[];
+  disableSeccomp?: boolean;
+  disablePidNs?: boolean;
+  disableCgroup?: boolean;
+  seccompFilter?: string;
+  vcpus?: number;
+  memMib?: number;
+  kernelPath?: string;
+  rootfsPath?: string;
+  agentBinary?: string;
+  agentToken?: string;
+  netnsName?: string;
+}
+
+export interface GatewayVmFullStopParams {
+  vmId: string;
+  slot?: number;
+  pid?: number;
+  netnsName?: string;
+  socketPath?: string;
+}
+
+export interface GatewayVmDeleteParams {
+  vmId: string;
+  force?: boolean;
+}
+
+export interface GatewayUpdatePolicyParams {
+  vmId: string;
+  policy: string;
+  slot?: number;
+  domains?: string[];
+  allowedCidrs?: string[];
+  deniedCidrs?: string[];
+  ports?: number[];
+  allowIcmp?: boolean;
+  skipDnat?: boolean;
+  netnsName?: string;
+}
+
+export interface GatewaySnapshotCreateParams {
+  vmId: string;
+  snapshotId: string;
+  socketPath: string;
+  destDir: string;
+  chrootDir?: string;
+  ownerUid?: number;
+  ownerGid?: number;
+}
+
+export interface GatewayRootfsBuildParams {
+  imageRef: string;
+  outputDir: string;
+  ownerUid?: number;
+  ownerGid?: number;
+}
+
+export interface GatewayGenericResult {
+  ok: boolean;
+  error?: string;
+  code?: string;
+  vm?: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function getOwnerUid(): number {
+  return process.getuid?.() ?? 0;
+}
+
+function getOwnerGid(): number {
+  return process.getgid?.() ?? 0;
+}
+
+// ---------------------------------------------------------------------------
+// GatewayClient
+// ---------------------------------------------------------------------------
+
 export class GatewayClient {
   constructor(private socketPath: string = "/run/vmsan/gateway.sock") {}
 
+  // -- Existing methods (backward-compatible) --
+
   async vmStart(config: GatewayVmConfig): Promise<GatewayVmResult> {
-    return this.send("vm.start", config);
+    return this.send("vm.start", config, TIMEOUT_CREATE);
   }
 
   async vmStop(vmId: string): Promise<void> {
-    await this.send("vm.stop", { vmId });
+    await this.send("vm.stop", { vmId }, TIMEOUT_STOP);
   }
 
   async vmUpdatePolicy(vmId: string, policy: string, allowedDomains?: string[]): Promise<void> {
-    await this.send("vm.updatePolicy", { vmId, policy, allowedDomains });
+    await this.send("vm.updatePolicy", { vmId, policy, allowedDomains }, TIMEOUT_UPDATE_POLICY);
   }
 
   async ping(): Promise<GatewayPingResult> {
-    return this.send("ping");
+    return this.send("ping", undefined, TIMEOUT_PING);
   }
 
   async shutdown(): Promise<void> {
-    await this.send("shutdown");
+    await this.send("shutdown", undefined, TIMEOUT_SHUTDOWN);
   }
 
-  private async send(method: string, params?: unknown): Promise<any> {
+  // -- New methods (full lifecycle) --
+
+  async vmCreate(params: GatewayVmCreateParams): Promise<GatewayVmCreateResult> {
+    return this.send("vm.create", {
+      ...params,
+      ownerUid: params.ownerUid ?? getOwnerUid(),
+      ownerGid: params.ownerGid ?? getOwnerGid(),
+    }, TIMEOUT_CREATE);
+  }
+
+  async vmRestart(params: GatewayVmRestartParams): Promise<GatewayVmCreateResult> {
+    return this.send("vm.restart", params, TIMEOUT_RESTART);
+  }
+
+  async vmFullStop(params: GatewayVmFullStopParams): Promise<GatewayGenericResult> {
+    return this.send("vm.fullStop", params, TIMEOUT_STOP);
+  }
+
+  async vmDelete(params: GatewayVmDeleteParams): Promise<GatewayGenericResult> {
+    return this.send("vm.delete", params, TIMEOUT_DELETE);
+  }
+
+  async vmFullUpdatePolicy(params: GatewayUpdatePolicyParams): Promise<GatewayGenericResult> {
+    return this.send("vm.fullUpdatePolicy", params, TIMEOUT_UPDATE_POLICY);
+  }
+
+  async snapshotCreate(params: GatewaySnapshotCreateParams): Promise<GatewayGenericResult> {
+    return this.send("vm.snapshot.create", {
+      ...params,
+      ownerUid: params.ownerUid ?? getOwnerUid(),
+      ownerGid: params.ownerGid ?? getOwnerGid(),
+    }, TIMEOUT_SNAPSHOT);
+  }
+
+  async rootfsBuild(params: GatewayRootfsBuildParams): Promise<GatewayGenericResult> {
+    return this.send("rootfs.build", {
+      ...params,
+      ownerUid: params.ownerUid ?? getOwnerUid(),
+      ownerGid: params.ownerGid ?? getOwnerGid(),
+    }, TIMEOUT_ROOTFS_BUILD);
+  }
+
+  // -- Internal --
+
+  private async send(method: string, params?: unknown, timeoutMs: number = 10_000): Promise<any> {
     return new Promise((resolve, reject) => {
       const socket = connect(this.socketPath);
       let data = "";
@@ -87,20 +309,18 @@ export class GatewayClient {
         reject(new Error(`Gateway connection error: ${err.message}`));
       });
 
-      // Timeout after 10 seconds
-      socket.setTimeout(10000);
+      socket.setTimeout(timeoutMs);
       socket.on("timeout", () => {
         socket.destroy();
-        reject(new Error("Gateway connection timeout"));
+        reject(new Error(`Gateway connection timeout after ${timeoutMs}ms for method: ${method}`));
       });
     });
   }
 }
 
 /**
- * Ensure vmsan-gateway is running. If not, start it in the background
- * and wait for it to become ready. Non-fatal — if the gateway can't
- * start, we log and continue without proxy support.
+ * Ensure vmsan-gateway is running. Throws if the gateway can't be reached.
+ * The gateway daemon is required for all VM operations — without it, nothing works.
  */
 export async function ensureGatewayRunning(gatewayBin: string): Promise<void> {
   const client = new GatewayClient();
@@ -125,15 +345,15 @@ export async function ensureGatewayRunning(gatewayBin: string): Promise<void> {
         // Still starting
       }
     }
-    return; // systemctl started it or timed out
   } catch {
     // systemctl failed (not installed, no service file, etc.)
   }
 
   // Fallback: direct spawn
   if (!existsSync(gatewayBin)) {
-    consola.debug("vmsan-gateway binary not found, skipping proxy layer");
-    return;
+    throw new Error(
+      "vmsan-gateway binary not found. Install it with: curl -fsSL https://vmsan.dev/install | bash",
+    );
   }
 
   const child = spawn(gatewayBin, ["start"], {
@@ -142,8 +362,8 @@ export async function ensureGatewayRunning(gatewayBin: string): Promise<void> {
   });
   child.unref();
 
-  // Wait for it to be ready (up to 2 seconds)
-  for (let i = 0; i < 10; i++) {
+  // Wait for it to be ready (up to 5 seconds)
+  for (let i = 0; i < 25; i++) {
     await new Promise((r) => setTimeout(r, 200));
     try {
       await client.ping();
@@ -152,5 +372,8 @@ export async function ensureGatewayRunning(gatewayBin: string): Promise<void> {
       // Still starting
     }
   }
-  consola.debug("vmsan-gateway failed to start within timeout");
+
+  throw new Error(
+    "vmsan-gateway failed to start within 5 seconds. Check: sudo systemctl status vmsan-gateway",
+  );
 }
