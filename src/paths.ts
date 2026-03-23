@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
+import { existsSync } from "node:fs";
 
 export interface VmsanPaths {
   baseDir: string;
@@ -43,17 +44,29 @@ function resolveBaseDir(): string {
   return join(homedir(), ".vmsan");
 }
 
+/**
+ * Resolve a binary path: prefer user-local (~/.vmsan/bin), fallback to /usr/local/bin.
+ * The gateway installs privileged binaries to /usr/local/bin for system-wide access.
+ */
+function resolveBin(base: string, name: string): string {
+  const userPath = join(base, "bin", name);
+  if (existsSync(userPath)) return userPath;
+  const systemPath = join("/usr/local/bin", name);
+  if (existsSync(systemPath)) return systemPath;
+  return userPath; // return user path even if missing (for error messages)
+}
+
 export function vmsanPaths(baseDir?: string): VmsanPaths {
   const base = baseDir ?? resolveBaseDir();
   return {
     baseDir: base,
     vmsDir: join(base, "vms"),
-    jailerBaseDir: join(base, "jailer"),
+    jailerBaseDir: "/srv/jailer",
     binDir: join(base, "bin"),
-    agentBin: join(base, "bin", "vmsan-agent"),
-    nftablesBin: join(base, "bin", "vmsan-nftables"),
-    gatewayBin: join(base, "bin", "vmsan-gateway"),
-    dnsproxyBin: join(base, "bin", "dnsproxy"),
+    agentBin: resolveBin(base, "vmsan-agent"),
+    nftablesBin: resolveBin(base, "vmsan-nftables"),
+    gatewayBin: resolveBin(base, "vmsan-gateway"),
+    dnsproxyBin: resolveBin(base, "dnsproxy"),
     kernelsDir: join(base, "kernels"),
     rootfsDir: join(base, "rootfs"),
     registryDir: join(base, "registry", "rootfs"),

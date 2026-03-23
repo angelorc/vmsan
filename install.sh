@@ -395,6 +395,19 @@ if [ "$UNINSTALL" -eq 1 ]; then
     fi
   fi
 
+  # Stop and disable gateway service
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl stop vmsan-gateway 2>/dev/null || true
+    systemctl disable vmsan-gateway 2>/dev/null || true
+    rm -f /etc/systemd/system/vmsan-gateway.service
+    systemctl daemon-reload 2>/dev/null || true
+  fi
+
+  # Remove system-wide binaries installed by the gateway setup
+  rm -f /usr/local/bin/firecracker /usr/local/bin/jailer
+  rm -f /usr/local/bin/vmsan-nftables /usr/local/bin/vmsan-gateway
+  rm -rf /run/vmsan /srv/jailer
+
   if [ -d "$VMSAN_DIR" ]; then
     info "Removing $VMSAN_DIR..."
     rm -rf "$VMSAN_DIR"
@@ -540,6 +553,18 @@ info "Setting up $VMSAN_DIR..."
 mkdir -p "$VMSAN_DIR"/{bin,kernels,rootfs,vms,jailer,registry/rootfs,snapshots,cloudflare}
 success "Directories created"
 
+# --- vmsan group + system directories ---
+
+# Create vmsan system group early so /srv/jailer can have correct ownership.
+# The vmsan group grants non-root users access to the gateway Unix socket.
+groupadd -r vmsan 2>/dev/null || true
+REAL_USER="${SUDO_USER:-$(whoami)}"
+usermod -aG vmsan "$REAL_USER" 2>/dev/null || true
+
+mkdir -p /srv/jailer
+chown root:vmsan /srv/jailer
+chmod 0750 /srv/jailer
+
 # --- firecracker + jailer ---
 
 if [ -x "$VMSAN_DIR/bin/firecracker" ] && [ -x "$VMSAN_DIR/bin/jailer" ]; then
@@ -566,6 +591,10 @@ else
   trap - EXIT
   success "Firecracker $FC_VER installed"
 fi
+
+# Install firecracker + jailer to system path (gateway runs as root, needs these)
+install -m 0755 "$VMSAN_DIR/bin/firecracker" /usr/local/bin/firecracker
+install -m 0755 "$VMSAN_DIR/bin/jailer" /usr/local/bin/jailer
 
 # --- kernel ---
 
@@ -695,6 +724,9 @@ else
   success "vmsan-nftables ${LATEST_TAG} installed"
 fi
 
+# Install vmsan-nftables to system path (gateway needs it)
+install -m 0755 "$NFTABLES_PATH" /usr/local/bin/vmsan-nftables
+
 # --- vmsan-gateway ---
 
 GATEWAY_PATH="$VMSAN_DIR/bin/vmsan-gateway"
@@ -713,6 +745,9 @@ else
   chmod +x "$GATEWAY_PATH"
   success "vmsan-gateway ${LATEST_TAG} installed"
 fi
+
+# Install vmsan-gateway to system path (systemd service expects it here)
+install -m 0755 "$GATEWAY_PATH" /usr/local/bin/vmsan-gateway
 
 # --- dnsproxy ---
 
@@ -1134,28 +1169,25 @@ EOF
 # --- systemd service ---
 
 if command -v systemctl >/dev/null 2>&1; then
-  # Create vmsan system group (for socket access)
-  groupadd -r vmsan 2>/dev/null || true
-  # Add the real user (not root) to vmsan group
-  REAL_USER="${SUDO_USER:-$(whoami)}"
-  usermod -aG vmsan "$REAL_USER" 2>/dev/null || true
-  if [ "$REAL_USER" != "$(whoami)" ]; then
-    info "Added $REAL_USER to vmsan group (re-login required for group to take effect)"
-  fi
-
-  # Install gateway service unit
+  # Install gateway systemd service unit (group was created earlier)
   GATEWAY_SERVICE_SRC=""
   if [ "$INSTALL_MODE" = "source" ] && [ -f "$VMSAN_SRC/hostd/cmd/vmsan-gateway/vmsan-gateway.service" ]; then
     GATEWAY_SERVICE_SRC="$VMSAN_SRC/hostd/cmd/vmsan-gateway/vmsan-gateway.service"
   fi
 
   if [ -n "$GATEWAY_SERVICE_SRC" ]; then
-    # Patch ExecStart to point to the actual binary path
-    sed "s|ExecStart=.*|ExecStart=$GATEWAY_PATH start|" "$GATEWAY_SERVICE_SRC" \
-      > /etc/systemd/system/vmsan-gateway.service
+    # Service file already has ExecStart=/usr/local/bin/vmsan-gateway — no patching needed
+    cp "$GATEWAY_SERVICE_SRC" /etc/systemd/system/vmsan-gateway.service
     systemctl daemon-reload
     systemctl enable vmsan-gateway 2>/dev/null || true
-    success "vmsan-gateway systemd service installed and enabled"
+    # Start or restart the gateway
+    systemctl restart vmsan-gateway 2>/dev/null || systemctl start vmsan-gateway 2>/dev/null || true
+    success "vmsan-gateway systemd service installed and started"
+  fi
+
+  REAL_USER="${SUDO_USER:-$(whoami)}"
+  if [ "$REAL_USER" != "root" ]; then
+    info "User $REAL_USER is in vmsan group — run 'newgrp vmsan' or re-login to activate"
   fi
 fi
 
