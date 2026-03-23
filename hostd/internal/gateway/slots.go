@@ -55,6 +55,22 @@ func (a *SlotAllocator) Allocate(vmId string) (int, error) {
 	return -1, fmt.Errorf("no free network slots (max %d)", a.max)
 }
 
+// AllocateAt reserves a specific slot for a VM. This is used during restart
+// to re-register a previously-assigned slot. Returns an error if the slot is
+// already used by a different VM.
+func (a *SlotAllocator) AllocateAt(slot int, vmId string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if existing, ok := a.used[slot]; ok && existing != vmId {
+		return fmt.Errorf("slot %d already used by %s", slot, existing)
+	}
+	a.used[slot] = vmId
+	a.reverse[vmId] = slot
+	a.persist()
+	return nil
+}
+
 // Release frees a slot by VM ID.
 func (a *SlotAllocator) Release(vmId string) {
 	a.mu.Lock()

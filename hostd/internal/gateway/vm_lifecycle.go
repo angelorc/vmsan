@@ -39,36 +39,55 @@ const (
 
 // vmCreateParams holds the parameters for vm.create.
 type vmCreateParams struct {
-	VCPUs         int      `json:"vcpus"`
-	MemMiB        int      `json:"memMib"`
-	Runtime       string   `json:"runtime"`
-	DiskSizeGb    float64  `json:"diskSizeGb"`
-	NetworkPolicy string   `json:"networkPolicy"`
-	Domains       []string `json:"domains,omitempty"`
-	AllowedCIDRs  []string `json:"allowedCidrs,omitempty"`
-	DeniedCIDRs   []string `json:"deniedCidrs,omitempty"`
-	Ports         []int    `json:"ports,omitempty"`
-	BandwidthMbit int      `json:"bandwidthMbit,omitempty"`
-	AllowICMP     bool     `json:"allowIcmp,omitempty"`
-	Project       string   `json:"project,omitempty"`
-	Service       string   `json:"service,omitempty"`
-	ConnectTo     []string `json:"connectTo,omitempty"`
-	SkipDNAT      bool     `json:"skipDnat,omitempty"`
-	KernelPath    string   `json:"kernelPath,omitempty"`
-	RootfsPath    string   `json:"rootfsPath,omitempty"`
-	SnapshotID    string   `json:"snapshotId,omitempty"`
-	AgentBinary   string   `json:"agentBinary,omitempty"`
-	AgentToken    string   `json:"agentToken,omitempty"`
-	VMId          string   `json:"vmId,omitempty"`
+	VCPUs          int      `json:"vcpus"`
+	MemMiB         int      `json:"memMib"`
+	Runtime        string   `json:"runtime"`
+	DiskSizeGb     float64  `json:"diskSizeGb"`
+	NetworkPolicy  string   `json:"networkPolicy"`
+	Domains        []string `json:"domains,omitempty"`
+	AllowedCIDRs   []string `json:"allowedCidrs,omitempty"`
+	DeniedCIDRs    []string `json:"deniedCidrs,omitempty"`
+	Ports          []int    `json:"ports,omitempty"`
+	BandwidthMbit  int      `json:"bandwidthMbit,omitempty"`
+	AllowICMP      bool     `json:"allowIcmp,omitempty"`
+	Project        string   `json:"project,omitempty"`
+	Service        string   `json:"service,omitempty"`
+	ConnectTo      []string `json:"connectTo,omitempty"`
+	SkipDNAT       bool     `json:"skipDnat,omitempty"`
+	KernelPath     string   `json:"kernelPath,omitempty"`
+	RootfsPath     string   `json:"rootfsPath,omitempty"`
+	SnapshotID     string   `json:"snapshotId,omitempty"`
+	AgentBinary    string   `json:"agentBinary,omitempty"`
+	AgentToken     string   `json:"agentToken,omitempty"`
+	VMId           string   `json:"vmId,omitempty"`
+	DisableSeccomp bool     `json:"disableSeccomp,omitempty"`
+	DisablePidNs   bool     `json:"disablePidNs,omitempty"`
+	DisableCgroup  bool     `json:"disableCgroup,omitempty"`
+	SeccompFilter  string   `json:"seccompFilter,omitempty"`
+	OwnerUID       int      `json:"ownerUid,omitempty"`
+	OwnerGID       int      `json:"ownerGid,omitempty"`
 }
 
 // vmCreateResponse is the response for vm.create.
 type vmCreateResponse struct {
-	VMId    string `json:"vmId"`
-	Slot    int    `json:"slot"`
-	HostIP  string `json:"hostIp"`
-	GuestIP string `json:"guestIp"`
-	MeshIP  string `json:"meshIp,omitempty"`
+	VMId       string `json:"vmId"`
+	Slot       int    `json:"slot"`
+	HostIP     string `json:"hostIp"`
+	GuestIP    string `json:"guestIp"`
+	MeshIP     string `json:"meshIp,omitempty"`
+	TAPDevice  string `json:"tapDevice"`
+	MACAddress string `json:"macAddress"`
+	NetNSName  string `json:"netnsName"`
+	VethHost   string `json:"vethHost"`
+	VethGuest  string `json:"vethGuest"`
+	SubnetMask string `json:"subnetMask"`
+	ChrootDir  string `json:"chrootDir"`
+	SocketPath string `json:"socketPath"`
+	PID        int    `json:"pid"`
+	AgentToken string `json:"agentToken,omitempty"`
+	DNSPort    int    `json:"dnsPort"`
+	SNIPort    int    `json:"sniPort"`
+	HTTPPort   int    `json:"httpPort"`
 }
 
 // vmDeleteParams holds the parameters for vm.delete.
@@ -79,12 +98,12 @@ type vmDeleteParams struct {
 
 // networkSetupParams holds the parameters for network.setup.
 type networkSetupParams struct {
-	VMId          string `json:"vmId"`
-	Slot          int    `json:"slot"`
-	Policy        string `json:"policy"`
-	BandwidthMbit int    `json:"bandwidthMbit,omitempty"`
-	AllowICMP     bool   `json:"allowIcmp,omitempty"`
-	SkipDNAT      bool   `json:"skipDnat,omitempty"`
+	VMId          string   `json:"vmId"`
+	Slot          int      `json:"slot"`
+	Policy        string   `json:"policy"`
+	BandwidthMbit int      `json:"bandwidthMbit,omitempty"`
+	AllowICMP     bool     `json:"allowIcmp,omitempty"`
+	SkipDNAT      bool     `json:"skipDnat,omitempty"`
 	AllowedCIDRs  []string `json:"allowedCidrs,omitempty"`
 	DeniedCIDRs   []string `json:"deniedCidrs,omitempty"`
 	Ports         []int    `json:"ports,omitempty"`
@@ -361,7 +380,7 @@ func (s *Server) handleVMCreateImpl(ctx context.Context, params json.RawMessage)
 		Policy:         policy,
 		AllowedCIDRs:   p.AllowedCIDRs,
 		DeniedCIDRs:    p.DeniedCIDRs,
-		PublishedPorts:  publishedPorts,
+		PublishedPorts: publishedPorts,
 		SkipDNAT:       p.SkipDNAT,
 		AllowICMP:      p.AllowICMP,
 	}
@@ -433,8 +452,8 @@ func (s *Server) handleVMCreateImpl(ctx context.Context, params json.RawMessage)
 	}
 
 	// Inject agent if binary is available.
+	agentToken := p.AgentToken
 	if agentBin != "" {
-		agentToken := p.AgentToken
 		if agentToken == "" {
 			tokenBytes := make([]byte, 16)
 			rand.Read(tokenBytes)
@@ -479,13 +498,16 @@ func (s *Server) handleVMCreateImpl(ctx context.Context, params json.RawMessage)
 		Paths:          paths,
 		UID:            jailerUID,
 		GID:            jailerGID,
-		NewPidNs:       true,
+		NewPidNs:       !p.DisablePidNs,
 		NetNS:          netnsName,
-		Cgroup: &jailer.CgroupConfig{
+		SeccompFilter:  p.SeccompFilter,
+	}
+	if !p.DisableCgroup {
+		spawnCfg.Cgroup = &jailer.CgroupConfig{
 			CPUQuotaUs:  cpuQuotaUs,
 			CPUPeriodUs: cpuPeriodUs,
 			MemoryBytes: memBytes,
-		},
+		}
 	}
 	if err := jailer.Spawn(spawnCfg); err != nil {
 		retErr = err
@@ -571,11 +593,24 @@ func (s *Server) handleVMCreateImpl(ctx context.Context, params json.RawMessage)
 	return Response{
 		OK: true,
 		VM: vmCreateResponse{
-			VMId:    vmId,
-			Slot:    slot,
-			HostIP:  hostIP,
-			GuestIP: guestIP,
-			MeshIP:  meshIP,
+			VMId:       vmId,
+			Slot:       slot,
+			HostIP:     hostIP,
+			GuestIP:    guestIP,
+			MeshIP:     meshIP,
+			TAPDevice:  tapDevice,
+			MACAddress: macAddress,
+			NetNSName:  netnsName,
+			VethHost:   vethHost,
+			VethGuest:  vethGuest,
+			SubnetMask: netsetup.VMSubnetMask,
+			ChrootDir:  paths.ChrootDir,
+			SocketPath: paths.SocketPath,
+			PID:        findFirecrackerPID(paths),
+			AgentToken: agentToken,
+			DNSPort:    netsetup.DNSPort(slot),
+			SNIPort:    netsetup.SNIPort(slot),
+			HTTPPort:   netsetup.HTTPPort(slot),
 		},
 	}
 }
@@ -719,12 +754,12 @@ func (s *Server) handleNetworkSetupImpl(ctx context.Context, params json.RawMess
 	guestIP := netsetup.VMGuestIP(p.Slot)
 	publishedPorts := buildPublishedPorts(p.Ports, guestIP)
 	fwCfg := netsetup.FirewallConfig{
-		Policy:        p.Policy,
-		AllowedCIDRs:  p.AllowedCIDRs,
-		DeniedCIDRs:   p.DeniedCIDRs,
+		Policy:         p.Policy,
+		AllowedCIDRs:   p.AllowedCIDRs,
+		DeniedCIDRs:    p.DeniedCIDRs,
 		PublishedPorts: publishedPorts,
-		SkipDNAT:      p.SkipDNAT,
-		AllowICMP:     p.AllowICMP,
+		SkipDNAT:       p.SkipDNAT,
+		AllowICMP:      p.AllowICMP,
 	}
 	if err := netsetup.SetupFirewall(ctx, netCfg, fwCfg); err != nil {
 		netsetup.TeardownNamespace(netCfg)

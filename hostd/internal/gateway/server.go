@@ -29,13 +29,13 @@ type Config struct {
 
 // Server is the vmsan-gateway Unix socket server.
 type Server struct {
-	config         Config
-	manager        *Manager
-	meshManager    *MeshManager
-	dnsSupervisor  *DNSSupervisor
-	slots          *SlotAllocator
-	startTime      time.Time
-	cancelFunc     context.CancelFunc // set by Run(), used by shutdown handler
+	config        Config
+	manager       *Manager
+	meshManager   *MeshManager
+	dnsSupervisor *DNSSupervisor
+	slots         *SlotAllocator
+	startTime     time.Time
+	cancelFunc    context.CancelFunc // set by Run(), used by shutdown handler
 }
 
 // Request is the JSON-RPC request envelope.
@@ -223,6 +223,16 @@ func (s *Server) dispatch(ctx context.Context, req *Request) Response {
 		return s.handleVMCreate(ctx, req.Params)
 	case "vm.delete":
 		return s.handleVMDelete(ctx, req.Params)
+	case "vm.restart":
+		return s.handleVMRestart(ctx, req.Params)
+	case "vm.fullStop":
+		return s.handleVMFullStop(ctx, req.Params)
+	case "vm.fullUpdatePolicy":
+		return s.handleVMFullUpdatePolicy(ctx, req.Params)
+	case "vm.snapshot.create":
+		return s.handleVMSnapshotCreate(ctx, req.Params)
+	case "rootfs.build":
+		return s.handleRootfsBuild(ctx, req.Params)
 	case "network.setup":
 		return s.handleNetworkSetup(ctx, req.Params)
 	case "network.teardown":
