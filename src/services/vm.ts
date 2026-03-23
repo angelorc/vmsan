@@ -204,6 +204,7 @@ export class VMService {
         disablePidNs: opts.disablePidNs,
         disableCgroup: opts.disableCgroup,
         seccompFilter: seccompFilter ?? undefined,
+        jailerBaseDir: paths.jailerBaseDir,
       });
 
       if (!result.ok || !result.vm) {
@@ -365,6 +366,7 @@ export class VMService {
         agentBinary: existsSync(paths.agentBin) ? paths.agentBin : undefined,
         agentToken: state.agentToken || undefined,
         netnsName: state.network.netnsName,
+        jailerBaseDir: paths.jailerBaseDir,
       });
 
       if (!result.ok || !result.vm) {
@@ -461,6 +463,7 @@ export class VMService {
         pid: state.pid ?? undefined,
         netnsName: state.network.netnsName,
         socketPath: state.apiSocket || undefined,
+        jailerBaseDir: this.paths.jailerBaseDir,
       });
 
       if (!result.ok) {
@@ -613,7 +616,7 @@ export class VMService {
 
       // 2. Delegate chroot cleanup to gateway
       const gateway = new GatewayClient();
-      const result = await gateway.vmDelete({ vmId, force });
+      const result = await gateway.vmDelete({ vmId, force, jailerBaseDir: this.paths.jailerBaseDir });
       if (!result.ok) {
         this.logger.debug(`Gateway vm.delete warning: ${result.error ?? "unknown"}`);
       }

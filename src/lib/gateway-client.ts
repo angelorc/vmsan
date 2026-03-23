@@ -90,6 +90,7 @@ export interface GatewayVmCreateParams {
   seccompFilter?: string;
   ownerUid?: number;
   ownerGid?: number;
+  jailerBaseDir?: string;
 }
 
 export interface GatewayVmCreateResult {
@@ -145,6 +146,7 @@ export interface GatewayVmRestartParams {
   agentBinary?: string;
   agentToken?: string;
   netnsName?: string;
+  jailerBaseDir?: string;
 }
 
 export interface GatewayVmFullStopParams {
@@ -153,11 +155,13 @@ export interface GatewayVmFullStopParams {
   pid?: number;
   netnsName?: string;
   socketPath?: string;
+  jailerBaseDir?: string;
 }
 
 export interface GatewayVmDeleteParams {
   vmId: string;
   force?: boolean;
+  jailerBaseDir?: string;
 }
 
 export interface GatewayUpdatePolicyParams {

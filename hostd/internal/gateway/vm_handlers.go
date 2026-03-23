@@ -42,18 +42,20 @@ type vmRestartParams struct {
 	MemMiB      int    `json:"memMib"`
 	KernelPath  string `json:"kernelPath"`
 	RootfsPath  string `json:"rootfsPath"`
-	AgentBinary string `json:"agentBinary,omitempty"`
-	AgentToken  string `json:"agentToken,omitempty"`
-	NetNSName   string `json:"netnsName,omitempty"`
+	AgentBinary   string `json:"agentBinary,omitempty"`
+	AgentToken    string `json:"agentToken,omitempty"`
+	NetNSName     string `json:"netnsName,omitempty"`
+	JailerBaseDir string `json:"jailerBaseDir,omitempty"`
 }
 
 // vmFullStopParams holds the parameters for vm.fullStop (full lifecycle stop).
 type vmFullStopParams struct {
-	VMId       string `json:"vmId"`
-	Slot       int    `json:"slot"`
-	PID        int    `json:"pid,omitempty"`
-	NetNSName  string `json:"netnsName,omitempty"`
-	SocketPath string `json:"socketPath,omitempty"`
+	VMId          string `json:"vmId"`
+	Slot          int    `json:"slot"`
+	PID           int    `json:"pid,omitempty"`
+	NetNSName     string `json:"netnsName,omitempty"`
+	SocketPath    string `json:"socketPath,omitempty"`
+	JailerBaseDir string `json:"jailerBaseDir,omitempty"`
 }
 
 // vmFullUpdatePolicyParams holds the parameters for vm.fullUpdatePolicy.
@@ -72,12 +74,13 @@ type vmFullUpdatePolicyParams struct {
 
 // vmSnapshotCreateParams holds the parameters for vm.snapshot.create.
 type vmSnapshotCreateParams struct {
-	VMId       string `json:"vmId"`
-	SnapshotID string `json:"snapshotId"`
-	SocketPath string `json:"socketPath"`
-	DestDir    string `json:"destDir"`
-	ChrootDir  string `json:"chrootDir"`
-	OwnerUID   int    `json:"ownerUid"`
+	VMId          string `json:"vmId"`
+	SnapshotID    string `json:"snapshotId"`
+	SocketPath    string `json:"socketPath"`
+	DestDir       string `json:"destDir"`
+	ChrootDir     string `json:"chrootDir"`
+	JailerBaseDir string `json:"jailerBaseDir,omitempty"`
+	OwnerUID      int    `json:"ownerUid"`
 	OwnerGID   int    `json:"ownerGid"`
 }
 
@@ -151,7 +154,7 @@ func (s *Server) handleVMRestart(ctx context.Context, params json.RawMessage) Re
 	if p.SocketPath != "" {
 		os.Remove(p.SocketPath)
 	}
-	paths := jailer.NewPaths(p.VMId, jailerBaseDir)
+	paths := jailer.NewPaths(p.VMId, resolveJailerBaseDir(p.JailerBaseDir))
 	os.Remove(paths.SocketPath)
 
 	// 3. Build a vmCreateParams from restart params for the helpers.
@@ -178,6 +181,7 @@ func (s *Server) handleVMRestart(ctx context.Context, params json.RawMessage) Re
 		DisablePidNs:   p.DisablePidNs,
 		DisableCgroup:  p.DisableCgroup,
 		SeccompFilter:  p.SeccompFilter,
+		JailerBaseDir:  p.JailerBaseDir,
 	}
 
 	// 4. Setup network.
@@ -246,7 +250,7 @@ func (s *Server) handleVMFullStop(ctx context.Context, params json.RawMessage) R
 	}
 
 	// 1. Kill Firecracker process.
-	paths := jailer.NewPaths(p.VMId, jailerBaseDir)
+	paths := jailer.NewPaths(p.VMId, resolveJailerBaseDir(p.JailerBaseDir))
 	socketPath := p.SocketPath
 	if socketPath == "" {
 		socketPath = paths.SocketPath
@@ -456,7 +460,7 @@ func (s *Server) handleVMSnapshotCreate(ctx context.Context, params json.RawMess
 	// 4. Copy snapshot files from chroot to destination.
 	chrootDir := p.ChrootDir
 	if chrootDir == "" {
-		chrootDir = jailer.NewPaths(p.VMId, jailerBaseDir).ChrootDir
+		chrootDir = jailer.NewPaths(p.VMId, resolveJailerBaseDir(p.JailerBaseDir)).ChrootDir
 	}
 	rootDir := filepath.Join(chrootDir, "root")
 

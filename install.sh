@@ -406,7 +406,7 @@ if [ "$UNINSTALL" -eq 1 ]; then
   # Remove system-wide binaries installed by the gateway setup
   rm -f /usr/local/bin/firecracker /usr/local/bin/jailer
   rm -f /usr/local/bin/vmsan-nftables /usr/local/bin/vmsan-gateway
-  rm -rf /run/vmsan /srv/jailer
+  rm -rf /run/vmsan
 
   if [ -d "$VMSAN_DIR" ]; then
     info "Removing $VMSAN_DIR..."
@@ -560,10 +560,6 @@ success "Directories created"
 groupadd -r vmsan 2>/dev/null || true
 REAL_USER="${SUDO_USER:-$(whoami)}"
 usermod -aG vmsan "$REAL_USER" 2>/dev/null || true
-
-mkdir -p /srv/jailer
-chown root:vmsan /srv/jailer
-chmod 0750 /srv/jailer
 
 # --- firecracker + jailer ---
 

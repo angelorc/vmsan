@@ -39,6 +39,14 @@ var (
 	jailerBin      = "/usr/bin/jailer"
 )
 
+// resolveJailerBaseDir returns the provided base dir or the default.
+func resolveJailerBaseDir(dir string) string {
+	if dir != "" {
+		return dir
+	}
+	return jailerBaseDir
+}
+
 // SetBinDir configures the directory containing firecracker and jailer binaries.
 func SetBinDir(dir string) {
 	if dir == "" {
@@ -75,6 +83,7 @@ type vmCreateParams struct {
 	DisablePidNs   bool     `json:"disablePidNs,omitempty"`
 	DisableCgroup  bool     `json:"disableCgroup,omitempty"`
 	SeccompFilter  string   `json:"seccompFilter,omitempty"`
+	JailerBaseDir  string   `json:"jailerBaseDir,omitempty"`
 	OwnerUID       int      `json:"ownerUid,omitempty"`
 	OwnerGID       int      `json:"ownerGid,omitempty"`
 }
@@ -103,8 +112,9 @@ type vmCreateResponse struct {
 
 // vmDeleteParams holds the parameters for vm.delete.
 type vmDeleteParams struct {
-	VMId  string `json:"vmId"`
-	Force bool   `json:"force,omitempty"`
+	VMId          string `json:"vmId"`
+	Force         bool   `json:"force,omitempty"`
+	JailerBaseDir string `json:"jailerBaseDir,omitempty"`
 }
 
 // networkSetupParams holds the parameters for network.setup.
@@ -439,7 +449,7 @@ func (s *Server) handleVMCreateImpl(ctx context.Context, params json.RawMessage)
 	}
 
 	// 10. Prepare jailer chroot.
-	paths := jailer.NewPaths(vmId, jailerBaseDir)
+	paths := jailer.NewPaths(vmId, resolveJailerBaseDir(p.JailerBaseDir))
 
 	agentBin := p.AgentBinary
 	if agentBin == "" {
@@ -672,7 +682,7 @@ func (s *Server) handleVMDeleteImpl(ctx context.Context, params json.RawMessage)
 	}
 
 	// 5. Stop Firecracker: try graceful via API, then force kill.
-	paths := jailer.NewPaths(p.VMId, jailerBaseDir)
+	paths := jailer.NewPaths(p.VMId, resolveJailerBaseDir(p.JailerBaseDir))
 	fcClient := firecracker.NewClient(paths.SocketPath)
 
 	stopped := false

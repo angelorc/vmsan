@@ -151,7 +151,7 @@ func (s *Server) spawnFirecracker(ctx context.Context, vmId string, slot int, p 
 	hostIP := netCfg.HostIP
 
 	// 1. Prepare jailer chroot.
-	paths := jailer.NewPaths(vmId, jailerBaseDir)
+	paths := jailer.NewPaths(vmId, resolveJailerBaseDir(p.JailerBaseDir))
 
 	agentBin := p.AgentBinary
 	if agentBin == "" {

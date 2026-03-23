@@ -61,7 +61,7 @@ export function vmsanPaths(baseDir?: string): VmsanPaths {
   return {
     baseDir: base,
     vmsDir: join(base, "vms"),
-    jailerBaseDir: "/srv/jailer",
+    jailerBaseDir: join(base, "jailer"),
     binDir: join(base, "bin"),
     agentBin: resolveBin(base, "vmsan-agent"),
     nftablesBin: resolveBin(base, "vmsan-nftables"),
