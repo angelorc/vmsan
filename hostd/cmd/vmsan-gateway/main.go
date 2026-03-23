@@ -29,11 +29,17 @@ func main() {
 
 	// Configure binary locations. The gateway runs as root via systemd
 	// and doesn't have the user's ~/.vmsan/bin in its PATH.
-	binDir := findBinDir(envOr("VMSAN_BIN_DIR", ""))
-	if binDir != "" {
-		netsetup.SetNftablesBinDir(binDir)
-		gateway.SetBinDir(binDir)
-		slog.Info("binary dir", "dir", binDir)
+	// Each binary is searched independently since they may be in different dirs.
+	fcDir := findBinary("firecracker", envOr("VMSAN_BIN_DIR", ""))
+	nftDir := findBinary("vmsan-nftables", envOr("VMSAN_BIN_DIR", ""))
+
+	if fcDir != "" {
+		gateway.SetBinDir(fcDir)
+		slog.Info("firecracker/jailer dir", "dir", fcDir)
+	}
+	if nftDir != "" {
+		netsetup.SetNftablesBinDir(nftDir)
+		slog.Info("vmsan-nftables dir", "dir", nftDir)
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
@@ -70,23 +76,16 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-// findBinDir locates the directory containing vmsan binaries (firecracker,
-// jailer, vmsan-nftables). It checks: explicit override, /usr/local/bin,
-// /usr/bin, SUDO_USER's ~/.vmsan/bin, any user's ~/.vmsan/bin.
-func findBinDir(override string) string {
+// findBinary locates the directory containing the named binary.
+// Search order: explicit override, /usr/local/bin, /usr/bin, any /home/*/.vmsan/bin.
+func findBinary(name, override string) string {
 	if override != "" {
-		return override
-	}
-	// Check standard system paths
-	for _, dir := range []string{"/usr/local/bin", "/usr/bin"} {
-		if _, err := os.Stat(dir + "/firecracker"); err == nil {
-			return dir
+		if _, err := os.Stat(override + "/" + name); err == nil {
+			return override
 		}
 	}
-	// Check SUDO_USER's ~/.vmsan/bin
-	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
-		dir := fmt.Sprintf("/home/%s/.vmsan/bin", sudoUser)
-		if _, err := os.Stat(dir + "/firecracker"); err == nil {
+	for _, dir := range []string{"/usr/local/bin", "/usr/bin"} {
+		if _, err := os.Stat(dir + "/" + name); err == nil {
 			return dir
 		}
 	}
@@ -94,7 +93,7 @@ func findBinDir(override string) string {
 	entries, _ := os.ReadDir("/home")
 	for _, e := range entries {
 		dir := fmt.Sprintf("/home/%s/.vmsan/bin", e.Name())
-		if _, err := os.Stat(dir + "/firecracker"); err == nil {
+		if _, err := os.Stat(dir + "/" + name); err == nil {
 			return dir
 		}
 	}
