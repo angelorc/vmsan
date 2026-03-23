@@ -1,43 +1,39 @@
-import { dirname, join } from "node:path";
-import { existsSync, rmSync } from "node:fs";
-import { randomBytes } from "node:crypto";
+import { join } from "node:path";
+import { existsSync } from "node:fs";
 import type { VmsanContext } from "../context.ts";
 import type { VmState, VmStateStore } from "../lib/vm-state.ts";
-import { NetworkManager, verifyCleanup, type NetworkConfig } from "../lib/network.ts";
-import { FileLock } from "../lib/file-lock.ts";
-import { FirecrackerClient } from "./firecracker.ts";
-import { Jailer, type CgroupConfig, CGROUP_VMM_OVERHEAD_MIB } from "../lib/jailer.ts";
+import type { CgroupConfig } from "../lib/jailer.ts";
+import { CGROUP_VMM_OVERHEAD_MIB } from "../lib/jailer.ts";
+import { NetworkManager, type NetworkConfig } from "../lib/network.ts";
 import {
-  getVmJailerPid,
-  getVmPid,
   validateEnvironment,
   findKernel,
   findBaseRootfs,
   findRuntimeRootfs,
-  waitForSocket,
 } from "../commands/create/environment.ts";
-import { killOrphanVmProcess, cleanupNetwork, cleanupChroot } from "../commands/create/cleanup.ts";
 import { buildInitialVmState } from "../commands/create/state.ts";
 import { resolveImageRootfs } from "../commands/create/image-rootfs.ts";
 import {
   type ImageReference,
   validatePublishedPortsAvailable,
 } from "../commands/create/validation.ts";
-import { ensureSeccompFilter } from "../lib/seccomp.ts";
 import type { NetworkPolicy, Runtime } from "../commands/create/types.ts";
 import {
   VmsanError,
   vmNotFoundError,
   vmNotStoppedError,
   vmNotRunningError,
-  chrootNotFoundError,
   mutuallyExclusiveFlagsError,
 } from "../errors/index.ts";
-import { generateVmId, safeKill, toError } from "../lib/utils.ts";
+import { generateVmId, toError } from "../lib/utils.ts";
 import { spawnTimeoutKiller } from "../lib/timeout-killer.ts";
 import { waitForAgent } from "../lib/vm-context.ts";
 import { AgentClient } from "./agent.ts";
 import { SnapshotService } from "./snapshot.ts";
+import { GatewayClient } from "../lib/gateway-client.ts";
+import { slotFromVmHostIp } from "../lib/network-address.ts";
+import { ensureSeccompFilter } from "../lib/seccomp.ts";
+import { FileLock } from "../lib/file-lock.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -136,12 +132,8 @@ export class VMService {
 
   async create(opts: CreateVmOptions): Promise<CreateVmResult> {
     const { logger, paths, hooks } = this;
-
     const vmId = generateVmId();
     const log = logger.withTag(vmId);
-
-    let networkConfig: NetworkConfig | undefined;
-    let chrootDir: string | undefined;
 
     try {
       // Pre-flight
@@ -151,242 +143,141 @@ export class VMService {
         throw mutuallyExclusiveFlagsError("--from-image", "--rootfs");
       }
 
-      const vcpus = opts.vcpus ?? 1;
-      const memMib = opts.memMib ?? 128;
-      const diskSizeGb = opts.diskSizeGb ?? 10;
-      const runtime: Runtime = opts.runtime ?? "base";
-      const networkPolicy: NetworkPolicy = opts.networkPolicy ?? "allow-all";
-      const domains = opts.domains ?? [];
-      const allowedCidrs = opts.allowedCidrs ?? [];
-      const deniedCidrs = opts.deniedCidrs ?? [];
-      const ports = opts.ports ?? [];
-      const bandwidthMbit = opts.bandwidthMbit;
-      const snapshotId = opts.snapshotId ?? null;
-      const timeoutMs = opts.timeoutMs ?? null;
-
       // Hook: beforeCreate (plugins may set opts.skipDnat)
       await hooks.callHook("vm:beforeCreate", { vmId, options: opts });
 
       // Port conflict check (only when DNAT is active)
       if (!opts.skipDnat) {
-        validatePublishedPortsAvailable(ports, paths);
+        validatePublishedPortsAvailable(opts.ports ?? [], paths);
       }
 
-      // Resolve kernel
+      // Resolve kernel (keep local resolution, pass absolute path to gateway)
       const kernelPath = opts.kernelPath ?? findKernel(paths.baseDir);
       logger.debug(`Kernel resolved: ${kernelPath}`);
 
-      // Resolve rootfs
+      // Resolve rootfs (keep local resolution)
       let rootfsPath: string;
       if (opts.fromImage) {
         rootfsPath = resolveImageRootfs(opts.fromImage, paths.registryDir, true);
-      } else if (runtime !== "base" && !opts.rootfsPath) {
-        rootfsPath = findRuntimeRootfs(runtime as Exclude<Runtime, "base">, paths.baseDir);
+      } else if ((opts.runtime ?? "base") !== "base" && !opts.rootfsPath) {
+        rootfsPath = findRuntimeRootfs(opts.runtime as Exclude<Runtime, "base">, paths.baseDir);
       } else {
         rootfsPath = opts.rootfsPath ?? findBaseRootfs(paths.baseDir);
       }
       logger.debug(`Rootfs resolved: ${rootfsPath}`);
 
-      const netnsName = opts.disableNetns ? undefined : `vmsan-${vmId}`;
-
       // Reuse agent token from snapshot metadata when restoring;
       // the agent inside the guest already has this token baked in.
       let agentToken: string | null = null;
-      if (snapshotId) {
-        const meta = SnapshotService.loadMetadata(paths.snapshotsDir, snapshotId);
+      if (opts.snapshotId) {
+        const meta = SnapshotService.loadMetadata(paths.snapshotsDir, opts.snapshotId);
         agentToken = meta?.agentToken ?? null;
       }
-      if (!agentToken && !opts.fromImage && existsSync(paths.agentBin)) {
-        agentToken = randomBytes(32).toString("hex");
-      }
+
+      // Resolve seccomp filter path to pass to gateway
+      const seccompFilter = opts.disableSeccomp ? undefined : ensureSeccompFilter(paths);
 
       log.start(`Creating VM ${vmId}...`);
 
-      // Allocate network slot + save initial state (under lock)
-      const slotLock = new FileLock(join(paths.vmsDir, ".slot-lock"), "slot-alloc");
-      const { net } = slotLock.run(() => {
-        const slot = this.store.allocateNetworkSlot();
-        logger.debug(`Network slot allocated: ${slot}`);
-        const net = NetworkManager.fromSlot(slot, {
-          networkPolicy,
-          allowedDomains: domains,
-          allowedCidrs,
-          deniedCidrs,
-          publishedPorts: ports,
-          bandwidthMbit,
-          netnsName,
-          skipDnat: opts.skipDnat,
-          allowIcmp: opts.allowIcmp,
-          project: opts.project,
-          service: opts.service,
-          connectTo: opts.connectTo,
-        });
-        networkConfig = net.config;
-
-        const state = buildInitialVmState({
-          vmId,
-          project: opts.project || "",
-          runtime,
-          diskSizeGb,
-          kernelPath,
-          rootfsPath,
-          vcpus,
-          memMib,
-          networkPolicy,
-          domains,
-          allowedCidrs,
-          deniedCidrs,
-          ports,
-          tapDevice: net.config.tapDevice,
-          hostIp: net.config.hostIp,
-          guestIp: net.config.guestIp,
-          subnetMask: net.config.subnetMask,
-          macAddress: net.config.macAddress,
-          snapshotId,
-          timeoutMs,
-          agentToken,
-          agentPort: paths.agentPort,
-          bandwidthMbit,
-          netnsName,
-          skipDnat: opts.skipDnat,
-          allowIcmp: opts.allowIcmp,
-          disableSeccomp: opts.disableSeccomp,
-          disablePidNs: opts.disablePidNs,
-          disableCgroup: opts.disableCgroup,
-          connectTo: opts.connectTo,
-          service: opts.service,
-        });
-        this.store.save(state);
-
-        return { net };
-      });
-      const netCfg = networkConfig!;
-
-      // Setup networking
-      log.start("Setting up networking...");
-      await net.setup();
-      log.success(
-        `Network: TAP ${netCfg.tapDevice}, Host ${netCfg.hostIp}, Guest ${netCfg.guestIp}`,
-      );
-
-      // Start gateway proxies and capture mesh IP (non-fatal)
-      const gatewayResult = await net.startProxies(vmId);
-      if (gatewayResult?.vm?.meshIp) {
-        this.store.update(vmId, {
-          network: {
-            ...this.store.load(vmId)!.network,
-            meshIp: gatewayResult.vm.meshIp,
-          },
-        });
-        logger.debug(`Mesh IP assigned: ${gatewayResult.vm.meshIp}`);
-      }
-
-      // Hook: network:afterSetup
-      await hooks.callHook("network:afterSetup", {
+      // Delegate to gateway (single RPC replaces ~15 privileged calls)
+      const gateway = new GatewayClient();
+      const result = await gateway.vmCreate({
         vmId,
-        slot: netCfg.slot,
-        networkConfig: netCfg,
-        domains,
-        networkPolicy,
-      });
-
-      // Prepare chroot
-      log.start("Preparing chroot...");
-      const snapshotConfig = snapshotId
-        ? {
-            snapshotFile: join(paths.snapshotsDir, snapshotId, "snapshot_file"),
-            memFile: join(paths.snapshotsDir, snapshotId, "mem_file"),
-          }
-        : undefined;
-
-      const jailer = new Jailer(vmId, paths.jailerBaseDir);
-
-      const agentConfig = agentToken
-        ? {
-            binaryPath: paths.agentBin,
-            token: agentToken,
-            port: paths.agentPort,
-            vmId,
-          }
-        : undefined;
-
-      const jailerPaths = jailer.prepare({
-        kernelSrc: kernelPath,
-        rootfsSrc: rootfsPath,
-        diskSizeGb,
-        snapshot: snapshotConfig,
-        agent: agentConfig,
-      });
-      chrootDir = jailerPaths.chrootDir;
-
-      this.store.update(vmId, {
-        chrootDir: jailerPaths.chrootDir,
-        apiSocket: jailerPaths.socketPath,
-      });
-      logger.debug(`Jailer chroot: ${jailerPaths.chrootDir}`);
-      logger.debug(`API socket path: ${jailerPaths.socketPath}`);
-
-      // Spawn Firecracker
-      log.start("Spawning Firecracker via jailer...");
-      const firecrackerBin = join(paths.binDir, "firecracker");
-      const jailerBin = join(paths.binDir, "jailer");
-
-      const seccompFilter = opts.disableSeccomp ? undefined : ensureSeccompFilter(paths);
-      if (seccompFilter) {
-        logger.debug(`Seccomp filter: ${seccompFilter}`);
-      }
-
-      const cgroup = opts.disableCgroup ? undefined : this.buildCgroupConfig(vcpus, memMib);
-
-      jailer.spawn({
-        firecrackerBin,
-        jailerBin,
-        chrootBase: jailerPaths.chrootBase,
+        vcpus: opts.vcpus,
+        memMib: opts.memMib,
+        runtime: opts.runtime,
+        diskSizeGb: opts.diskSizeGb,
+        networkPolicy: opts.networkPolicy,
+        domains: opts.domains,
+        allowedCidrs: opts.allowedCidrs,
+        deniedCidrs: opts.deniedCidrs,
+        ports: opts.ports,
+        bandwidthMbit: opts.bandwidthMbit,
+        allowIcmp: opts.allowIcmp,
+        project: opts.project,
+        service: opts.service,
+        connectTo: opts.connectTo,
+        skipDnat: opts.skipDnat,
+        kernelPath,
+        rootfsPath,
+        snapshotId: opts.snapshotId,
+        agentBinary: existsSync(paths.agentBin) ? paths.agentBin : undefined,
+        agentToken: agentToken ?? undefined,
+        disableSeccomp: opts.disableSeccomp,
+        disablePidNs: opts.disablePidNs,
+        disableCgroup: opts.disableCgroup,
         seccompFilter: seccompFilter ?? undefined,
-        newPidNs: !opts.disablePidNs,
-        cgroup,
-        netns: netnsName,
       });
 
-      log.start("Waiting for API socket...");
-      await waitForSocket(jailerPaths.socketPath, 5000);
-      log.success("API socket ready");
-
-      // Boot VM
-      if (snapshotId) {
-        log.start("Restoring from snapshot...");
-        const vm = new FirecrackerClient(jailerPaths.socketPath);
-        await vm.loadSnapshot("snapshot/snapshot_file", "snapshot/mem_file");
-        await vm.resume();
-        log.success("Snapshot restored and VM resumed");
-      } else {
-        await this.bootVm(jailerPaths.socketPath, netCfg, vcpus, memMib);
-        log.start("Starting VM...");
-        const vm = new FirecrackerClient(jailerPaths.socketPath);
-        await vm.start();
+      if (!result.ok || !result.vm) {
+        throw new Error(result.error ?? "Gateway vm.create failed");
       }
 
-      const pid = getVmPid(vmId);
-      logger.debug(`Firecracker PID: ${pid ?? "unknown"}`);
-      this.store.update(vmId, { status: "running", pid });
-      log.success(`VM ${vmId} is running (PID: ${pid || "unknown"})`);
+      const gw = result.vm;
+
+      // Build state from gateway response
+      const state = buildInitialVmState({
+        vmId,
+        project: opts.project || "",
+        runtime: opts.runtime ?? "base",
+        diskSizeGb: opts.diskSizeGb ?? 10,
+        kernelPath,
+        rootfsPath,
+        vcpus: opts.vcpus ?? 1,
+        memMib: opts.memMib ?? 128,
+        networkPolicy: opts.networkPolicy ?? "allow-all",
+        domains: opts.domains ?? [],
+        allowedCidrs: opts.allowedCidrs ?? [],
+        deniedCidrs: opts.deniedCidrs ?? [],
+        ports: opts.ports ?? [],
+        tapDevice: gw.tapDevice,
+        hostIp: gw.hostIp,
+        guestIp: gw.guestIp,
+        subnetMask: gw.subnetMask,
+        macAddress: gw.macAddress,
+        snapshotId: opts.snapshotId ?? null,
+        timeoutMs: opts.timeoutMs ?? null,
+        agentToken: gw.agentToken ?? null,
+        agentPort: paths.agentPort,
+        bandwidthMbit: opts.bandwidthMbit,
+        netnsName: gw.netnsName || undefined,
+        skipDnat: opts.skipDnat,
+        allowIcmp: opts.allowIcmp,
+        disableSeccomp: opts.disableSeccomp,
+        disablePidNs: opts.disablePidNs,
+        disableCgroup: opts.disableCgroup,
+        connectTo: opts.connectTo,
+        service: opts.service,
+      });
+
+      // Update state with gateway response data
+      state.chrootDir = gw.chrootDir;
+      state.apiSocket = gw.socketPath;
+      state.status = "running";
+      state.pid = gw.pid;
+      if (gw.meshIp) {
+        state.network.meshIp = gw.meshIp;
+      }
+      this.store.save(state);
+
+      log.success(`VM ${vmId} is running (PID: ${gw.pid})`);
 
       // Timeout killer
-      if (timeoutMs && pid) {
+      if (opts.timeoutMs && gw.pid) {
         spawnTimeoutKiller({
           vmId,
-          pid,
-          timeoutMs,
+          pid: gw.pid,
+          timeoutMs: opts.timeoutMs,
           stateFile: join(paths.vmsDir, `${vmId}.json`),
         });
       }
 
       // Forward published ports to localhost inside the VM
-      if (agentToken && opts.ports?.length) {
+      if (gw.agentToken && opts.ports?.length) {
         await this.setupLocalhostPortForwarding(
-          netCfg.guestIp,
+          gw.guestIp,
           paths.agentPort,
-          agentToken,
+          gw.agentToken,
           opts.ports,
         );
       }
@@ -399,7 +290,7 @@ export class VMService {
       // Re-read state: hooks (e.g. Cloudflare plugin) may have updated it
       const updatedState = this.store.load(vmId) ?? finalState;
 
-      return { vmId, pid, state: updatedState };
+      return { vmId, pid: gw.pid, state: updatedState };
     } catch (error) {
       // Error hooks
       if (vmId) {
@@ -410,11 +301,8 @@ export class VMService {
         });
       }
 
-      // Cleanup
-      killOrphanVmProcess(vmId);
+      // Gateway handles rollback on its side; just mark state as error
       this.markAsError(vmId, error);
-      cleanupNetwork(networkConfig);
-      cleanupChroot(chrootDir);
 
       throw error;
     }
@@ -428,8 +316,6 @@ export class VMService {
     const { logger, paths, hooks } = this;
     const log = logger.withTag(vmId);
 
-    let networkConfig: NetworkConfig | undefined;
-
     try {
       // 1. Validate state
       const state = this.store.load(vmId);
@@ -439,9 +325,6 @@ export class VMService {
       if (state.status !== "stopped") {
         throw vmNotStoppedError(vmId, state.status);
       }
-      if (!state.chrootDir || !existsSync(state.chrootDir)) {
-        throw chrootNotFoundError(vmId);
-      }
 
       validateEnvironment(paths.baseDir);
 
@@ -450,186 +333,69 @@ export class VMService {
 
       log.start(`Starting VM ${vmId}...`);
 
-      // 2. Reconstruct network config and re-setup networking
-      const mgr = NetworkManager.fromVmNetwork(state.network);
-      mgr.config.project = state.project || undefined;
-      networkConfig = mgr.config;
-      logger.debug(
-        `Reconstructed network config: slot=${networkConfig.slot}, tap=${networkConfig.tapDevice}, host=${networkConfig.hostIp}, guest=${networkConfig.guestIp}`,
-      );
+      // Derive slot from stored network config
+      const slot = slotFromVmHostIp(state.network.hostIp);
 
-      log.start("Setting up networking...");
-      await mgr.setup();
-      log.success(
-        `Network: TAP ${networkConfig.tapDevice}, Host ${networkConfig.hostIp}, Guest ${networkConfig.guestIp}`,
-      );
+      // Resolve seccomp filter path to pass to gateway
+      const seccompFilter = state.disableSeccomp ? undefined : ensureSeccompFilter(paths);
 
-      // Start gateway proxies and capture mesh IP (non-fatal)
-      const gatewayResult = await mgr.startProxies(vmId);
-      if (gatewayResult?.vm?.meshIp) {
-        this.store.update(vmId, {
-          network: {
-            ...state.network,
-            meshIp: gatewayResult.vm.meshIp,
-          },
-        });
-        logger.debug(`Mesh IP assigned: ${gatewayResult.vm.meshIp}`);
-      }
-
-      // Hook: network:afterSetup
-      await hooks.callHook("network:afterSetup", {
+      // Delegate to gateway
+      const gateway = new GatewayClient();
+      const result = await gateway.vmRestart({
         vmId,
-        slot: networkConfig.slot,
-        networkConfig,
+        slot,
+        chrootDir: state.chrootDir || undefined,
+        socketPath: state.apiSocket || undefined,
+        networkPolicy: state.network.networkPolicy,
         domains: state.network.allowedDomains,
-        networkPolicy: state.network.networkPolicy as NetworkPolicy,
+        allowedCidrs: state.network.allowedCidrs,
+        deniedCidrs: state.network.deniedCidrs,
+        ports: state.network.publishedPorts,
+        bandwidthMbit: state.network.bandwidthMbit,
+        allowIcmp: state.network.allowIcmp,
+        skipDnat: state.network.skipDnat,
+        project: state.project || undefined,
+        service: state.network.service,
+        connectTo: state.network.connectTo,
+        disableSeccomp: state.disableSeccomp,
+        disablePidNs: state.disablePidNs,
+        disableCgroup: state.disableCgroup,
+        seccompFilter: seccompFilter ?? undefined,
+        vcpus: state.vcpuCount,
+        memMib: state.memSizeMib,
+        kernelPath: state.kernel,
+        rootfsPath: state.rootfs,
+        agentBinary: existsSync(paths.agentBin) ? paths.agentBin : undefined,
+        agentToken: state.agentToken || undefined,
+        netnsName: state.network.netnsName,
       });
 
-      // 3. Clean stale files from previous run
-      const vmRootCandidates = Array.from(
-        new Set([
-          join(state.chrootDir, "root"),
-          state.chrootDir,
-          dirname(dirname(state.apiSocket)),
-        ]),
-      );
-      const removeStaleFirecrackerFiles = (): void => {
-        for (const rootDir of vmRootCandidates) {
-          rmSync(join(rootDir, "firecracker"), { force: true });
-          rmSync(join(rootDir, "firecracker.pid"), { force: true });
-        }
-      };
-
-      removeStaleFirecrackerFiles();
-
-      const socketPath = state.apiSocket;
-      rmSync(socketPath, { force: true });
-
-      const removeStaleDevTrees = (): void => {
-        for (const rootDir of vmRootCandidates) {
-          rmSync(join(rootDir, "dev"), { recursive: true, force: true });
-        }
-      };
-      const removeStaleDeviceNodes = (): void => {
-        const staleNodes = ["dev/net/tun", "dev/kvm", "dev/userfaultfd", "dev/urandom"];
-        for (const rootDir of vmRootCandidates) {
-          for (const rel of staleNodes) {
-            rmSync(join(rootDir, rel), { recursive: true, force: true });
-          }
-        }
-      };
-
-      // 4. Spawn Firecracker via Jailer (reuse existing chroot)
-      const firecrackerBin = join(paths.binDir, "firecracker");
-      const jailerBin = join(paths.binDir, "jailer");
-
-      const jailer = new Jailer(vmId, paths.jailerBaseDir);
-      let socketReady = false;
-      const startTag = `[start:${vmId}]`;
-      const logAttemptError = (attempt: string, error: unknown): void => {
-        logger.error(`${startTag} ${attempt} failed: ${toError(error).message}`);
-      };
-      logger.debug(`Stale file cleanup: checked ${vmRootCandidates.length} root candidates`);
-
-      const logDiagnostics = (): void => {
-        const socketExists = existsSync(socketPath);
-        const devState = vmRootCandidates
-          .map((rootDir) => `${join(rootDir, "dev")}=${existsSync(join(rootDir, "dev"))}`)
-          .join(", ");
-        const firecrackerPid = getVmPid(vmId);
-        const jailerPid = getVmJailerPid(vmId);
-        log.error(
-          `${startTag} diagnostics: socketExists=${socketExists}; firecrackerPid=${firecrackerPid ?? "none"}; jailerPid=${jailerPid ?? "none"}; devDirs=[${devState}]`,
-        );
-      };
-
-      const isRecoverableStartError = (message: string): boolean => {
-        if (message.includes("Timeout waiting for API socket")) return true;
-        if (message.includes("mknod inside the jail") && message.includes("File exists")) {
-          return true;
-        }
-        if (message.includes("MknodDev(") && message.includes("os error 17")) {
-          return true;
-        }
-        return false;
-      };
-
-      const seccompFilter = state.disableSeccomp ? undefined : ensureSeccompFilter(paths);
-      if (seccompFilter) {
-        logger.debug(`Seccomp filter: ${seccompFilter}`);
+      if (!result.ok || !result.vm) {
+        throw new Error(result.error ?? "Gateway vm.restart failed");
       }
 
-      const cgroup = state.disableCgroup
-        ? undefined
-        : this.buildCgroupConfig(state.vcpuCount, state.memSizeMib);
+      const gw = result.vm;
 
-      const spawnAndWait = async (timeoutMs: number): Promise<void> => {
-        log.start("Spawning Firecracker via jailer...");
-        logger.debug(
-          `Jailer spawn: firecracker=${firecrackerBin}, jailer=${jailerBin}, chrootBase=${jailer.paths.chrootBase}`,
-        );
-        jailer.spawn({
-          firecrackerBin,
-          jailerBin,
-          chrootBase: jailer.paths.chrootBase,
-          seccompFilter: seccompFilter ?? undefined,
-          newPidNs: !state.disablePidNs,
-          cgroup,
-          netns: state.network.netnsName,
-        });
-
-        log.start("Waiting for API socket...");
-        await waitForSocket(socketPath, timeoutMs);
+      // Update state with new PID and running status
+      const updates: Partial<VmState> = {
+        status: "running",
+        pid: gw.pid,
       };
-
-      try {
-        removeStaleDeviceNodes();
-        await spawnAndWait(10000);
-        socketReady = true;
-      } catch (firstStartError) {
-        const message = toError(firstStartError).message;
-        if (!isRecoverableStartError(message)) {
-          logAttemptError("initial attempt", firstStartError);
-          logDiagnostics();
-          throw firstStartError;
-        }
-
-        logAttemptError("initial attempt", firstStartError);
-        killOrphanVmProcess(vmId);
-        rmSync(socketPath, { force: true });
-        removeStaleDeviceNodes();
-        removeStaleDevTrees();
-        removeStaleFirecrackerFiles();
-
-        try {
-          await spawnAndWait(15000);
-          socketReady = true;
-        } catch (retryError) {
-          logAttemptError("retry attempt", retryError);
-          logDiagnostics();
-          throw new Error(
-            `${startTag} retry failed after cleanup. First error: ${message}. Retry error: ${toError(retryError).message}`,
-          );
-        }
+      if (gw.socketPath) {
+        updates.apiSocket = gw.socketPath;
       }
-
-      if (!socketReady) {
-        throw new Error(`Timeout waiting for API socket at ${socketPath}`);
+      if (gw.chrootDir) {
+        updates.chrootDir = gw.chrootDir;
       }
+      if (gw.meshIp) {
+        updates.network = {
+          ...state.network,
+          meshIp: gw.meshIp,
+        };
+      }
+      this.store.update(vmId, updates);
 
-      log.success("API socket ready");
-
-      // 5. Boot VM
-      await this.bootVm(socketPath, networkConfig, state.vcpuCount, state.memSizeMib);
-
-      log.start("Starting VM...");
-      const vm = new FirecrackerClient(socketPath);
-      await vm.start();
-
-      // 6. Update state
-      const pid = getVmPid(vmId);
-      this.store.update(vmId, { status: "running", pid });
-      log.success(`VM ${vmId} is running (PID: ${pid || "unknown"})`);
+      log.success(`VM ${vmId} is running (PID: ${gw.pid})`);
 
       // Re-apply localhost port forwarding after restart
       if (state.agentToken && state.network.publishedPorts?.length) {
@@ -646,7 +412,7 @@ export class VMService {
       // Hook: afterStart
       await hooks.callHook("vm:afterStart", finalState);
 
-      return { vmId, pid, state: finalState, success: true };
+      return { vmId, pid: gw.pid, state: finalState, success: true };
     } catch (error) {
       // Error hooks
       await hooks.callHook("vm:error", {
@@ -655,9 +421,7 @@ export class VMService {
         phase: "start",
       });
 
-      killOrphanVmProcess(vmId);
       this.markAsError(vmId, error);
-      cleanupNetwork(networkConfig);
 
       return {
         vmId,
@@ -689,41 +453,24 @@ export class VMService {
 
       const previousStatus = state.status;
 
-      // 1. Kill process — stored PID first, then /proc scan fallback
-      if (state.pid) {
-        safeKill(state.pid, "SIGKILL");
-      }
-      const orphanPid = getVmPid(vmId);
-      if (orphanPid) {
-        safeKill(orphanPid, "SIGKILL");
-      }
-      const orphanJailerPid = getVmJailerPid(vmId);
-      if (orphanJailerPid) {
-        safeKill(orphanJailerPid, "SIGKILL");
-      }
+      // Derive slot from stored network config
+      const slot = slotFromVmHostIp(state.network.hostIp);
 
-      // 2. Teardown networking (including namespace if present)
-      if (state.network) {
-        const netCfg = NetworkManager.fromVmNetwork(state.network);
-        try {
-          netCfg.teardown();
-        } catch (err) {
-          this.logger.debug(`Network teardown failed for VM ${vmId}: ${toError(err).message}`);
-        }
+      // Delegate to gateway
+      const gateway = new GatewayClient();
+      const result = await gateway.vmFullStop({
+        vmId,
+        slot,
+        pid: state.pid ?? undefined,
+        netnsName: state.network.netnsName,
+        socketPath: state.apiSocket || undefined,
+      });
 
-        const leaks = verifyCleanup(state.network, vmId);
-        for (const leak of leaks) {
-          this.logger.warn(`[${vmId}] cleanup leak: ${leak}`);
-        }
-
-        // Hook: network:afterTeardown
-        await this.hooks.callHook("network:afterTeardown", {
-          vmId,
-          networkConfig: netCfg.config,
-        });
+      if (!result.ok) {
+        this.logger.debug(`Gateway vm.fullStop warning: ${result.error ?? "unknown"}`);
       }
 
-      // 3. Update state
+      // Update state
       this.store.update(vmId, { status: "stopped", pid: null });
 
       // Hook: afterStop
@@ -783,11 +530,27 @@ export class VMService {
         // Resolve allowIcmp: explicit flag wins, otherwise preserve existing
         const effectiveAllowIcmp = allowIcmp ?? state.network.allowIcmp ?? false;
 
-        const mgr = NetworkManager.fromVmNetwork({
-          ...state.network,
+        // Derive slot from stored network config
+        const slot = slotFromVmHostIp(state.network.hostIp);
+
+        // Delegate to gateway
+        const gateway = new GatewayClient();
+        const result = await gateway.vmFullUpdatePolicy({
+          vmId,
+          policy,
+          slot,
+          domains,
+          allowedCidrs,
+          deniedCidrs,
+          ports: state.network.publishedPorts,
           allowIcmp: effectiveAllowIcmp,
+          skipDnat: state.network.skipDnat,
+          netnsName: state.network.netnsName,
         });
-        mgr.updatePolicy(policy, domains, allowedCidrs, deniedCidrs);
+
+        if (!result.ok) {
+          throw new Error(result.error ?? "Gateway vm.fullUpdatePolicy failed");
+        }
 
         this.store.update(vmId, {
           network: {
@@ -851,18 +614,14 @@ export class VMService {
         }
       }
 
-      // Verify network cleanup
-      if (state.network) {
-        const leaks = verifyCleanup(state.network, vmId);
-        for (const leak of leaks) {
-          this.logger.warn(`[${vmId}] cleanup leak: ${leak}`);
-        }
+      // 2. Delegate chroot cleanup to gateway
+      const gateway = new GatewayClient();
+      const result = await gateway.vmDelete({ vmId, force });
+      if (!result.ok) {
+        this.logger.debug(`Gateway vm.delete warning: ${result.error ?? "unknown"}`);
       }
 
-      // 2. Remove chroot dir + parent jailer dir
-      cleanupChroot(state.chrootDir);
-
-      // 3. Delete state file — VM disappears from list
+      // 3. Delete state file -- VM disappears from list
       this.store.delete(vmId);
 
       // Hook: afterRemove
@@ -897,6 +656,7 @@ export class VMService {
     vcpus: number,
     memMib: number,
   ): Promise<void> {
+    const { FirecrackerClient } = await import("./firecracker.ts");
     const vm = new FirecrackerClient(socketPath);
     const bootArgs = NetworkManager.bootArgs(netCfg);
     this.logger.debug(`Boot args: ${bootArgs}`);
