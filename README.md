@@ -100,16 +100,16 @@ ln -sf "$(pwd)/dist/bin/cli.mjs" ~/.vmsan/bin/vmsan
 vmsan init
 
 # Deploy all services
-sudo vmsan up
+vmsan up
 
 # Check service status
-sudo vmsan status
+vmsan status
 
 # Re-deploy code without recreating VMs
-sudo vmsan deploy
+vmsan deploy
 
 # Stop all services (--destroy removes everything)
-sudo vmsan down
+vmsan down
 ```
 
 ### Single VM management
@@ -220,10 +220,10 @@ release = "npx prisma migrate deploy"
 
 ```bash
 vmsan init          # creates vmsan.toml
-sudo vmsan up       # provisions VMs, builds, and starts services
-sudo vmsan status   # shows service health table
-sudo vmsan deploy   # re-deploys code (skips accessory recreation)
-sudo vmsan down     # stops everything (--destroy removes VMs)
+vmsan up       # provisions VMs, builds, and starts services
+vmsan status   # shows service health table
+vmsan deploy   # re-deploys code (skips accessory recreation)
+vmsan down     # stops everything (--destroy removes VMs)
 ```
 
 ### Built-in accessories
@@ -257,7 +257,7 @@ vmsan agent join --server http://10.88.0.1:6443 --token <TOKEN>
 
 **Deploy to a specific host:**
 ```bash
-sudo vmsan create --name my-vm --host worker-1 --runtime base --vcpus 2 --memory 1024
+vmsan create --name my-vm --host worker-1 --runtime base --vcpus 2 --memory 1024
 vmsan hosts list              # Show all hosts and their VMs
 ```
 

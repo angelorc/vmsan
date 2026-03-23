@@ -342,42 +342,59 @@ function checkDnsproxyBinary(dnsproxyBin: string): CheckResult {
   return { category: "Binaries", name: "dnsproxy", status: "pass", detail: "Found" };
 }
 
-function checkGatewayProcess(): CheckResult {
-  const pidFile = "/run/vmsan-gateway.pid";
-  if (!existsSync(pidFile)) {
-    return {
-      category: "Services",
-      name: "vmsan-gateway process",
-      status: "pass",
-      detail: "Not running (no active VMs)",
-    };
+function checkGatewayDaemon(): CheckResult {
+  // Check both new and old PID file paths
+  const pidFiles = ["/run/vmsan/gateway.pid", "/run/vmsan-gateway.pid"];
+  let pid: string | null = null;
+
+  for (const pidFile of pidFiles) {
+    if (existsSync(pidFile)) {
+      try {
+        pid = readFileSync(pidFile, "utf-8").trim();
+        break;
+      } catch {
+        // try next
+      }
+    }
   }
-  try {
-    const pid = readFileSync(pidFile, "utf-8").trim();
-    const procPath = `/proc/${pid}`;
-    if (existsSync(procPath)) {
+
+  if (!pid) {
+    // Check socket existence as fallback
+    const socketPath = "/run/vmsan/gateway.sock";
+    if (existsSync(socketPath)) {
       return {
         category: "Services",
-        name: "vmsan-gateway process",
+        name: "Gateway daemon",
         status: "pass",
-        detail: `Running (PID ${pid})`,
+        detail: "Socket exists (daemon likely running)",
       };
     }
     return {
       category: "Services",
-      name: "vmsan-gateway process",
-      status: "fail",
-      detail: `Stale PID file (PID ${pid} not running)`,
-      fix: `Remove stale PID file: sudo rm ${pidFile}`,
-    };
-  } catch {
-    return {
-      category: "Services",
-      name: "vmsan-gateway process",
-      status: "pass",
-      detail: "Check skipped",
+      name: "Gateway daemon",
+      status: "warn",
+      detail: "Not running",
+      fix: "Start with: sudo systemctl start vmsan-gateway",
     };
   }
+
+  const procPath = `/proc/${pid}`;
+  if (existsSync(procPath)) {
+    return {
+      category: "Services",
+      name: "Gateway daemon",
+      status: "pass",
+      detail: `Running (PID ${pid})`,
+    };
+  }
+
+  return {
+    category: "Services",
+    name: "Gateway daemon",
+    status: "fail",
+    detail: `Stale PID file (PID ${pid} not running)`,
+    fix: "Restart with: sudo systemctl restart vmsan-gateway",
+  };
 }
 
 export function runDoctorChecks(paths?: VmsanPaths): CheckResult[] {
@@ -396,7 +413,7 @@ export function runDoctorChecks(paths?: VmsanPaths): CheckResult[] {
     checkNftablesBinary(p.nftablesBin),
     checkGatewayBinary(p.gatewayBin),
     checkDnsproxyBinary(p.dnsproxyBin),
-    checkGatewayProcess(),
+    checkGatewayDaemon(),
     checkKernel(p.kernelsDir),
     checkRootfs(p.rootfsDir),
   ];

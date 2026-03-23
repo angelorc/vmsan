@@ -702,7 +702,7 @@ GATEWAY_PATH="$VMSAN_DIR/bin/vmsan-gateway"
 if [ "$INSTALL_MODE" = "source" ]; then
   ensure_go
   info "Building vmsan-gateway from source (${SOURCE_SHA})..."
-  (cd "$VMSAN_SRC/nftables" && CGO_ENABLED=0 GOOS=linux GOARCH="$(go_arch)" go build -ldflags="-s -w" -o "$GATEWAY_PATH" ./cmd/gateway)
+  (cd "$VMSAN_SRC/hostd" && CGO_ENABLED=0 GOOS=linux GOARCH="$(go_arch)" go build -ldflags="-s -w" -o "$GATEWAY_PATH" ./cmd/vmsan-gateway)
   chmod +x "$GATEWAY_PATH"
   success "vmsan-gateway built from ${SOURCE_LABEL}"
 elif [ -x "$GATEWAY_PATH" ]; then
@@ -1136,7 +1136,12 @@ EOF
 if command -v systemctl >/dev/null 2>&1; then
   # Create vmsan system group (for socket access)
   groupadd -r vmsan 2>/dev/null || true
-  usermod -aG vmsan "$(whoami)" 2>/dev/null || true
+  # Add the real user (not root) to vmsan group
+  REAL_USER="${SUDO_USER:-$(whoami)}"
+  usermod -aG vmsan "$REAL_USER" 2>/dev/null || true
+  if [ "$REAL_USER" != "$(whoami)" ]; then
+    info "Added $REAL_USER to vmsan group (re-login required for group to take effect)"
+  fi
 
   # Install gateway service unit
   GATEWAY_SERVICE_SRC=""
