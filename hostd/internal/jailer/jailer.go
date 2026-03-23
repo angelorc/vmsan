@@ -14,6 +14,12 @@ import (
 	"strings"
 )
 
+// JailerUID is the unprivileged user ID that Firecracker runs as inside the jail.
+const JailerUID = 123
+
+// JailerGID is the group ID that Firecracker runs as inside the jail.
+const JailerGID = 100
+
 // CgroupVMMOverheadMiB is extra memory (in MiB) added to the cgroup limit
 // beyond guest memory. Covers Firecracker VMM process overhead, page tables,
 // and kernel slab. Without this, the OOM killer can terminate the VM under
@@ -98,6 +104,14 @@ func Prepare(cfg Config, paths Paths) error {
 	// 5. Mount rootfs and configure
 	if err := configureRootfs(cfg, paths); err != nil {
 		return fmt.Errorf("configure rootfs: %w", err)
+	}
+
+	// 5b. Chown the entire chroot tree to the jailer UID:GID so Firecracker
+	// (running as uid 123) can access all files. The jailer binary also does
+	// this, but only for dirs it creates — our pre-placed files need it too.
+	chownCmd := exec.Command("chown", "-R", fmt.Sprintf("%d:%d", JailerUID, JailerGID), paths.RootDir)
+	if output, err := chownCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("chown chroot to jailer uid: %w: %s", err, string(output))
 	}
 
 	// 6. Copy snapshot files if restoring

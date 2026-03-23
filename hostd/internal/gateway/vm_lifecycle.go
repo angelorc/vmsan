@@ -30,9 +30,7 @@ const (
 	defaultDiskSizeGb = 0
 	defaultPolicy     = "deny-all"
 	agentPort         = 9119
-	jailerBaseDir     = "/srv/jailer"
-	jailerUID         = 123
-	jailerGID         = 100
+	jailerBaseDir = "/srv/jailer"
 )
 
 // Binary paths — configurable at startup via SetBinDir().
@@ -509,8 +507,8 @@ func (s *Server) handleVMCreateImpl(ctx context.Context, params json.RawMessage)
 		JailerBin:      jailerBin,
 		VMId:           vmId,
 		Paths:          paths,
-		UID:            jailerUID,
-		GID:            jailerGID,
+		UID:            jailer.JailerUID,
+		GID:            jailer.JailerGID,
 		NewPidNs:       !p.DisablePidNs,
 		NetNS:          netnsName,
 		SeccompFilter:  p.SeccompFilter,
