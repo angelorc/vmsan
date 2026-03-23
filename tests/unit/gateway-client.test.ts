@@ -251,9 +251,10 @@ describe("GatewayClient", () => {
 });
 
 describe("ensureGatewayRunning", () => {
-  it("returns early when binary does not exist", async () => {
-    // This should not throw — it logs and returns
-    await ensureGatewayRunning("/nonexistent/vmsan-gateway");
-    // If we get here, the function handled the missing binary gracefully
+  it("throws when gateway binary does not exist and daemon is not running", async () => {
+    // ensureGatewayRunning is now fatal — it throws if the gateway can't be reached
+    await expect(ensureGatewayRunning("/nonexistent/vmsan-gateway")).rejects.toThrow(
+      "vmsan-gateway binary not found",
+    );
   });
 });
