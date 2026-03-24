@@ -85,19 +85,20 @@ type vmUpdatePolicyParams struct {
 
 // NewServer creates a new gateway server. The meshManager may be nil if
 // mesh networking is not enabled.
-func NewServer(cfg Config, meshManager *MeshManager) (*Server, error) {
+func NewServer(cfg Config, meshManager *MeshManager, slots *SlotAllocator) (*Server, error) {
 	if cfg.SocketPath == "" {
 		return nil, errors.New("socket path is required")
 	}
 	if cfg.PIDFile == "" {
 		return nil, errors.New("PID file path is required")
 	}
+	dnsSup := NewDNSSupervisor(slog.Default())
 	return &Server{
 		config:        cfg,
-		manager:       NewManager(),
+		manager:       NewManager(dnsSup),
 		meshManager:   meshManager,
-		dnsSupervisor: NewDNSSupervisor(slog.Default()),
-		slots:         NewSlotAllocator(254, "/run/vmsan/slots.json"),
+		dnsSupervisor: dnsSup,
+		slots:         slots,
 	}, nil
 }
 
@@ -178,8 +179,7 @@ func (s *Server) Run(ctx context.Context) error {
 	// Wait for in-flight connections to finish.
 	wg.Wait()
 
-	// Graceful shutdown: stop supervised DNS processes, VMs, remove socket, symlink, and PID file.
-	s.dnsSupervisor.StopAll()
+	// Graceful shutdown: stop VMs and supervised DNS processes, remove socket, symlink, and PID file.
 	s.manager.StopAll()
 	removeIfExists(s.config.SocketPath)
 	removeIfExists("/run/vmsan-gateway.sock") // backward compat symlink

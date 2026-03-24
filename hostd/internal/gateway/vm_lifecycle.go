@@ -19,6 +19,7 @@ import (
 	"github.com/angelorc/vmsan/hostd/internal/firecracker"
 	"github.com/angelorc/vmsan/hostd/internal/jailer"
 	"github.com/angelorc/vmsan/hostd/internal/netsetup"
+	"github.com/angelorc/vmsan/hostd/internal/runtimes"
 	nftypes "github.com/angelorc/vmsan/nftables"
 )
 
@@ -145,27 +146,20 @@ func generateVMId() (string, error) {
 	return "vm-" + hex.EncodeToString(b), nil
 }
 
-// resolveRuntimePaths resolves the kernel and rootfs paths for a given runtime.
-// It looks in ~/.vmsan/runtimes/<runtime>/ for vmlinux and rootfs.ext4.
-func resolveRuntimePaths(runtime string) (kernelPath, rootfsPath string, err error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", "", fmt.Errorf("resolve home directory: %w", err)
-	}
+// resolveRuntimePaths is a gateway-side fallback for resolving kernel and
+// rootfs paths. Callers (CLI, agent) should resolve paths themselves and pass
+// absolute kernelPath/rootfsPath — this function is only called when those
+// fields are empty (backward compat).
+func resolveRuntimePaths(runtime, jailerBaseDir string) (kernelPath, rootfsPath string, err error) {
+	vmsanDir := filepath.Dir(resolveJailerBaseDir(jailerBaseDir))
+	return runtimes.Resolve(vmsanDir, runtime)
+}
 
-	runtimeDir := filepath.Join(home, ".vmsan", "runtimes", runtime)
-
-	kernelPath = filepath.Join(runtimeDir, "vmlinux")
-	if _, err := os.Stat(kernelPath); err != nil {
-		return "", "", fmt.Errorf("kernel not found at %s: %w", kernelPath, err)
-	}
-
-	rootfsPath = filepath.Join(runtimeDir, "rootfs.ext4")
-	if _, err := os.Stat(rootfsPath); err != nil {
-		return "", "", fmt.Errorf("rootfs not found at %s: %w", rootfsPath, err)
-	}
-
-	return kernelPath, rootfsPath, nil
+// resolveSnapshotDir returns the snapshot directory for the given ID,
+// derived from the jailerBaseDir parent (~/.vmsan/snapshots/<id>).
+func resolveSnapshotDir(jailerBaseDir, snapshotID string) string {
+	vmsanDir := filepath.Dir(resolveJailerBaseDir(jailerBaseDir))
+	return filepath.Join(vmsanDir, "snapshots", snapshotID)
 }
 
 // effectivePolicy determines the firewall policy from the provided params.
@@ -315,7 +309,7 @@ func (s *Server) handleVMCreateImpl(ctx context.Context, params json.RawMessage)
 	kernelPath := p.KernelPath
 	rootfsPath := p.RootfsPath
 	if kernelPath == "" || rootfsPath == "" {
-		k, r, err := resolveRuntimePaths(p.Runtime)
+		k, r, err := resolveRuntimePaths(p.Runtime, p.JailerBaseDir)
 		if err != nil {
 			return Response{OK: false, Error: err.Error(), Code: "RUNTIME_ERROR"}
 		}
@@ -427,6 +421,15 @@ func (s *Server) handleVMCreateImpl(ctx context.Context, params json.RawMessage)
 		s.manager.StopVM(vmId)
 	})
 
+	// 8b. Register VM with DNS handler for per-VM query logging.
+	if s.meshManager != nil {
+		transitGuestIP := netsetup.VMGuestIP(slot)
+		s.meshManager.RegisterDNSVM(vmId, transitGuestIP, policy)
+		cleanup = append(cleanup, func() {
+			s.meshManager.UnregisterDNSVM(transitGuestIP)
+		})
+	}
+
 	// 9. Start mesh networking if VM has a project.
 	var meshIP string
 	if p.Project != "" && s.meshManager != nil {
@@ -440,6 +443,7 @@ func (s *Server) handleVMCreateImpl(ctx context.Context, params json.RawMessage)
 			VethHost:  vethHost,
 			NetNS:     netnsName,
 			GuestDev:  vethGuest,
+			TAPDevice: tapDevice,
 		})
 		if err != nil {
 			slog.Warn("mesh setup failed", "vmId", vmId, "error", err)
@@ -470,6 +474,7 @@ func (s *Server) handleVMCreateImpl(ctx context.Context, params json.RawMessage)
 		KernelSrc:  kernelPath,
 		RootfsSrc:  rootfsPath,
 		DiskSizeGb: p.DiskSizeGb,
+		HostIP:     hostIP,
 	}
 
 	// Inject agent if binary is available.
@@ -490,8 +495,7 @@ func (s *Server) handleVMCreateImpl(ctx context.Context, params json.RawMessage)
 
 	// Handle snapshot restore.
 	if p.SnapshotID != "" {
-		home, _ := os.UserHomeDir()
-		snapshotDir := filepath.Join(home, ".vmsan", "snapshots", p.SnapshotID)
+		snapshotDir := resolveSnapshotDir(p.JailerBaseDir, p.SnapshotID)
 		jailCfg.Snapshot = &jailer.SnapshotConfig{
 			SnapshotFile: filepath.Join(snapshotDir, "snapshot_file"),
 			MemFile:      filepath.Join(snapshotDir, "mem_file"),
@@ -522,6 +526,7 @@ func (s *Server) handleVMCreateImpl(ctx context.Context, params json.RawMessage)
 		NewPidNs:       !p.DisablePidNs,
 		NetNS:          netnsName,
 		SeccompFilter:  p.SeccompFilter,
+		DisableSeccomp: p.DisableSeccomp,
 	}
 	if !p.DisableCgroup {
 		spawnCfg.Cgroup = &jailer.CgroupConfig{
@@ -548,37 +553,11 @@ func (s *Server) handleVMCreateImpl(ctx context.Context, params json.RawMessage)
 		return Response{OK: false, Error: fmt.Sprintf("wait for socket: %s", err), Code: "FIRECRACKER_ERROR"}
 	}
 
-	// 14. Configure Firecracker via API.
-	if err := fcClient.Configure(firecracker.MachineConfig{
-		VCPUs:  p.VCPUs,
-		MemMiB: p.MemMiB,
-	}); err != nil {
-		retErr = err
-		return Response{OK: false, Error: fmt.Sprintf("configure machine: %s", err), Code: "FIRECRACKER_ERROR"}
-	}
-
-	// Boot source — kernel path is relative to the chroot root.
-	bootArgs := netsetup.BootArgs(guestIP, hostIP, netsetup.VMSubnetMask)
-	if err := fcClient.Boot("kernel/vmlinux", bootArgs); err != nil {
-		retErr = err
-		return Response{OK: false, Error: fmt.Sprintf("configure boot: %s", err), Code: "FIRECRACKER_ERROR"}
-	}
-
-	// Root drive — rootfs path is relative to the chroot root.
-	if err := fcClient.AddDrive("rootfs", "rootfs/rootfs.ext4", true, false); err != nil {
-		retErr = err
-		return Response{OK: false, Error: fmt.Sprintf("add drive: %s", err), Code: "FIRECRACKER_ERROR"}
-	}
-
-	// Network interface.
-	if err := fcClient.AddNetwork("eth0", tapDevice, macAddress); err != nil {
-		retErr = err
-		return Response{OK: false, Error: fmt.Sprintf("add network: %s", err), Code: "FIRECRACKER_ERROR"}
-	}
-
-	// 15. Start Firecracker instance.
+	// 14–15. Configure and start Firecracker.
 	if p.SnapshotID != "" {
-		// Restore from snapshot instead of fresh boot.
+		// Snapshot restore: Firecracker forbids ANY configuration API calls
+		// (machine-config, boot-source, drives, network) before LoadSnapshot.
+		// The snapshot contains the full machine state.
 		if err := fcClient.LoadSnapshot("snapshot/snapshot_file", "snapshot/mem_file"); err != nil {
 			retErr = err
 			return Response{OK: false, Error: fmt.Sprintf("load snapshot: %s", err), Code: "FIRECRACKER_ERROR"}
@@ -588,6 +567,27 @@ func (s *Server) handleVMCreateImpl(ctx context.Context, params json.RawMessage)
 			return Response{OK: false, Error: fmt.Sprintf("resume snapshot: %s", err), Code: "FIRECRACKER_ERROR"}
 		}
 	} else {
+		// Fresh boot: configure machine, boot source, drive, network, then start.
+		if err := fcClient.Configure(firecracker.MachineConfig{
+			VCPUs:  p.VCPUs,
+			MemMiB: p.MemMiB,
+		}); err != nil {
+			retErr = err
+			return Response{OK: false, Error: fmt.Sprintf("configure machine: %s", err), Code: "FIRECRACKER_ERROR"}
+		}
+		bootArgs := netsetup.BootArgs(guestIP, hostIP, netsetup.VMSubnetMask)
+		if err := fcClient.Boot("kernel/vmlinux", bootArgs); err != nil {
+			retErr = err
+			return Response{OK: false, Error: fmt.Sprintf("configure boot: %s", err), Code: "FIRECRACKER_ERROR"}
+		}
+		if err := fcClient.AddDrive("rootfs", "rootfs/rootfs.ext4", true, false); err != nil {
+			retErr = err
+			return Response{OK: false, Error: fmt.Sprintf("add drive: %s", err), Code: "FIRECRACKER_ERROR"}
+		}
+		if err := fcClient.AddNetwork("eth0", tapDevice, macAddress); err != nil {
+			retErr = err
+			return Response{OK: false, Error: fmt.Sprintf("add network: %s", err), Code: "FIRECRACKER_ERROR"}
+		}
 		if err := fcClient.Start(); err != nil {
 			retErr = err
 			return Response{OK: false, Error: fmt.Sprintf("start instance: %s", err), Code: "FIRECRACKER_ERROR"}

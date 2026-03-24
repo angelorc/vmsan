@@ -82,7 +82,8 @@ type CreateTokenResponse struct {
 
 // SyncResponse is returned by GET /api/v1/sync.
 type SyncResponse struct {
-	Entries []SyncLogEntry `json:"entries"`
+	Changes []SyncLogEntry `json:"changes"`
+	Latest  int64          `json:"latest"`
 }
 
 // ErrorResponse is the standard error envelope.

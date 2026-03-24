@@ -423,6 +423,42 @@ describe("runDoctorChecks", () => {
     expect(nftKernelCheck.detail).toBe("nftables kernel support verified");
   });
 
+  test("nftables kernel check passes when verify is EPERM but nf_tables is loaded", () => {
+    setupAllPassing();
+    vi.mocked(execSync).mockImplementation((cmd: string | URL) => {
+      const cmdStr = String(cmd);
+      if (cmdStr.includes("vmsan-nftables") && cmdStr.includes("verify")) {
+        throw new Error('{"ok":false,"error":"list tables: socket: operation not permitted","code":"PERMISSION_DENIED"}');
+      }
+      if (cmdStr.includes("ip route show default")) {
+        return "default via 192.168.1.1 dev eth0 proto dhcp metric 100\n";
+      }
+      if (cmdStr.includes("--version")) {
+        return "firecracker v1.14.2\n";
+      }
+      throw new Error("Command failed");
+    });
+
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path === "/sys/module/nf_tables") return true;
+      if (path.includes("firecracker")) return true;
+      if (path.includes("jailer")) return true;
+      if (path.includes("vmsan-nftables")) return true;
+      if (path.includes("vmsan-agent")) return true;
+      if (path.includes("vmsan-gateway")) return true;
+      if (path.includes("dnsproxy")) return true;
+      if (path.includes("kernels")) return true;
+      if (path.includes("ubuntu-24.04.ext4")) return true;
+      return false;
+    });
+
+    const checks = runDoctorChecks(fakePaths);
+    const nftKernelCheck = checks.find((c) => c.name === "nftables kernel")!;
+    expect(nftKernelCheck.status).toBe("pass");
+    expect(nftKernelCheck.detail).toContain("nf_tables module loaded");
+  });
+
   // ---------- host firewall check ----------
 
   test("host firewall check fails when ufw is active", () => {

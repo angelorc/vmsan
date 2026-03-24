@@ -123,7 +123,9 @@ func setupVMTable(ctx context.Context, opts *types.SetupOptions) error {
 	}
 
 	// 3-6. Security rules with logging (all policies)
-	if !opts.AllowICMP {
+	if opts.AllowICMP {
+		fwd.AcceptProto(unix.IPPROTO_ICMP)
+	} else {
 		fwd.LogDropProto("vmsan-deny-icmp: ", unix.IPPROTO_ICMP)
 	}
 	fwd.LogDropProto("vmsan-deny-udp: ", unix.IPPROTO_UDP)
@@ -170,11 +172,9 @@ func setupVMTable(ctx context.Context, opts *types.SetupOptions) error {
 }
 
 // vethHostIPForSlot computes the veth host-side IP for a given slot.
-// Veth subnets use 10.200.{offset}/30 where offset = slot * 4.
-// Host side is .1, guest side is .2.
+// Must match netsetup.TransitHostIP: 10.200.{slot}.1 per slot.
 func vethHostIPForSlot(slot int) string {
-	offset := slot * 4
-	return fmt.Sprintf("10.200.%d.%d", offset/256, (offset%256)+1)
+	return fmt.Sprintf("10.200.%d.1", slot)
 }
 
 // addInterfaceForwardRules allows bidirectional forwarding between

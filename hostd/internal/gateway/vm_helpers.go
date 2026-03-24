@@ -111,6 +111,15 @@ func (s *Server) setupVMNetwork(ctx context.Context, vmId string, slot int, p vm
 		s.manager.StopVM(vmId)
 	})
 
+	// 7b. Register VM with DNS handler for per-VM query logging.
+	if s.meshManager != nil {
+		transitGuestIP := netsetup.VMGuestIP(slot)
+		s.meshManager.RegisterDNSVM(vmId, transitGuestIP, policy)
+		cleanup = append(cleanup, func() {
+			s.meshManager.UnregisterDNSVM(transitGuestIP)
+		})
+	}
+
 	// 8. Start mesh networking if VM has a project.
 	if p.Project != "" && s.meshManager != nil {
 		meshResult, err := s.meshManager.OnVMStart(VMStartParams{
@@ -123,6 +132,7 @@ func (s *Server) setupVMNetwork(ctx context.Context, vmId string, slot int, p vm
 			VethHost:  vethHost,
 			NetNS:     netnsName,
 			GuestDev:  vethGuest,
+			TAPDevice: netCfg.TAPDevice,
 		})
 		if err != nil {
 			slog.Warn("mesh setup failed", "vmId", vmId, "error", err)
@@ -155,10 +165,14 @@ func (s *Server) spawnFirecracker(ctx context.Context, vmId string, slot int, p 
 
 	agentBin := p.AgentBinary
 	if agentBin == "" {
-		for _, candidate := range []string{
+		candidates := []string{
 			"/usr/local/bin/vmsan-agent",
 			"/usr/bin/vmsan-agent",
-		} {
+		}
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			candidates = append([]string{filepath.Join(home, ".vmsan", "bin", "vmsan-agent")}, candidates...)
+		}
+		for _, candidate := range candidates {
 			if _, err := os.Stat(candidate); err == nil {
 				agentBin = candidate
 				break
@@ -171,6 +185,7 @@ func (s *Server) spawnFirecracker(ctx context.Context, vmId string, slot int, p 
 		KernelSrc:  kernelPath,
 		RootfsSrc:  rootfsPath,
 		DiskSizeGb: p.DiskSizeGb,
+		HostIP:     hostIP,
 	}
 
 	agentToken := p.AgentToken
@@ -189,8 +204,7 @@ func (s *Server) spawnFirecracker(ctx context.Context, vmId string, slot int, p 
 	}
 
 	if p.SnapshotID != "" {
-		home, _ := os.UserHomeDir()
-		snapshotDir := filepath.Join(home, ".vmsan", "snapshots", p.SnapshotID)
+		snapshotDir := resolveSnapshotDir(p.JailerBaseDir, p.SnapshotID)
 		jailCfg.Snapshot = &jailer.SnapshotConfig{
 			SnapshotFile: filepath.Join(snapshotDir, "snapshot_file"),
 			MemFile:      filepath.Join(snapshotDir, "mem_file"),

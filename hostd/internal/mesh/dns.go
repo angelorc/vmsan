@@ -2,9 +2,11 @@ package mesh
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -26,12 +28,19 @@ const (
 // DNSHandler is a lightweight DNS server for mesh service discovery.
 // It resolves <service>.<project>.vmsan.internal queries to mesh IPs.
 type DNSHandler struct {
-	allocator        *Allocator
-	port             int
-	logger           *slog.Logger
-	server           *dns.Server
-	mu               sync.Mutex
+	allocator         *Allocator
+	port              int
+	logger            *slog.Logger
+	server            *dns.Server
+	mu                sync.Mutex
 	notifyStartedFunc func() // called once after server is listening
+	// vmBySourceIP maps guest IPs (198.19.X.2) to VM info for DNS logging and policy.
+	vmBySourceIP map[string]vmDNSInfo
+}
+
+type vmDNSInfo struct {
+	vmId   string
+	policy string // "allow-all", "deny-all", "custom"
 }
 
 // NewDNSHandler creates a new mesh DNS handler.
@@ -44,9 +53,10 @@ func NewDNSHandler(allocator *Allocator, port int, logger *slog.Logger) *DNSHand
 		logger = slog.Default()
 	}
 	return &DNSHandler{
-		allocator: allocator,
-		port:      port,
-		logger:    logger,
+		allocator:     allocator,
+		port:          port,
+		logger:        logger,
+		vmBySourceIP: make(map[string]vmDNSInfo),
 	}
 }
 
@@ -127,11 +137,45 @@ func (h *DNSHandler) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 }
 
 // handleForward proxies non-vmsan DNS queries to an upstream resolver.
+// RegisterVM associates a guest IP with a VM ID and policy for DNS filtering and logging.
+func (h *DNSHandler) RegisterVM(vmId, guestIP, policy string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.vmBySourceIP[guestIP] = vmDNSInfo{vmId: vmId, policy: policy}
+}
+
+// UnregisterVM removes a VM's guest IP mapping.
+func (h *DNSHandler) UnregisterVM(guestIP string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.vmBySourceIP, guestIP)
+}
+
 func (h *DNSHandler) handleForward(w dns.ResponseWriter, r *dns.Msg) {
 	const upstream = "8.8.8.8:53"
+	start := time.Now()
+	domain := ""
+	if len(r.Question) > 0 {
+		domain = r.Question[0].Name
+	}
+
+	// Check VM policy — deny-all blocks all DNS.
+	info := h.lookupVM(w.RemoteAddr())
+	if info != nil && info.policy == "deny-all" {
+		h.logDNSQuery(w.RemoteAddr(), domain, nil, nil, time.Since(start), "deny")
+		msg := new(dns.Msg)
+		msg.SetRcode(r, dns.RcodeRefused)
+		w.WriteMsg(msg)
+		return
+	}
+
 	c := new(dns.Client)
 	c.Timeout = 5 * time.Second
 	resp, _, err := c.Exchange(r, upstream)
+
+	// Log the query for the originating VM.
+	h.logDNSQuery(w.RemoteAddr(), domain, resp, err, time.Since(start), "allow")
+
 	if err != nil {
 		h.logger.Debug("upstream DNS failed", "error", err.Error())
 		msg := new(dns.Msg)
@@ -140,6 +184,60 @@ func (h *DNSHandler) handleForward(w dns.ResponseWriter, r *dns.Msg) {
 		return
 	}
 	w.WriteMsg(resp)
+}
+
+// lookupVM returns the VM info for the given remote address, or nil.
+func (h *DNSHandler) lookupVM(remoteAddr net.Addr) *vmDNSInfo {
+	srcIP := ""
+	if addr, ok := remoteAddr.(*net.UDPAddr); ok {
+		srcIP = addr.IP.String()
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if info, ok := h.vmBySourceIP[srcIP]; ok {
+		return &info
+	}
+	return nil
+}
+
+// logDNSQuery writes a JSON log entry to /tmp/vmsan-dns-{vmId}.log.
+func (h *DNSHandler) logDNSQuery(remoteAddr net.Addr, domain string, resp *dns.Msg, queryErr error, latency time.Duration, policy string) {
+	info := h.lookupVM(remoteAddr)
+	if info == nil {
+		return // unknown source, skip logging
+	}
+	vmId := info.vmId
+
+	result := ""
+	if queryErr != nil {
+		policy = "error"
+		result = queryErr.Error()
+	} else if resp != nil {
+		for _, a := range resp.Answer {
+			if aRec, ok := a.(*dns.A); ok {
+				result = aRec.A.String()
+				break
+			}
+		}
+	}
+
+	entry := map[string]interface{}{
+		"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+		"domain":    strings.TrimSuffix(domain, "."),
+		"result":    result,
+		"policy":    policy,
+		"latencyMs": latency.Milliseconds(),
+	}
+
+	line, _ := json.Marshal(entry)
+	logPath := fmt.Sprintf("/tmp/vmsan-dns-%s.log", vmId)
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.Write(line)
+	f.Write([]byte("\n"))
 }
 
 // handleA resolves A record queries: <service>.<project>.vmsan.internal.

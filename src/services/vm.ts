@@ -29,7 +29,6 @@ import { AgentClient } from "./agent.ts";
 import { SnapshotService } from "./snapshot.ts";
 import { GatewayClient } from "../lib/gateway-client.ts";
 import { slotFromVmHostIp } from "../lib/network-address.ts";
-import { ensureSeccompFilter } from "../lib/seccomp.ts";
 import { FileLock } from "../lib/file-lock.ts";
 
 // ---------------------------------------------------------------------------
@@ -171,12 +170,11 @@ export class VMService {
         agentToken = meta?.agentToken ?? null;
       }
 
-      // Resolve seccomp filter path to pass to gateway
-      const seccompFilter = opts.disableSeccomp ? undefined : ensureSeccompFilter(paths);
-
       log.start(`Creating VM ${vmId}...`);
 
       // Delegate to gateway (single RPC replaces ~15 privileged calls)
+      // Seccomp: Firecracker v1.5+ uses its own built-in filter by default.
+      // Only pass seccompFilter if the user explicitly provides a custom one.
       const gateway = new GatewayClient();
       const result = await gateway.vmCreate({
         vmId,
@@ -203,7 +201,6 @@ export class VMService {
         disableSeccomp: opts.disableSeccomp,
         disablePidNs: opts.disablePidNs,
         disableCgroup: opts.disableCgroup,
-        seccompFilter: seccompFilter ?? undefined,
         jailerBaseDir: paths.jailerBaseDir,
       });
 
@@ -334,10 +331,8 @@ export class VMService {
       // Derive slot from stored network config
       const slot = slotFromVmHostIp(state.network.hostIp);
 
-      // Resolve seccomp filter path to pass to gateway
-      const seccompFilter = state.disableSeccomp ? undefined : ensureSeccompFilter(paths);
-
       // Delegate to gateway
+      // Seccomp: Firecracker v1.5+ uses its own built-in filter by default.
       const gateway = new GatewayClient();
       const result = await gateway.vmRestart({
         vmId,
@@ -358,7 +353,6 @@ export class VMService {
         disableSeccomp: state.disableSeccomp,
         disablePidNs: state.disablePidNs,
         disableCgroup: state.disableCgroup,
-        seccompFilter: seccompFilter ?? undefined,
         vcpus: state.vcpuCount,
         memMib: state.memSizeMib,
         kernelPath: state.kernel,
@@ -483,7 +477,7 @@ export class VMService {
         error: toError(err),
         phase: "stop",
       });
-      return { vmId, success: false, error: err instanceof VmsanError ? err : undefined };
+      return { vmId, success: false, error: toError(err) };
     }
   }
 
@@ -577,7 +571,7 @@ export class VMService {
           success: false,
           previousPolicy,
           newPolicy: policy,
-          error: err instanceof VmsanError ? err : undefined,
+          error: toError(err),
         };
       }
     });
@@ -634,7 +628,7 @@ export class VMService {
         error: toError(err),
         phase: "remove",
       });
-      return { vmId, success: false, error: err instanceof VmsanError ? err : undefined };
+      return { vmId, success: false, error: toError(err) };
     }
   }
 

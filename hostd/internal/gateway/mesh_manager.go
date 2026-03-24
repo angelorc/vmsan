@@ -21,14 +21,16 @@ type MeshManager struct {
 	dns       *mesh.DNSHandler
 	firewall  *mesh.MeshFirewall
 	logger    *slog.Logger
+	slots     *SlotAllocator
 
-	mu      sync.Mutex
-	started bool
-	cancel  context.CancelFunc
+	mu         sync.Mutex
+	started    bool
+	cancel     context.CancelFunc
+	connectMap map[string][]string // vmId → connectTo list for retroactive ACL setup
 }
 
 // NewManager creates a new mesh gateway manager.
-func NewMeshManager(logger *slog.Logger) *MeshManager {
+func NewMeshManager(logger *slog.Logger, slots *SlotAllocator) *MeshManager {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -38,6 +40,7 @@ func NewMeshManager(logger *slog.Logger) *MeshManager {
 		dns:       mesh.NewDNSHandler(allocator, 0, logger),
 		firewall:  mesh.NewMeshFirewall(logger),
 		logger:    logger,
+		slots:     slots,
 	}
 }
 
@@ -110,6 +113,7 @@ type VMStartParams struct {
 	VethHost  string   `json:"vethHost"`
 	NetNS     string   `json:"netns"`
 	GuestDev  string   `json:"guestDev"`
+	TAPDevice string   `json:"tapDevice"`
 }
 
 // VMStartResult holds the result of registering a VM with the mesh.
@@ -117,6 +121,24 @@ type VMStartResult struct {
 	MeshIP  string                 `json:"meshIp"`
 	Service string                 `json:"service,omitempty"`
 	Peers   []mesh.MeshIPAssignment `json:"peers,omitempty"`
+}
+
+// slotByVMId returns the slot for a VM, or -1 if not found.
+func (m *MeshManager) slotByVMId(vmId string) int {
+	if m.slots == nil {
+		return -1
+	}
+	return m.slots.GetSlot(vmId)
+}
+
+// RegisterDNSVM registers a VM's guest IP for DNS query logging and policy filtering.
+func (m *MeshManager) RegisterDNSVM(vmId, guestIP, policy string) {
+	m.dns.RegisterVM(vmId, guestIP, policy)
+}
+
+// UnregisterDNSVM removes a VM's transit IP from DNS logging.
+func (m *MeshManager) UnregisterDNSVM(transitGuestIP string) {
+	m.dns.UnregisterVM(transitGuestIP)
 }
 
 // OnVMStart allocates a mesh IP, sets up routes, registers in DNS, and
@@ -135,25 +157,45 @@ func (m *MeshManager) OnVMStart(params VMStartParams) (*VMStartResult, error) {
 		"service", params.Service,
 	)
 
-	// Add host-side route.
-	if params.VethHost != "" {
-		if err := mesh.AddRoute(assignment.MeshIP, params.VethHost); err != nil {
+	// Add host-side route via transit guest IP.
+	if params.VethHost != "" && params.Slot >= 0 {
+		transitGuestIP := fmt.Sprintf("10.200.%d.2", params.Slot)
+		if err := mesh.AddRoute(assignment.MeshIP, params.VethHost, transitGuestIP); err != nil {
 			m.logger.Debug("failed to add mesh route (may already exist)", "error", err.Error())
 		}
 	}
 
-	// Add mesh IP to guest interface.
-	if params.NetNS != "" && params.GuestDev != "" {
-		if err := mesh.AddGuestRoute(params.NetNS, assignment.MeshIP, params.GuestDev); err != nil {
-			m.logger.Debug("failed to add guest mesh addr (may already exist)", "error", err.Error())
+	// Set up ARP + DNAT so mesh traffic reaching this VM is forwarded to the guest.
+	if params.NetNS != "" && params.Slot >= 0 && params.GuestDev != "" {
+		guestIP := fmt.Sprintf("198.19.%d.2", params.Slot)
+		m.logger.Info("setting up mesh routing",
+			"vmId", params.VMId, "meshIP", assignment.MeshIP,
+			"guestIP", guestIP, "vethGuest", params.GuestDev,
+			"netns", params.NetNS, "slot", params.Slot)
+		if err := mesh.AddGuestRoute(params.NetNS, assignment.MeshIP, guestIP, params.GuestDev); err != nil {
+			m.logger.Error("failed to add mesh routing", "vmId", params.VMId, "error", err.Error())
 		}
 	}
 
-	// Set up mesh ACLs for connectTo peers.
+	// Store connectTo for retroactive ACL setup when peers start later.
 	if len(params.ConnectTo) > 0 {
+		m.mu.Lock()
+		if m.connectMap == nil {
+			m.connectMap = make(map[string][]string)
+		}
+		m.connectMap[params.VMId] = params.ConnectTo
+		m.mu.Unlock()
+
 		if err := m.setupConnections(params.Project, assignment.MeshIP, params.ConnectTo); err != nil {
 			m.logger.Debug("failed to setup mesh connections", "error", err.Error())
 		}
+	}
+
+	// Retroactively add ACLs for peers that started before us and had
+	// connectTo entries targeting our service (which failed because we
+	// didn't exist yet).
+	if params.Service != "" {
+		m.setupPendingConnections(params.Project, params.Service, assignment.MeshIP)
 	}
 
 	// List current project peers.
@@ -178,6 +220,11 @@ func (m *MeshManager) OnVMStop(vmId string, vethHost string, netNS string, guest
 		"meshIp", assignment.MeshIP,
 		"project", assignment.Project,
 	)
+
+	// Remove connectTo tracking.
+	m.mu.Lock()
+	delete(m.connectMap, vmId)
+	m.mu.Unlock()
 
 	// Remove mesh ACL entries for this VM.
 	if err := m.firewall.RemoveVM(assignment.MeshIP); err != nil {
@@ -207,6 +254,42 @@ func (m *MeshManager) OnVMStop(vmId string, vethHost string, netNS string, guest
 // Allocator returns the underlying mesh IP allocator.
 func (m *MeshManager) Allocator() *mesh.Allocator {
 	return m.allocator
+}
+
+// setupPendingConnections checks existing peers' connectTo lists for entries
+// targeting the newly started service. If peer A started with --connect-to
+// "db:5432" but the db VM didn't exist yet, the ACL was skipped. When db
+// starts, this method retroactively creates the ACL.
+func (m *MeshManager) setupPendingConnections(project, newService, newMeshIP string) {
+	m.mu.Lock()
+	snapshot := make(map[string][]string, len(m.connectMap))
+	for k, v := range m.connectMap {
+		snapshot[k] = v
+	}
+	m.mu.Unlock()
+
+	for peerVMId, peerConnectTo := range snapshot {
+		peerAssignment, ok := m.allocator.GetByVMId(peerVMId)
+		if !ok || peerAssignment.Project != project {
+			continue
+		}
+		for _, conn := range peerConnectTo {
+			service, port, err := parseConnectTo(conn)
+			if err != nil || service != newService {
+				continue
+			}
+			entries := []mesh.ACLEntry{
+				{SrcIP: peerAssignment.MeshIP, DstIP: newMeshIP, DstPort: port, Proto: "tcp"},
+				{SrcIP: newMeshIP, DstIP: peerAssignment.MeshIP, DstPort: port, Proto: "tcp"},
+			}
+			if err := m.firewall.AllowMesh(entries); err != nil {
+				m.logger.Debug("failed to add pending mesh ACL", "peer", peerVMId, "error", err.Error())
+			} else {
+				m.logger.Info("retroactive mesh ACL added",
+					"peer", peerVMId, "service", newService, "port", port)
+			}
+		}
+	}
 }
 
 // setupConnections creates bidirectional mesh ACL entries for the given
@@ -242,6 +325,7 @@ func (m *MeshManager) setupConnections(project string, srcIP string, connectTo [
 			DstPort: port,
 			Proto:   "tcp",
 		})
+
 	}
 
 	if len(entries) == 0 {

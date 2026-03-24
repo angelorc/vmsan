@@ -213,6 +213,12 @@ func (b *Builder) LogDropProto(prefix string, proto byte) {
 	b.LogAndDrop(prefix, matchIPv4Proto(proto))
 }
 
+// AcceptProto adds a rule that accepts packets matching the given L4 protocol.
+func (b *Builder) AcceptProto(proto byte) {
+	exprs := append(matchIPv4Proto(proto), verdict(expr.VerdictAccept))
+	b.add(exprs)
+}
+
 // LogDropDstPort adds a log+drop rule pair matching a destination port.
 func (b *Builder) LogDropDstPort(prefix string, proto byte, port uint16) {
 	exprs := make([]expr.Any, 0, 4)

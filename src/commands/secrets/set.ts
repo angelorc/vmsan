@@ -17,6 +17,11 @@ const secretsSetCommand = defineCommand({
       description: "Secret in KEY=VALUE format, or KEY followed by VALUE",
       required: true,
     },
+    project: {
+      type: "string",
+      alias: "p",
+      description: "Project name (default: auto-detect from vmsan.toml or directory name)",
+    },
   },
   async run({ args }) {
     const cmdLog = createCommandLogger("secrets:set");
@@ -50,7 +55,7 @@ const secretsSetCommand = defineCommand({
         return;
       }
 
-      const project = resolveProject();
+      const project = resolveProject(args.project);
       const store = new SecretsStore();
       store.set(project, key, value);
 

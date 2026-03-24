@@ -6,7 +6,7 @@ import (
 )
 
 func TestStartVM(t *testing.T) {
-	m := NewManager()
+	m := NewManager(nil)
 
 	state, err := m.StartVM("vm-1", 1, "deny-all", nil)
 	if err != nil {
@@ -27,7 +27,7 @@ func TestStartVM(t *testing.T) {
 }
 
 func TestStartVM_Idempotent(t *testing.T) {
-	m := NewManager()
+	m := NewManager(nil)
 
 	first, err := m.StartVM("vm-1", 1, "deny-all", nil)
 	if err != nil {
@@ -48,7 +48,7 @@ func TestStartVM_Idempotent(t *testing.T) {
 }
 
 func TestStopVM(t *testing.T) {
-	m := NewManager()
+	m := NewManager(nil)
 
 	m.StartVM("vm-1", 1, "deny-all", nil)
 
@@ -62,7 +62,7 @@ func TestStopVM(t *testing.T) {
 }
 
 func TestStopVM_NotFound(t *testing.T) {
-	m := NewManager()
+	m := NewManager(nil)
 
 	if err := m.StopVM("nonexistent"); err == nil {
 		t.Error("StopVM on nonexistent VM should return error")
@@ -70,7 +70,7 @@ func TestStopVM_NotFound(t *testing.T) {
 }
 
 func TestUpdatePolicy(t *testing.T) {
-	m := NewManager()
+	m := NewManager(nil)
 
 	m.StartVM("vm-1", 1, "deny-all", nil)
 
@@ -88,7 +88,7 @@ func TestUpdatePolicy(t *testing.T) {
 }
 
 func TestUpdatePolicy_NotFound(t *testing.T) {
-	m := NewManager()
+	m := NewManager(nil)
 
 	if err := m.UpdatePolicy("nonexistent", "allow"); err == nil {
 		t.Error("UpdatePolicy on nonexistent VM should return error")
@@ -96,7 +96,7 @@ func TestUpdatePolicy_NotFound(t *testing.T) {
 }
 
 func TestGetVM(t *testing.T) {
-	m := NewManager()
+	m := NewManager(nil)
 
 	if _, ok := m.GetVM("vm-1"); ok {
 		t.Error("GetVM should return false for nonexistent VM")
@@ -114,7 +114,7 @@ func TestGetVM(t *testing.T) {
 }
 
 func TestListVMs(t *testing.T) {
-	m := NewManager()
+	m := NewManager(nil)
 
 	if vms := m.ListVMs(); len(vms) != 0 {
 		t.Errorf("ListVMs on empty manager: got %d, want 0", len(vms))
@@ -139,7 +139,7 @@ func TestListVMs(t *testing.T) {
 }
 
 func TestStopAll(t *testing.T) {
-	m := NewManager()
+	m := NewManager(nil)
 
 	m.StartVM("vm-1", 1, "deny-all", nil)
 	m.StartVM("vm-2", 2, "allow", nil)
@@ -157,7 +157,7 @@ func TestStopAll(t *testing.T) {
 }
 
 func TestConcurrentAccess(t *testing.T) {
-	m := NewManager()
+	m := NewManager(nil)
 	var wg sync.WaitGroup
 
 	// Concurrently start VMs.

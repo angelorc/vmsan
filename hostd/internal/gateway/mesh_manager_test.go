@@ -43,7 +43,7 @@ func TestParseConnectTo(t *testing.T) {
 }
 
 func TestNewMeshManager(t *testing.T) {
-	m := NewMeshManager(nil)
+	m := NewMeshManager(nil, nil)
 	if m == nil {
 		t.Fatal("NewMeshManager returned nil")
 	}

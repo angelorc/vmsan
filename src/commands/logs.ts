@@ -1,8 +1,6 @@
 import type { CommandDef } from "citty";
 import { defineCommand, runCommand } from "citty";
 
-const SUBCOMMAND_NAMES = new Set(["dns"]);
-
 const logsCommand = defineCommand({
   meta: {
     name: "logs",
@@ -11,7 +9,7 @@ const logsCommand = defineCommand({
   args: {
     service: {
       type: "positional",
-      description: "Service name to filter (omit for all services)",
+      description: 'Service name to filter, or "dns" for DNS logs',
       required: false,
     },
     lines: {
@@ -37,13 +35,11 @@ const logsCommand = defineCommand({
       description: "Path to vmsan.toml (default: ./vmsan.toml)",
     },
   },
-  subCommands: {
-    dns: () => import("./logs/dns.ts").then((m) => m.default),
-  },
   async run({ rawArgs, args }) {
-    // When citty dispatches a subcommand (e.g. "dns"), it still calls the
-    // parent's run(). Skip if the first positional matches a subcommand name.
-    if (args.service && SUBCOMMAND_NAMES.has(args.service)) {
+    // Route "vmsan logs dns ..." to the DNS logs subcommand.
+    if (args.service === "dns") {
+      const dnsCmd = await import("./logs/dns.ts").then((m) => m.default);
+      await runCommand(dnsCmd, { rawArgs: rawArgs.filter((a) => a !== "dns") });
       return;
     }
 

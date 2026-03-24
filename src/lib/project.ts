@@ -16,6 +16,6 @@ export function loadProjectConfig(configArg?: string): ProjectConfig {
   }
   const config = loadVmsanToml(configPath);
   const sourceDir = resolve(configPath, "..");
-  const project = basename(sourceDir);
+  const project = config.project || basename(sourceDir);
   return { config, configPath, sourceDir, project };
 }

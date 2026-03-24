@@ -11,11 +11,18 @@ const secretsListCommand = defineCommand({
     name: "list",
     description: "List secret names for the current project",
   },
-  async run() {
+  args: {
+    project: {
+      type: "string",
+      alias: "p",
+      description: "Project name (default: auto-detect from vmsan.toml or directory name)",
+    },
+  },
+  async run({ args }) {
     const cmdLog = createCommandLogger("secrets:list");
 
     try {
-      const project = resolveProject();
+      const project = resolveProject(args.project);
       const store = new SecretsStore();
       const keys = store.list(project);
 

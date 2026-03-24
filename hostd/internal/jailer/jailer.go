@@ -32,6 +32,7 @@ type Config struct {
 	KernelSrc  string
 	RootfsSrc  string
 	DiskSizeGb float64 // 0 means no expansion
+	HostIP     string  // host-side IP for guest DNS resolution
 	Snapshot   *SnapshotConfig
 	Agent      *AgentConfig
 }
@@ -66,6 +67,7 @@ type SpawnConfig struct {
 	UID            int
 	GID            int
 	SeccompFilter  string
+	DisableSeccomp bool
 	NewPidNs       bool
 	Cgroup         *CgroupConfig
 	NetNS          string
@@ -163,17 +165,22 @@ func Spawn(cfg SpawnConfig) error {
 		}
 	}
 
-	args = append(args, "--", "--api-sock", "run/firecracker.socket")
+	// Firecracker args go after "--". The jailer passes them through to Firecracker.
+	fcArgs := []string{"--api-sock", "run/firecracker.socket"}
 
-	if cfg.SeccompFilter != "" {
+	// Seccomp is handled by Firecracker (not the jailer) since v1.5+.
+	// When neither flag is passed, Firecracker uses its built-in default filter.
+	if cfg.DisableSeccomp {
+		fcArgs = append(fcArgs, "--no-seccomp")
+	} else if cfg.SeccompFilter != "" {
 		if _, err := os.Stat(cfg.SeccompFilter); err == nil {
-			args = append(args, "--seccomp-filter", cfg.SeccompFilter)
-		} else {
-			args = append(args, "--no-seccomp")
+			fcArgs = append(fcArgs, "--seccomp-filter", cfg.SeccompFilter)
 		}
-	} else {
-		args = append(args, "--no-seccomp")
+		// If filter path is invalid, fall through to Firecracker's built-in default.
 	}
+
+	args = append(args, "--")
+	args = append(args, fcArgs...)
 
 	cmd := exec.Command("sudo", args...)
 	output, err := cmd.CombinedOutput()
@@ -262,13 +269,19 @@ func configureRootfs(cfg Config, paths Paths) error {
 			os.RemoveAll(tmpMount)
 		}()
 
-		// Configure DNS: rm resolv.conf, symlink to /proc/net/pnp
+		// Configure DNS: write static resolv.conf pointing to host gateway.
+		// Remove any symlink (Ubuntu uses resolv.conf → /run/systemd/resolve/stub-resolv.conf),
+		// write a static file, then make it immutable so systemd-resolved/cloud-init can't
+		// overwrite it during boot.
 		resolvConf := filepath.Join(tmpMount, "etc", "resolv.conf")
+		exec.Command("chattr", "-i", resolvConf).Run() // clear immutable if set from previous run
 		os.Remove(resolvConf)
-		if err := os.Symlink("/proc/net/pnp", resolvConf); err != nil {
-			prepareErr = fmt.Errorf("symlink resolv.conf: %w", err)
+		nameserver := fmt.Sprintf("nameserver %s\n", cfg.HostIP)
+		if err := os.WriteFile(resolvConf, []byte(nameserver), 0644); err != nil {
+			prepareErr = fmt.Errorf("write resolv.conf: %w", err)
 			return
 		}
+		exec.Command("chattr", "+i", resolvConf).Run() // make immutable
 
 		// Set hostname
 		hostnamePath := filepath.Join(tmpMount, "etc", "hostname")
@@ -277,15 +290,19 @@ func configureRootfs(cfg Config, paths Paths) error {
 			return
 		}
 
-		// Add hostname to /etc/hosts
+		// Write /etc/hosts with localhost and VM hostname
 		hostsPath := filepath.Join(tmpMount, "etc", "hosts")
 		hostsContent, _ := os.ReadFile(hostsPath)
-		if !strings.Contains(string(hostsContent), cfg.VMId) {
-			newContent := strings.TrimRight(string(hostsContent), "\n") + "\n127.0.1.1 " + cfg.VMId + "\n"
-			if err := os.WriteFile(hostsPath, []byte(newContent), 0644); err != nil {
-				prepareErr = fmt.Errorf("write hosts: %w", err)
-				return
-			}
+		hostsStr := string(hostsContent)
+		if !strings.Contains(hostsStr, "127.0.0.1") {
+			hostsStr = "127.0.0.1 localhost\n" + hostsStr
+		}
+		if !strings.Contains(hostsStr, cfg.VMId) {
+			hostsStr = strings.TrimRight(hostsStr, "\n") + "\n127.0.1.1 " + cfg.VMId + "\n"
+		}
+		if err := os.WriteFile(hostsPath, []byte(hostsStr), 0644); err != nil {
+			prepareErr = fmt.Errorf("write hosts: %w", err)
+			return
 		}
 
 		// Inject agent binary and systemd service

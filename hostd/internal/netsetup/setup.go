@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // SetupConfig holds the configuration for network setup.
@@ -39,6 +40,9 @@ func SetupNamespace(cfg SetupConfig) error {
 	if fileExists(fmt.Sprintf("/sys/class/net/%s", cfg.VethHost)) {
 		_ = run("ip", "link", "delete", cfg.VethHost)
 	}
+
+	// Clean up stale namespace if it exists from a previous lifecycle
+	_ = run("ip", "netns", "delete", cfg.NetNSName)
 
 	// 1. Create namespace
 	if err := run("ip", "netns", "add", cfg.NetNSName); err != nil {
@@ -176,7 +180,11 @@ func TeardownNamespace(cfg SetupConfig) error {
 
 	// Delete namespace — auto-cleans veth pair, TAP, rules inside
 	if err := run("ip", "netns", "delete", cfg.NetNSName); err != nil {
-		slog.Debug("namespace teardown: netns delete failed", "netns", cfg.NetNSName, "error", err)
+		slog.Debug("namespace teardown: netns delete failed, retrying", "netns", cfg.NetNSName, "error", err)
+		time.Sleep(500 * time.Millisecond)
+		if err := run("ip", "netns", "delete", cfg.NetNSName); err != nil {
+			slog.Warn("namespace teardown: netns delete retry failed", "netns", cfg.NetNSName, "error", err)
+		}
 	}
 
 	return nil

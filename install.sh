@@ -4,6 +4,8 @@ set -euo pipefail
 # vmsan installer — downloads Firecracker, kernel, rootfs, and vmsan-agent.
 # Usage:
 #   Install: curl -fsSL https://vmsan.dev/install | bash
+#   Install from local checkout: sudo bash ./install.sh --local
+#   Install from local checkout: sudo bash ./install.sh --source-dir /path/to/vmsan
 #   Install a branch: curl -fsSL https://vmsan.dev/install | bash -s -- --ref my-branch
 #   Install a commit: curl -fsSL https://vmsan.dev/install | bash -s -- --sha <commit>
 #   Uninstall: curl -fsSL https://vmsan.dev/install | bash -s -- --uninstall
@@ -12,6 +14,7 @@ VMSAN_DIR="${VMSAN_DIR:-}"
 VMSAN_REPO="angelorc/vmsan"
 VMSAN_INSTALL_BOOTSTRAPPED="${VMSAN_INSTALL_BOOTSTRAPPED:-}"
 VMSAN_INSTALL_SOURCE_SHA="${VMSAN_INSTALL_SOURCE_SHA:-}"
+VMSAN_INSTALL_SOURCE_DIR="${VMSAN_INSTALL_SOURCE_DIR:-}"
 VMSAN_INSTALL_REQUESTED_REF="${VMSAN_INSTALL_REQUESTED_REF:-}"
 VMSAN_INSTALL_REQUESTED_SHA="${VMSAN_INSTALL_REQUESTED_SHA:-}"
 VMSAN_RUNTIME_MANIFEST_URL="${VMSAN_RUNTIME_MANIFEST_URL:-https://artifacts.vmsan.dev/runtimes/channels/stable.json}"
@@ -22,6 +25,7 @@ GO_REQUIRED_VERSION="${GO_REQUIRED_VERSION:-1.22.0}"
 GO_INSTALL_VERSION="${GO_INSTALL_VERSION:-1.22.0}"
 REQUESTED_REF="$VMSAN_INSTALL_REQUESTED_REF"
 REQUESTED_SHA="$VMSAN_INSTALL_REQUESTED_SHA"
+REQUESTED_SOURCE_DIR="$VMSAN_INSTALL_SOURCE_DIR"
 RUNTIME_MANIFEST_URL="$VMSAN_RUNTIME_MANIFEST_URL"
 FORCE_LOCAL_RUNTIME_BUILD="$VMSAN_FORCE_LOCAL_RUNTIME_BUILD"
 UNINSTALL=0
@@ -55,6 +59,8 @@ print_usage() {
   cat <<EOF
 Usage:
   curl -fsSL https://vmsan.dev/install | bash
+  sudo bash ./install.sh --local
+  sudo bash ./install.sh --source-dir /path/to/vmsan
   curl -fsSL https://vmsan.dev/install | bash -s -- --ref <branch>
   curl -fsSL https://vmsan.dev/install | bash -s -- --sha <commit>
   curl -fsSL https://vmsan.dev/install | bash -s -- --uninstall
@@ -218,6 +224,28 @@ go_version_number() {
   go version 2>/dev/null | awk '{print $3}' | sed 's/^go//'
 }
 
+resolve_script_dir() {
+  local script_path="${BASH_SOURCE[0]:-$0}"
+  cd "$(dirname "$script_path")" && pwd -P
+}
+
+resolve_source_dir() {
+  local dir="$1"
+  [ -n "$dir" ] || error "source directory is required"
+  [ -d "$dir" ] || error "Source directory not found: $dir"
+  (
+    cd "$dir" && pwd -P
+  )
+}
+
+validate_source_tree() {
+  local dir="$1"
+  [ -f "$dir/package.json" ] || error "Invalid source tree: missing $dir/package.json"
+  [ -d "$dir/agent" ] || error "Invalid source tree: missing $dir/agent"
+  [ -d "$dir/hostd" ] || error "Invalid source tree: missing $dir/hostd"
+  [ -d "$dir/nftables" ] || error "Invalid source tree: missing $dir/nftables"
+}
+
 resolve_commit_sha() {
   local target="$1"
   local sha
@@ -256,6 +284,19 @@ while [ $# -gt 0 ]; do
       UNINSTALL=1
       shift
       ;;
+    --local)
+      REQUESTED_SOURCE_DIR="$(resolve_script_dir)"
+      shift
+      ;;
+    --source-dir)
+      [ $# -ge 2 ] || error "--source-dir requires a value"
+      REQUESTED_SOURCE_DIR="$2"
+      shift 2
+      ;;
+    --source-dir=*)
+      REQUESTED_SOURCE_DIR="${1#--source-dir=}"
+      shift
+      ;;
     --ref)
       [ $# -ge 2 ] || error "--ref requires a value"
       REQUESTED_REF="$2"
@@ -285,6 +326,8 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "$REQUESTED_REF" ] && [ -n "$REQUESTED_SHA" ] && error "Use only one of --ref or --sha"
+[ -n "$REQUESTED_SOURCE_DIR" ] && [ -n "$REQUESTED_REF" ] && error "Use only one of --local/--source-dir or --ref"
+[ -n "$REQUESTED_SOURCE_DIR" ] && [ -n "$REQUESTED_SHA" ] && error "Use only one of --local/--source-dir or --sha"
 
 if [ -z "$VMSAN_INSTALL_BOOTSTRAPPED" ] && { [ -n "$REQUESTED_REF" ] || [ -n "$REQUESTED_SHA" ]; }; then
   need_cmd curl
@@ -299,7 +342,16 @@ fi
 INSTALL_MODE="release"
 SOURCE_LABEL=""
 SOURCE_SHA=""
-if [ -n "$VMSAN_INSTALL_SOURCE_SHA" ]; then
+SOURCE_LOCAL=0
+VMSAN_SRC=""
+if [ -n "$REQUESTED_SOURCE_DIR" ]; then
+  INSTALL_MODE="source"
+  SOURCE_LOCAL=1
+  VMSAN_SRC="$(resolve_source_dir "$REQUESTED_SOURCE_DIR")"
+  validate_source_tree "$VMSAN_SRC"
+  SOURCE_SHA="$(git -C "$VMSAN_SRC" rev-parse HEAD 2>/dev/null || echo "local")"
+  SOURCE_LABEL="$VMSAN_SRC"
+elif [ -n "$VMSAN_INSTALL_SOURCE_SHA" ]; then
   INSTALL_MODE="source"
   SOURCE_SHA="$VMSAN_INSTALL_SOURCE_SHA"
   SOURCE_LABEL="${REQUESTED_REF:-${REQUESTED_SHA:-$SOURCE_SHA}}"
@@ -651,17 +703,32 @@ fi
 
 # --- source / release selection ---
 
-VMSAN_SRC="$VMSAN_DIR/src"
+if [ -z "$VMSAN_SRC" ]; then
+  VMSAN_SRC="$VMSAN_DIR/src"
+fi
+
 LATEST_TAG=""
 LOCAL_RUNTIME_BUILD=0
 
-if [ "$INSTALL_MODE" = "source" ] || is_truthy "$FORCE_LOCAL_RUNTIME_BUILD"; then
+if is_truthy "$FORCE_LOCAL_RUNTIME_BUILD"; then
+  LOCAL_RUNTIME_BUILD=1
+elif [ "$INSTALL_MODE" = "source" ] && [ "${SOURCE_LOCAL:-0}" -eq 0 ]; then
   LOCAL_RUNTIME_BUILD=1
 fi
 
 if [ "$INSTALL_MODE" = "source" ]; then
-  info "Source install mode active (${SOURCE_LABEL})"
-  download_source_tree_ref "$SOURCE_SHA" "$VMSAN_SRC"
+  if [ "$SOURCE_LOCAL" -eq 1 ]; then
+    info "Local source install mode active (${SOURCE_LABEL})"
+    if [ "$LOCAL_RUNTIME_BUILD" -eq 1 ]; then
+      info "Local runtime build forced; built-in runtimes will be built from source"
+    else
+      info "Using public runtime artifacts from ${RUNTIME_MANIFEST_URL}"
+    fi
+  else
+    VMSAN_SRC="$VMSAN_DIR/src"
+    info "Source install mode active (${SOURCE_LABEL})"
+    download_source_tree_ref "$SOURCE_SHA" "$VMSAN_SRC"
+  fi
 else
   info "Fetching latest release tag..."
   LATEST_TAG=$(curl -fsSL "https://api.github.com/repos/$VMSAN_REPO/releases" | grep -oP '"tag_name":\s*"\K[^"]+' | head -1)
@@ -753,6 +820,24 @@ fi
 
 # Install vmsan-gateway to system path (systemd service expects it here)
 install -m 0755 "$GATEWAY_PATH" /usr/local/bin/vmsan-gateway
+
+# --- vmsan-server / vmsan-agent-host ---
+
+SERVER_PATH="$VMSAN_DIR/bin/vmsan-server"
+AGENT_HOST_PATH="$VMSAN_DIR/bin/vmsan-agent-host"
+
+if [ "$INSTALL_MODE" = "source" ]; then
+  ensure_go
+  info "Building vmsan-server from source (${SOURCE_SHA})..."
+  (cd "$VMSAN_SRC/hostd" && CGO_ENABLED=0 GOOS=linux GOARCH="$(go_arch)" go build -ldflags="-s -w" -o "$SERVER_PATH" ./cmd/vmsan-server)
+  chmod +x "$SERVER_PATH"
+  success "vmsan-server built from ${SOURCE_LABEL}"
+
+  info "Building vmsan-agent-host from source (${SOURCE_SHA})..."
+  (cd "$VMSAN_SRC/hostd" && CGO_ENABLED=0 GOOS=linux GOARCH="$(go_arch)" go build -ldflags="-s -w" -o "$AGENT_HOST_PATH" ./cmd/vmsan-agent-host)
+  chmod +x "$AGENT_HOST_PATH"
+  success "vmsan-agent-host built from ${SOURCE_LABEL}"
+fi
 
 # --- dnsproxy ---
 
@@ -1222,6 +1307,7 @@ runtime_distribution=$RUNTIME_DISTRIBUTION
 runtime_manifest_url=$RUNTIME_MANIFEST_URL
 runtime_recipe_version=$RUNTIME_RECIPE_VERSION_INSTALLED
 local_runtime_build=$LOCAL_RUNTIME_BUILD
+source_dir=$VMSAN_SRC
 installed_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
 
@@ -1273,6 +1359,12 @@ echo "  Kernel       $VMSAN_DIR/kernels/$KERNEL_FILE"
 echo "  Rootfs       $VMSAN_DIR/rootfs/$ROOTFS_FILE"
 echo "  Runtimes     $RUNTIME_STATUS"
 echo "  Agent        $AGENT_PATH"
+if [ -x "$SERVER_PATH" ]; then
+  echo "  Server       $SERVER_PATH"
+fi
+if [ -x "$AGENT_HOST_PATH" ]; then
+  echo "  Agent host   $AGENT_HOST_PATH"
+fi
 echo "  cloudflared  $CLOUDFLARED_PATH ($CF_STATUS)"
 echo "  CLI          $(command -v vmsan 2>/dev/null || echo 'vmsan (npm global)')"
 if [ "$INSTALL_MODE" = "source" ]; then

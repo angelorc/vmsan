@@ -69,6 +69,22 @@ func buildCommand(name string, args []string) *exec.Cmd {
 	return exec.Command(name, args...)
 }
 
+// appLogPath is the file where detached process output is written.
+// vmsan logs reads from this file to surface application output.
+const appLogPath = "/var/log/vmsan-app.log"
+
+// drainToLogFile reads from r and appends to the app log file.
+// Used for detached processes so their output surfaces in vmsan logs.
+func drainToLogFile(r io.Reader) {
+	f, err := os.OpenFile(appLogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		io.Copy(io.Discard, r)
+		return
+	}
+	defer f.Close()
+	io.Copy(f, r)
+}
+
 func writeEvent(w io.Writer, mu *sync.Mutex, evt ndjsonEvent) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -177,7 +193,10 @@ func handleRun(w http.ResponseWriter, r *http.Request, logger *slog.Logger, defa
 	})
 
 	// In detached mode, return after the started event; the process continues in background.
+	// Drain stdout/stderr to syslog so `vmsan logs` can surface app output.
 	if req.Detached {
+		go drainToLogFile(stdout)
+		go drainToLogFile(stderr)
 		go func() {
 			cmd.Wait()
 			activeCommands.Add(-1)

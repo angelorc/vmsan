@@ -372,7 +372,14 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		entries = []SyncLogEntry{}
 	}
 
-	s.writeJSON(w, http.StatusOK, SyncResponse{Entries: entries})
+	var latest int64
+	for _, e := range entries {
+		if e.Version > latest {
+			latest = e.Version
+		}
+	}
+
+	s.writeJSON(w, http.StatusOK, SyncResponse{Changes: entries, Latest: latest})
 }
 
 // --- Token handler ---

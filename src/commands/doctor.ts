@@ -208,6 +208,53 @@ function checkNftablesBinary(nftablesBin: string): CheckResult {
   return { category: "Binaries", name: "vmsan-nftables", status: "pass", detail: "Found" };
 }
 
+function hasLoadedKernelModule(name: string): boolean {
+  if (existsSync(`/sys/module/${name}`)) {
+    return true;
+  }
+
+  try {
+    const modules = readFileSync("/proc/modules", "utf-8");
+    return modules.split("\n").some((line) => line.startsWith(`${name} `));
+  } catch {
+    return false;
+  }
+}
+
+function commandErrorText(error: unknown): string {
+  const parts: string[] = [];
+
+  if (error instanceof Error && error.message) {
+    parts.push(error.message);
+  }
+
+  if (typeof error === "object" && error !== null) {
+    const stdout = "stdout" in error ? (error as { stdout?: unknown }).stdout : undefined;
+    const stderr = "stderr" in error ? (error as { stderr?: unknown }).stderr : undefined;
+
+    for (const stream of [stdout, stderr]) {
+      if (typeof stream === "string" && stream.trim()) {
+        parts.push(stream);
+      } else if (stream && typeof stream === "object" && "toString" in stream) {
+        const text = String(stream).trim();
+        if (text) parts.push(text);
+      }
+    }
+  }
+
+  return parts.join("\n");
+}
+
+function isPermissionDeniedErrorText(text: string): boolean {
+  const lower = text.toLowerCase();
+  return (
+    lower.includes("permission denied") ||
+    lower.includes("operation not permitted") ||
+    lower.includes("eperm") ||
+    text.includes("PERMISSION_DENIED")
+  );
+}
+
 function checkNftablesKernel(nftablesBin: string): CheckResult {
   try {
     // Use vmsan-nftables verify (netlink-based) instead of the nft CLI.
@@ -223,7 +270,17 @@ function checkNftablesKernel(nftablesBin: string): CheckResult {
       status: "pass",
       detail: "nftables kernel support verified",
     };
-  } catch {
+  } catch (error) {
+    const errorText = commandErrorText(error);
+    if (isPermissionDeniedErrorText(errorText) && hasLoadedKernelModule("nf_tables")) {
+      return {
+        category: "System",
+        name: "nftables kernel",
+        status: "pass",
+        detail: "nf_tables module loaded (unprivileged netlink probe returned EPERM)",
+      };
+    }
+
     return {
       category: "System",
       name: "nftables kernel",

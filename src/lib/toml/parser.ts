@@ -5,6 +5,9 @@ import { findClosestMatch } from "./suggest.ts";
 // ---------- Schema types ----------
 
 export interface VmsanToml {
+  // Project name
+  project?: string;
+
   // Single-service format (flat)
   runtime?: string;
   build?: string;
@@ -68,6 +71,7 @@ export interface HealthCheckConfig {
 // ---------- Known fields ----------
 
 const TOP_LEVEL_KEYS = new Set([
+  "project",
   "runtime",
   "build",
   "start",

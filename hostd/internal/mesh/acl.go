@@ -39,11 +39,15 @@ func NewMeshFirewall(logger *slog.Logger) *MeshFirewall {
 	return &MeshFirewall{logger: logger}
 }
 
-// Init creates the mesh nftables table with a default-deny forward chain
-// and a concatenated set for ACL entries.
+// Init creates the mesh nftables table with a forward chain scoped to mesh
+// traffic and a concatenated set for ACL entries.
+//
+// Chain logic (policy accept — non-mesh traffic passes through):
+//  1. ct state established,related → accept (return traffic)
+//  2. dst in 10.90.0.0/16 AND tuple in ACL set → accept
+//  3. dst in 10.90.0.0/16 → drop (mesh traffic not in ACL)
+//  4. everything else → accept (policy, e.g. VM internet traffic)
 func (f *MeshFirewall) Init() error {
-	// Build the nftables ruleset atomically.
-	// Uses a concatenated set {ipv4_addr . ipv4_addr . inet_service} for O(1) lookup.
 	ruleset := fmt.Sprintf(`
 table ip %s {
 	set %s {
@@ -52,13 +56,36 @@ table ip %s {
 	}
 
 	chain %s {
-		type filter hook forward priority filter; policy drop;
-		ip saddr . ip daddr . meta l4proto . th dport @%s accept
+		type filter hook forward priority filter; policy accept;
+		ct state established,related accept
+		ip daddr 10.90.0.0/16 ip saddr . ip daddr . meta l4proto . th dport @%s accept
+		ip daddr 10.90.0.0/16 counter drop
 	}
 }
 `, meshTableName, meshSetName, meshChainName, meshSetName)
 
-	return f.applyRuleset(ruleset)
+	if err := f.applyRuleset(ruleset); err != nil {
+		return err
+	}
+
+	// The host also has iptables FORWARD rules (from hostiptables.go) for
+	// Docker compatibility. iptables and nftables evaluate FORWARD hooks
+	// independently — both must accept for traffic to pass. Docker sets the
+	// iptables FORWARD policy to DROP, so cross-VM mesh traffic (veth-h-N →
+	// veth-h-M) gets dropped even though our nftables chain accepts it.
+	// Add an iptables rule to let mesh traffic through; ACL enforcement
+	// remains in the nftables chain above.
+	if out, err := exec.Command("iptables", "-C", "FORWARD",
+		"-d", "10.90.0.0/16", "-j", "ACCEPT").CombinedOutput(); err != nil {
+		// Rule doesn't exist yet, add it at the top of the chain.
+		if out, err := exec.Command("iptables", "-I", "FORWARD", "1",
+			"-d", "10.90.0.0/16", "-j", "ACCEPT").CombinedOutput(); err != nil {
+			f.logger.Debug("failed to add iptables mesh FORWARD rule", "error", err, "output", string(out))
+		}
+		_ = out
+	}
+
+	return nil
 }
 
 // AllowMesh adds ACL entries to permit specific mesh connections.
@@ -133,9 +160,13 @@ func (f *MeshFirewall) RemoveVM(meshIP string) error {
 	return f.nftCmd(cmd)
 }
 
-// Cleanup removes the entire mesh nftables table.
+// Cleanup removes the entire mesh nftables table and iptables mesh rule.
 func (f *MeshFirewall) Cleanup() error {
 	f.logger.Debug("cleaning up mesh firewall table")
+
+	// Remove iptables FORWARD rule for mesh traffic (best-effort).
+	exec.Command("iptables", "-D", "FORWARD", "-d", "10.90.0.0/16", "-j", "ACCEPT").Run()
+
 	err := f.nftCmd(fmt.Sprintf("delete table ip %s", meshTableName))
 	if err != nil {
 		// Ignore "No such file" — table may not exist.

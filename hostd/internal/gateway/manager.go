@@ -3,6 +3,8 @@ package gateway
 import (
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/angelorc/vmsan/hostd/internal/tcpproxy"
@@ -16,23 +18,50 @@ type VMState struct {
 	DNSPort  int    `json:"dnsPort"`
 	SNIPort  int    `json:"sniPort"`
 	HTTPPort int    `json:"httpPort"`
-	// Future: dnsproxy PID, tcpproxy listener, config paths
 }
 
 // Manager tracks per-VM proxy resources. All methods are safe for
 // concurrent use.
 type Manager struct {
-	mu         sync.RWMutex
-	vms        map[string]*VMState
-	sniProxies map[string]*tcpproxy.SNIProxy
+	mu            sync.RWMutex
+	vms           map[string]*VMState
+	sniProxies    map[string]*tcpproxy.SNIProxy
+	dnsSupervisor *DNSSupervisor
 }
 
 // NewManager returns an empty Manager.
-func NewManager() *Manager {
+func NewManager(dnsSupervisor *DNSSupervisor) *Manager {
 	return &Manager{
-		vms:        make(map[string]*VMState),
-		sniProxies: make(map[string]*tcpproxy.SNIProxy),
+		vms:           make(map[string]*VMState),
+		sniProxies:    make(map[string]*tcpproxy.SNIProxy),
+		dnsSupervisor: dnsSupervisor,
 	}
+}
+
+// dnsproxyBin returns the path to the dnsproxy binary.
+// The gateway runs as root (systemd), so ~/ resolves to /root.
+// We check standard paths first, then scan /home/*/.vmsan/bin/ where install.sh puts it.
+func dnsproxyBin() string {
+	for _, candidate := range []string{
+		"/usr/local/bin/dnsproxy",
+		"/usr/bin/dnsproxy",
+	} {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	if entries, err := os.ReadDir("/home"); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			p := filepath.Join("/home", e.Name(), ".vmsan", "bin", "dnsproxy")
+			if _, err := os.Stat(p); err == nil {
+				return p
+			}
+		}
+	}
+	return "dnsproxy"
 }
 
 // StartVM registers a VM and allocates stub ports. If the VM is already
@@ -70,6 +99,12 @@ func (m *Manager) StartVM(vmId string, slot int, policy string, allowedDomains [
 		m.sniProxies[vmId] = sniProxy
 	}
 
+	// DNS resolution is handled by the mesh DNS handler (port 10052) which:
+	// - Resolves *.vmsan.internal via the mesh allocator
+	// - Forwards all other queries upstream (8.8.8.8, 1.1.1.1)
+	// DNAT rules in the namespace redirect guest DNS (port 53) to the mesh DNS handler.
+	// No separate dnsproxy process is needed.
+
 	slog.Info("vm started", "vmId", vmId, "slot", slot, "policy", policy)
 	return state, nil
 }
@@ -88,6 +123,12 @@ func (m *Manager) StopVM(vmId string) error {
 			slog.Debug("sni proxy close failed", "vmId", vmId, "error", err)
 		}
 		delete(m.sniProxies, vmId)
+	}
+
+	if m.dnsSupervisor != nil {
+		if err := m.dnsSupervisor.Stop(vmId); err != nil {
+			slog.Debug("dns proxy stop failed", "vmId", vmId, "error", err)
+		}
 	}
 
 	delete(m.vms, vmId)
@@ -152,6 +193,10 @@ func (m *Manager) StopAll() {
 		}
 	}
 	m.sniProxies = make(map[string]*tcpproxy.SNIProxy)
+
+	if m.dnsSupervisor != nil {
+		m.dnsSupervisor.StopAll()
+	}
 
 	count := len(m.vms)
 	m.vms = make(map[string]*VMState)

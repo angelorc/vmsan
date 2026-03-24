@@ -48,6 +48,9 @@ type VMCreateParams struct {
 	Project       string   `json:"project,omitempty"`
 	Service       string   `json:"service,omitempty"`
 	ConnectTo     []string `json:"connectTo,omitempty"`
+	KernelPath    string   `json:"kernelPath,omitempty"`
+	RootfsPath    string   `json:"rootfsPath,omitempty"`
+	JailerBaseDir string   `json:"jailerBaseDir,omitempty"`
 }
 
 // VMCreateResult is the result of vm.create.

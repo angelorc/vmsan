@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"log/slog"
+	"os"
 	"os/exec"
 	"sync"
 	"time"
@@ -144,9 +145,11 @@ func (s *DNSSupervisor) supervise(ctx context.Context, proc *supervisedProcess) 
 
 		// Start the process
 		proc.cmd = exec.CommandContext(ctx, proc.args[0], proc.args[1:]...)
+		proc.cmd.Stderr = os.Stderr
+		proc.cmd.Stdout = os.Stdout
 		proc.lastStart = time.Now()
 
-		s.logger.Info("starting dnsproxy", "vmId", proc.vmId, "port", proc.port, "restart", proc.restarts)
+		s.logger.Info("starting dnsproxy", "vmId", proc.vmId, "port", proc.port, "restart", proc.restarts, "args", proc.args)
 
 		err := proc.cmd.Start()
 		if err != nil {

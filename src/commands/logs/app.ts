@@ -42,6 +42,7 @@ function buildJournalctlCommand(lines: number, follow: boolean, timestamps: bool
 function buildFallbackCommand(lines: number, follow: boolean): string {
   const tailFlag = follow ? "-f" : "";
   return [
+    `tail ${tailFlag} -n ${lines} /var/log/vmsan-app.log 2>/dev/null`,
     `tail ${tailFlag} -n ${lines} /var/log/syslog 2>/dev/null`,
     `tail ${tailFlag} -n ${lines} /var/log/messages 2>/dev/null`,
     `echo "No log source found"`,

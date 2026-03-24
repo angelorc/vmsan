@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/angelorc/vmsan/hostd/internal/runtimes"
 	vmsync "github.com/angelorc/vmsan/hostd/internal/sync"
 )
 
@@ -103,6 +104,15 @@ func New(logger *slog.Logger) (*Agent, error) {
 
 	gw := NewGatewayClient(gatewaySocketPath)
 
+	// Resolve vmsan paths once for the agent's lifetime.
+	// VMSAN_DIR env var takes precedence (same convention as the CLI),
+	// falling back to $HOME/.vmsan.
+	vmsanDir := os.Getenv("VMSAN_DIR")
+	if vmsanDir == "" {
+		home, _ := os.UserHomeDir()
+		vmsanDir = filepath.Join(home, ".vmsan")
+	}
+
 	handlers := vmsync.Handlers{
 		OnVMCreate: func(payload json.RawMessage) error {
 			logger.Info("vm create received", "payload_size", len(payload))
@@ -110,6 +120,36 @@ func New(logger *slog.Logger) (*Agent, error) {
 			var params VMCreateParams
 			if err := json.Unmarshal(payload, &params); err != nil {
 				return fmt.Errorf("unmarshal vm create params: %w", err)
+			}
+
+			// The agent resolves kernel/rootfs paths locally (same pattern
+			// as the CLI) and passes absolute paths to the gateway.
+			// The gateway is a privileged executor — it shouldn't need to
+			// know about installation layout.
+			if params.KernelPath == "" || params.RootfsPath == "" {
+				rt := params.Runtime
+				if rt == "" {
+					rt = "base"
+				}
+				k, r, err := runtimes.Resolve(vmsanDir, rt)
+				if err != nil {
+					return fmt.Errorf("resolve runtime %q: %w", rt, err)
+				}
+				if params.KernelPath == "" {
+					params.KernelPath = k
+				}
+				if params.RootfsPath == "" {
+					params.RootfsPath = r
+				}
+				logger.Info("resolved runtime paths",
+					"runtime", rt,
+					"kernel", params.KernelPath,
+					"rootfs", params.RootfsPath,
+				)
+			}
+
+			if params.JailerBaseDir == "" {
+				params.JailerBaseDir = filepath.Join(vmsanDir, "jailer")
 			}
 
 			result, err := gw.VMCreate(params)

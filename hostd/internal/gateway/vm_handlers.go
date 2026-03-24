@@ -118,7 +118,7 @@ func (s *Server) handleVMRestart(ctx context.Context, params json.RawMessage) Re
 	kernelPath := p.KernelPath
 	rootfsPath := p.RootfsPath
 	if kernelPath == "" || rootfsPath == "" {
-		k, r, err := resolveRuntimePaths(defaultRuntime)
+		k, r, err := resolveRuntimePaths(defaultRuntime, p.JailerBaseDir)
 		if err != nil {
 			return Response{OK: false, Error: err.Error(), Code: "RUNTIME_ERROR"}
 		}
@@ -130,11 +130,14 @@ func (s *Server) handleVMRestart(ctx context.Context, params json.RawMessage) Re
 		}
 	}
 
+	slog.Info("vm restart: starting", "vmId", p.VMId, "slot", p.Slot, "kernel", kernelPath, "rootfs", rootfsPath)
+
 	// Rollback cleanup stack.
 	var retErr error
 	var cleanup []func()
 	defer func() {
 		if retErr != nil {
+			slog.Error("vm restart: rolling back", "vmId", p.VMId, "error", retErr)
 			for i := len(cleanup) - 1; i >= 0; i-- {
 				cleanup[i]()
 			}
@@ -144,17 +147,21 @@ func (s *Server) handleVMRestart(ctx context.Context, params json.RawMessage) Re
 	// 1. Re-register slot.
 	if err := s.slots.AllocateAt(p.Slot, p.VMId); err != nil {
 		retErr = err
+		slog.Error("vm restart: slot allocation failed", "vmId", p.VMId, "slot", p.Slot, "error", err)
 		return Response{OK: false, Error: err.Error(), Code: "SLOT_ERROR"}
 	}
 	cleanup = append(cleanup, func() {
 		s.slots.Release(p.VMId)
 	})
 
-	// 2. Clean stale files.
+	// 2. Clean stale chroot and files from previous lifecycle.
+	paths := jailer.NewPaths(p.VMId, resolveJailerBaseDir(p.JailerBaseDir))
+	if err := jailer.Cleanup(paths.ChrootDir); err != nil {
+		slog.Debug("stale chroot cleanup failed", "vmId", p.VMId, "error", err)
+	}
 	if p.SocketPath != "" {
 		os.Remove(p.SocketPath)
 	}
-	paths := jailer.NewPaths(p.VMId, resolveJailerBaseDir(p.JailerBaseDir))
 	os.Remove(paths.SocketPath)
 
 	// 3. Build a vmCreateParams from restart params for the helpers.
@@ -188,6 +195,7 @@ func (s *Server) handleVMRestart(ctx context.Context, params json.RawMessage) Re
 	netResult, netCleanup, err := s.setupVMNetwork(ctx, p.VMId, p.Slot, createP)
 	cleanup = append(cleanup, netCleanup...)
 	if err != nil {
+		slog.Error("vm restart: network setup failed", "vmId", p.VMId, "error", err)
 		retErr = err
 		return Response{OK: false, Error: err.Error(), Code: "NETWORK_ERROR"}
 	}
@@ -196,6 +204,7 @@ func (s *Server) handleVMRestart(ctx context.Context, params json.RawMessage) Re
 	spawnRes, spawnCleanup, err := s.spawnFirecracker(ctx, p.VMId, p.Slot, createP, netResult.NetCfg, kernelPath, rootfsPath)
 	cleanup = append(cleanup, spawnCleanup...)
 	if err != nil {
+		slog.Error("vm restart: spawn failed", "vmId", p.VMId, "error", err)
 		retErr = err
 		return Response{OK: false, Error: err.Error(), Code: "SPAWN_ERROR"}
 	}
@@ -360,11 +369,17 @@ func (s *Server) handleVMFullUpdatePolicy(ctx context.Context, params json.RawMe
 		return Response{OK: false, Error: err.Error(), Code: "UPDATE_ERROR"}
 	}
 
-	// If slot is provided, rebuild nftables rules.
+	// Update DNS handler policy for this VM.
 	slot := p.Slot
 	if slot <= 0 {
 		slot = s.slots.GetSlot(p.VMId)
 	}
+	if s.meshManager != nil && slot >= 0 {
+		guestIP := netsetup.VMGuestIP(slot)
+		s.meshManager.RegisterDNSVM(p.VMId, guestIP, p.Policy)
+	}
+
+	// Rebuild nftables rules with new policy.
 	if slot > 0 {
 		netnsName := p.NetNSName
 		if netnsName == "" {
@@ -446,26 +461,38 @@ func (s *Server) handleVMSnapshotCreate(ctx context.Context, params json.RawMess
 		}
 	}()
 
-	// 2. Create snapshot via Firecracker API.
-	// Snapshot paths are relative to the chroot root.
-	if err := fcClient.Snapshot("snapshot/snapshot_file", "snapshot/mem_file"); err != nil {
-		return Response{OK: false, Error: fmt.Sprintf("create snapshot: %s", err), Code: "FIRECRACKER_ERROR"}
-	}
-
-	// 3. Ensure destination directory exists.
-	if err := os.MkdirAll(p.DestDir, 0755); err != nil {
-		return Response{OK: false, Error: fmt.Sprintf("create dest dir: %s", err), Code: "INTERNAL_ERROR"}
-	}
-
-	// 4. Copy snapshot files from chroot to destination.
+	// 2. Compute chroot paths (needed for both snapshot creation and file copying).
 	chrootDir := p.ChrootDir
 	if chrootDir == "" {
 		chrootDir = jailer.NewPaths(p.VMId, resolveJailerBaseDir(p.JailerBaseDir)).ChrootDir
 	}
 	rootDir := filepath.Join(chrootDir, "root")
 
-	srcSnapshot := filepath.Join(rootDir, "snapshot", "snapshot_file")
-	srcMem := filepath.Join(rootDir, "snapshot", "mem_file")
+	// 3. Create snapshot directory inside chroot before Firecracker writes to it.
+	snapshotDir := filepath.Join(rootDir, "snapshot")
+	if err := os.MkdirAll(snapshotDir, 0755); err != nil {
+		return Response{OK: false, Error: fmt.Sprintf("create snapshot dir: %s", err), Code: "INTERNAL_ERROR"}
+	}
+
+	// Chown to jailer UID so the Firecracker process can write.
+	if err := os.Chown(snapshotDir, jailer.JailerUID, jailer.JailerGID); err != nil {
+		slog.Warn("chown snapshot dir failed", "error", err)
+	}
+
+	// 4. Create snapshot via Firecracker API.
+	// Snapshot paths are relative to the chroot root.
+	if err := fcClient.Snapshot("snapshot/snapshot_file", "snapshot/mem_file"); err != nil {
+		return Response{OK: false, Error: fmt.Sprintf("create snapshot: %s", err), Code: "FIRECRACKER_ERROR"}
+	}
+
+	// 5. Ensure destination directory exists.
+	if err := os.MkdirAll(p.DestDir, 0755); err != nil {
+		return Response{OK: false, Error: fmt.Sprintf("create dest dir: %s", err), Code: "INTERNAL_ERROR"}
+	}
+
+	// 6. Copy snapshot files from chroot to destination.
+	srcSnapshot := filepath.Join(snapshotDir, "snapshot_file")
+	srcMem := filepath.Join(snapshotDir, "mem_file")
 	dstSnapshot := filepath.Join(p.DestDir, "snapshot_file")
 	dstMem := filepath.Join(p.DestDir, "mem_file")
 
@@ -476,7 +503,7 @@ func (s *Server) handleVMSnapshotCreate(ctx context.Context, params json.RawMess
 		return Response{OK: false, Error: fmt.Sprintf("copy mem file: %s", err), Code: "INTERNAL_ERROR"}
 	}
 
-	// 5. Copy rootfs to snapshot dir for complete restore.
+	// 7. Copy rootfs to snapshot dir for complete restore.
 	srcRootfs := filepath.Join(rootDir, "rootfs", "rootfs.ext4")
 	dstRootfs := filepath.Join(p.DestDir, "rootfs.ext4")
 	if err := copyFileForSnapshot(srcRootfs, dstRootfs); err != nil {
@@ -484,7 +511,7 @@ func (s *Server) handleVMSnapshotCreate(ctx context.Context, params json.RawMess
 		// Non-fatal: snapshot_file and mem_file are the critical ones.
 	}
 
-	// 6. Chown to owner if specified.
+	// 8. Chown to owner if specified.
 	if p.OwnerUID > 0 || p.OwnerGID > 0 {
 		uid := p.OwnerUID
 		gid := p.OwnerGID

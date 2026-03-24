@@ -74,17 +74,19 @@ const createCommand = defineCommand({
 
         const result = await client.createVM({
           host_id: host.id,
-          vcpus,
-          memory_mib: memMib,
-          disk_size_gb: diskSizeGb,
-          runtime: commandArgs.runtime ?? "base",
           project: commandArgs.project || undefined,
-          network_policy: commandArgs["network-policy"] ?? "allow-all",
-          bandwidth_mbit: bandwidthMbit ?? undefined,
-          allow_icmp: commandArgs["allow-icmp"] || false,
-          snapshot_id: commandArgs.snapshot || undefined,
-          connect_to: connectTo.length > 0 ? connectTo : undefined,
           service: commandArgs.service || undefined,
+          state: {
+            vcpus,
+            memMib: memMib,
+            diskSizeGb,
+            runtime: commandArgs.runtime ?? "base",
+            networkPolicy: commandArgs["network-policy"] ?? "allow-all",
+            bandwidthMbit: bandwidthMbit ?? undefined,
+            allowIcmp: commandArgs["allow-icmp"] || false,
+            snapshotId: commandArgs.snapshot || undefined,
+            connectTo: connectTo.length > 0 ? connectTo : undefined,
+          },
         });
 
         const log = createScopedLogger(result.id);

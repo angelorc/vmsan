@@ -45,7 +45,8 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	meshManager := gateway.NewMeshManager(logger)
+	slots := gateway.NewSlotAllocator(254, "/run/vmsan/slots.json")
+	meshManager := gateway.NewMeshManager(logger, slots)
 	if err := meshManager.Start(ctx); err != nil {
 		slog.Warn("mesh manager start failed, continuing without mesh", "error", err)
 	}
@@ -53,7 +54,7 @@ func main() {
 	srv, err := gateway.NewServer(gateway.Config{
 		SocketPath: socketPath,
 		PIDFile:    pidFile,
-	}, meshManager)
+	}, meshManager, slots)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)
 		os.Exit(1)
