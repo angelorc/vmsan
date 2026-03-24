@@ -26,7 +26,7 @@ Optionally specify a systemd service unit to filter.`,
 func init() {
 	f := logsCmd.Flags()
 	f.IntP("lines", "n", 100, "Number of historical lines to show")
-	f.BoolP("follow", "f", false, "Follow log output")
+	f.BoolP("follow", "f", true, "Follow log output")
 	f.BoolP("timestamps", "t", false, "Show timestamps")
 
 	rootCmd.AddCommand(logsCmd)

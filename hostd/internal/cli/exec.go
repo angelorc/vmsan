@@ -7,8 +7,11 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
+	vmsanv1 "github.com/angelorc/vmsan/hostd/gen/vmsan/v1"
 	"github.com/angelorc/vmsan/hostd/internal/agentclient"
+	"github.com/angelorc/vmsan/hostd/internal/gwclient"
 	"github.com/spf13/cobra"
 )
 
@@ -47,6 +50,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 	f := cmd.Flags()
 	sudo, _ := f.GetBool("sudo")
 	interactive, _ := f.GetBool("interactive")
+	noExtendTimeout, _ := f.GetBool("no-extend-timeout")
 	workdir, _ := f.GetString("workdir")
 	envFlags, _ := f.GetStringArray("env")
 
@@ -73,7 +77,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 	}
 
 	if interactive {
-		return runExecInteractive(vm, vmID, command, cmdArgs, workdir, envMap, sudo)
+		return runExecInteractive(vm, vmID, command, cmdArgs, workdir, envMap, sudo, noExtendTimeout)
 	}
 
 	return runExecNonInteractive(ctx, cancel, vm, command, cmdArgs, workdir, envMap, sudo)
@@ -86,7 +90,34 @@ func runExecInteractive(
 	workdir string,
 	envMap map[string]string,
 	sudo bool,
+	noExtendTimeout bool,
 ) error {
+	// Start timeout extension goroutine if enabled.
+	var cancelExtend context.CancelFunc
+	if !noExtendTimeout {
+		gw, err := gwclient.New()
+		if err == nil {
+			var extendCtx context.Context
+			extendCtx, cancelExtend = context.WithCancel(context.Background())
+			go func() {
+				defer gw.Close()
+				ticker := time.NewTicker(5 * time.Minute)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-extendCtx.Done():
+						return
+					case <-ticker.C:
+						gw.ExtendTimeout(extendCtx, &vmsanv1.ExtendTimeoutRequest{
+							VmId:      vmID,
+							TimeoutAt: time.Now().Add(30 * time.Minute).Format(time.RFC3339),
+						})
+					}
+				}
+			}()
+		}
+	}
+
 	// Build injected command string.
 	var parts []string
 
@@ -130,6 +161,12 @@ func runExecInteractive(
 		User:           user,
 		InitialCommand: injectedCmd,
 	})
+
+	// Stop timeout extension goroutine.
+	if cancelExtend != nil {
+		cancelExtend()
+	}
+
 	if err != nil {
 		return err
 	}

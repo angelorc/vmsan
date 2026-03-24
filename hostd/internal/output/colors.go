@@ -22,6 +22,21 @@ func IsTerminal() bool {
 	return term.IsTerminal(int(os.Stdout.Fd()))
 }
 
+// Colorize wraps text with the given ANSI color code.
+func Colorize(color, text string) string {
+	if !IsTerminal() {
+		return text
+	}
+	return color + text + Reset
+}
+
+// Convenience color functions.
+func RedText(s string) string    { return Colorize(Red, s) }
+func GreenText(s string) string  { return Colorize(Green, s) }
+func YellowText(s string) string { return Colorize(Yellow, s) }
+func CyanText(s string) string   { return Colorize(Cyan, s) }
+func GrayText(s string) string   { return Colorize(Gray, s) }
+
 // StatusColor wraps a VM status string with ANSI color codes.
 // Returns the plain string when stdout is not a terminal.
 func StatusColor(status string) string {

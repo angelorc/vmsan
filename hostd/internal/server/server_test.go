@@ -644,8 +644,8 @@ func TestHandlerSync(t *testing.T) {
 	}
 	var resp SyncResponse
 	json.NewDecoder(w.Body).Decode(&resp)
-	if len(resp.Entries) != 2 {
-		t.Errorf("expected 2 entries, got %d", len(resp.Entries))
+	if len(resp.Changes) != 2 {
+		t.Errorf("expected 2 entries, got %d", len(resp.Changes))
 	}
 
 	// Since version 1 should return 1
@@ -653,8 +653,8 @@ func TestHandlerSync(t *testing.T) {
 	w = httptest.NewRecorder()
 	srv.srv.Handler.ServeHTTP(w, req)
 	json.NewDecoder(w.Body).Decode(&resp)
-	if len(resp.Entries) != 1 {
-		t.Errorf("expected 1 entry since v1, got %d", len(resp.Entries))
+	if len(resp.Changes) != 1 {
+		t.Errorf("expected 1 entry since v1, got %d", len(resp.Changes))
 	}
 }
 
@@ -670,8 +670,8 @@ func TestHandlerSyncEmpty(t *testing.T) {
 	}
 	var resp SyncResponse
 	json.NewDecoder(w.Body).Decode(&resp)
-	if len(resp.Entries) != 0 {
-		t.Errorf("expected 0 entries, got %d", len(resp.Entries))
+	if len(resp.Changes) != 0 {
+		t.Errorf("expected 0 entries, got %d", len(resp.Changes))
 	}
 }
 

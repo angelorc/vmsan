@@ -1,4 +1,4 @@
-package main
+package gateway
 
 import (
 	"context"
@@ -7,44 +7,39 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-
-	"github.com/angelorc/vmsan/hostd/internal/gateway"
 )
 
-func main() {
+// RunGateway starts the gateway daemon. This contains all the logic previously
+// in cmd/vmsan-gateway/main.go. It blocks until the context is cancelled
+// (via SIGTERM/SIGINT) and calls os.Exit on fatal errors.
+func RunGateway() {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
 	slog.SetDefault(logger)
-
-	// Accept "start" subcommand or no args (for systemd ExecStart)
-	if len(os.Args) > 1 && os.Args[1] != "start" {
-		fmt.Fprintf(os.Stderr, "usage: vmsan-gateway [start]\n")
-		os.Exit(1)
-	}
 
 	socketPath := envOr("VMSAN_SOCKET", "/run/vmsan/gateway.sock")
 	pidFile := envOr("VMSAN_PID_FILE", "/run/vmsan/gateway.pid")
 
 	// Configure binary locations. The gateway runs as root via systemd
 	// and doesn't have the user's ~/.vmsan/bin in its PATH.
-	fcDir := findBinary("firecracker", envOr("VMSAN_BIN_DIR", ""))
+	fcDir := findBinaryDir("firecracker", envOr("VMSAN_BIN_DIR", ""))
 
 	if fcDir != "" {
-		gateway.SetBinDir(fcDir)
+		SetBinDir(fcDir)
 		slog.Info("firecracker/jailer dir", "dir", fcDir)
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	slots := gateway.NewSlotAllocator(254, "/run/vmsan/slots.json")
-	meshManager := gateway.NewMeshManager(logger, slots)
+	slots := NewSlotAllocator(254, "/run/vmsan/slots.json")
+	meshManager := NewMeshManager(logger, slots)
 	if err := meshManager.Start(ctx); err != nil {
 		slog.Warn("mesh manager start failed, continuing without mesh", "error", err)
 	}
 
-	srv, err := gateway.NewServer(gateway.Config{
+	srv, err := NewServer(Config{
 		SocketPath: socketPath,
 		PIDFile:    pidFile,
 	}, meshManager, slots)
@@ -70,9 +65,9 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-// findBinary locates the directory containing the named binary.
+// findBinaryDir locates the directory containing the named binary.
 // Search order: explicit override, /usr/local/bin, /usr/bin, any /home/*/.vmsan/bin.
-func findBinary(name, override string) string {
+func findBinaryDir(name, override string) string {
 	if override != "" {
 		if _, err := os.Stat(override + "/" + name); err == nil {
 			return override

@@ -2,8 +2,6 @@ package cli
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -16,7 +14,10 @@ import (
 	vmsanv1 "github.com/angelorc/vmsan/hostd/gen/vmsan/v1"
 	"github.com/angelorc/vmsan/hostd/internal/gwclient"
 	"github.com/angelorc/vmsan/hostd/internal/paths"
+	"github.com/angelorc/vmsan/hostd/internal/server"
+	"github.com/angelorc/vmsan/hostd/internal/serverclient"
 	"github.com/angelorc/vmsan/hostd/internal/vmstate"
+	"github.com/angelorc/vmsan/hostd/internal/vmutil"
 	"github.com/spf13/cobra"
 )
 
@@ -51,6 +52,7 @@ func init() {
 	f.Bool("allow-icmp", false, "Allow ICMP traffic (ping)")
 	f.String("connect-to", "", "Mesh connections (comma-separated service:port pairs)")
 	f.String("service", "", "Register as mesh service (e.g. --service web)")
+	f.String("host", "", "Remote host server address for multi-host creation")
 
 	rootCmd.AddCommand(createCmd)
 }
@@ -79,9 +81,10 @@ func runCreate(cmd *cobra.Command, _ []string) error {
 	allowIcmp, _ := f.GetBool("allow-icmp")
 	connectToStr, _ := f.GetString("connect-to")
 	service, _ := f.GetString("service")
+	hostAddr, _ := f.GetString("host")
 
 	// Parse disk size
-	diskSizeGb, err := parseDiskSize(diskStr)
+	diskSizeGb, err := vmutil.ParseDiskSize(diskStr)
 	if err != nil {
 		return err
 	}
@@ -123,14 +126,19 @@ func runCreate(cmd *cobra.Command, _ []string) error {
 	// Resolve paths
 	p := paths.Resolve()
 	if kernelPath == "" {
-		kernelPath = autoDetectKernel(p.KernelsDir)
+		kernelPath = vmutil.AutoDetectKernel(p.KernelsDir)
 	}
 	if rootfsPath == "" {
-		rootfsPath = autoDetectRootfs(p.RootfsDir, runtime)
+		rootfsPath = vmutil.AutoDetectRootfs(p.RootfsDir, runtime)
 	}
 
 	// Generate agent token
-	agentToken := generateToken()
+	agentToken := vmutil.GenerateToken()
+
+	// Remote host creation via server API.
+	if hostAddr != "" {
+		return runCreateRemote(hostAddr, project, service, agentToken)
+	}
 
 	// Connect to gateway
 	gw, err := gwclient.New()
@@ -249,6 +257,44 @@ func runCreate(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+func runCreateRemote(hostAddr, project, service, agentToken string) error {
+	client := serverclient.New(hostAddr, "")
+
+	stateJSON, _ := json.Marshal(map[string]string{
+		"agent_token": agentToken,
+	})
+
+	req := &server.CreateVMRequest{
+		Project: project,
+		Service: service,
+		State:   stateJSON,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	vm, err := client.CreateVM(ctx, req)
+	if err != nil {
+		return fmt.Errorf("remote create VM: %w", err)
+	}
+
+	if jsonOutput {
+		data, _ := json.MarshalIndent(vm, "", "  ")
+		fmt.Println(string(data))
+	} else {
+		fmt.Println()
+		fmt.Printf("  VM Created: %s (remote)\n", vm.ID)
+		fmt.Printf("  Host:     %s\n", hostAddr)
+		fmt.Printf("  Status:   %s\n", vm.Status)
+		if vm.Project != "" {
+			fmt.Printf("  Project:  %s\n", vm.Project)
+		}
+		fmt.Println()
+	}
+
+	return nil
+}
+
 func printCreateSummary(resp *vmsanv1.CreateVMResponse, state *vmstate.VmState, p paths.Paths) {
 	fmt.Println()
 	fmt.Printf("  VM Created: %s\n", resp.VmId)
@@ -308,20 +354,6 @@ func printCreateSummary(resp *vmsanv1.CreateVMResponse, state *vmstate.VmState, 
 }
 
 // --- helpers ---
-
-func parseDiskSize(value string) (int, error) {
-	raw := strings.ToLower(strings.TrimSpace(value))
-	re := regexp.MustCompile(`^(\d+)(gb|g|gib)?$`)
-	m := re.FindStringSubmatch(raw)
-	if m == nil {
-		return 0, fmt.Errorf("invalid disk size format: %s (expected e.g. 10gb)", value)
-	}
-	size, _ := strconv.Atoi(m[1])
-	if size < 1 || size > 1024 {
-		return 0, fmt.Errorf("disk size must be 1-1024 GB, got %d", size)
-	}
-	return size, nil
-}
 
 func parseDuration(s string) (time.Duration, error) {
 	// Try Go's built-in parser first (handles "5m", "1h", "30s")
@@ -408,41 +440,6 @@ func toInt32Slice(ints []int) []int32 {
 		out[i] = int32(v)
 	}
 	return out
-}
-
-func autoDetectKernel(kernelsDir string) string {
-	entries, err := os.ReadDir(kernelsDir)
-	if err != nil {
-		return ""
-	}
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasPrefix(e.Name(), "vmlinux") {
-			return filepath.Join(kernelsDir, e.Name())
-		}
-	}
-	return ""
-}
-
-func autoDetectRootfs(rootfsDir, runtime string) string {
-	// Try runtime-specific first, then generic
-	candidates := []string{
-		filepath.Join(rootfsDir, runtime+".ext4"),
-		filepath.Join(rootfsDir, runtime+".squashfs"),
-		filepath.Join(rootfsDir, "base.ext4"),
-		filepath.Join(rootfsDir, "base.squashfs"),
-	}
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			return c
-		}
-	}
-	return ""
-}
-
-func generateToken() string {
-	b := make([]byte, 32)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
 }
 
 func strPtr(s string) *string {

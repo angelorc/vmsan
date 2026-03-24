@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"flag"
@@ -6,14 +6,18 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-
-	"github.com/angelorc/vmsan/hostd/internal/server"
 )
 
-func main() {
-	listen := flag.String("listen", "0.0.0.0:6443", "listen address")
-	dbPath := flag.String("db", "", "SQLite database path (default: ~/.vmsan/state.db)")
-	flag.Parse()
+// RunServer starts the control plane server. This contains all the logic
+// previously in cmd/vmsan-server/main.go. It parses flags from os.Args[2:]
+// (skipping "vmsan" and "server") and calls os.Exit on fatal errors.
+func RunServer() {
+	fs := flag.NewFlagSet("server", flag.ExitOnError)
+	listen := fs.String("listen", "0.0.0.0:6443", "listen address")
+	dbPath := fs.String("db", "", "SQLite database path (default: ~/.vmsan/state.db)")
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		os.Exit(1)
+	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
@@ -27,7 +31,7 @@ func main() {
 		*dbPath = home + "/.vmsan/state.db"
 	}
 
-	srv, err := server.New(*listen, *dbPath, logger)
+	srv, err := New(*listen, *dbPath, logger)
 	if err != nil {
 		logger.Error("failed to create server", "error", err)
 		os.Exit(1)
