@@ -17,6 +17,14 @@ const TIMEOUT_SNAPSHOT = 60_000;
 const TIMEOUT_ROOTFS_BUILD = 120_000;
 const TIMEOUT_UPDATE_POLICY = 10_000;
 const TIMEOUT_SHUTDOWN = 5_000;
+const TIMEOUT_STATUS = 5_000;
+const TIMEOUT_VM_GET = 5_000;
+const TIMEOUT_DOCTOR = 5_000;
+const TIMEOUT_ROOTFS_DOWNLOAD = 120_000;
+const TIMEOUT_CF_SETUP = 10_000;
+const TIMEOUT_CF_ROUTE = 10_000;
+const TIMEOUT_CF_STATUS = 5_000;
+const TIMEOUT_EXTEND_TIMEOUT = 10_000;
 
 // ---------------------------------------------------------------------------
 // Interfaces — matching Go param/response structs
@@ -154,6 +162,133 @@ export interface GatewayRootfsBuildParams {
   ownerGid?: number;
 }
 
+export interface GatewayVmNetworkMeta {
+  policy: string;
+  domains?: string[];
+  allowedCidrs?: string[];
+  deniedCidrs?: string[];
+  ports?: number[];
+  bandwidthMbit?: number;
+  allowIcmp?: boolean;
+}
+
+export interface GatewayVmMetadata {
+  vmId: string;
+  slot: number;
+  status: string;
+  hostIp: string;
+  guestIp: string;
+  meshIp?: string;
+  pid: number;
+  createdAt: string;
+  timeoutAt?: string;
+  agentToken?: string;
+  runtime: string;
+  vcpus: number;
+  memMib: number;
+  diskSizeGb: number;
+  project?: string;
+  service?: string;
+  network: GatewayVmNetworkMeta;
+  chrootDir: string;
+  socketPath: string;
+  tapDevice: string;
+  macAddress: string;
+  netnsName: string;
+  vethHost: string;
+  vethGuest: string;
+  subnetMask: string;
+  dnsPort: number;
+  sniPort: number;
+  httpPort: number;
+}
+
+export interface GatewayStatusResult {
+  ok: boolean;
+  error?: string;
+  code?: string;
+  vms: number;
+  list: GatewayVmMetadata[];
+}
+
+export interface GatewayVmGetResult {
+  ok: boolean;
+  error?: string;
+  code?: string;
+  vm?: GatewayVmMetadata;
+}
+
+export interface GatewayDoctorCheck {
+  category: string;
+  name: string;
+  status: "pass" | "fail" | "warn";
+  detail: string;
+  fix?: string;
+}
+
+export interface GatewayDoctorResult {
+  ok: boolean;
+  error?: string;
+  code?: string;
+  list: GatewayDoctorCheck[];
+}
+
+export interface GatewayRootfsDownloadParams {
+  url: string;
+  checksum?: string;
+  destPath: string;
+  ownerUid?: number;
+  ownerGid?: number;
+}
+
+export interface GatewayRootfsDownloadResult {
+  ok: boolean;
+  error?: string;
+  code?: string;
+  vm?: {
+    destPath: string;
+    checksum: string;
+    size: number;
+  };
+}
+
+export interface GatewayCfSetupParams {
+  tunnelToken: string;
+  configPath?: string;
+  logPath?: string;
+}
+
+export interface GatewayCfAddRouteParams {
+  vmId: string;
+  hostname: string;
+  apiToken: string;
+  tunnelId: string;
+  accountId: string;
+}
+
+export interface GatewayCfRemoveRouteParams {
+  vmId: string;
+  apiToken: string;
+  tunnelId: string;
+  accountId: string;
+}
+
+export interface GatewayCfStatusResult {
+  ok: boolean;
+  error?: string;
+  code?: string;
+  vm?: {
+    running: boolean;
+    pid?: number;
+    uptime?: string;
+  };
+}
+
+export interface GatewayExtendTimeoutParams {
+  vmId: string;
+  timeoutAt: string;
+}
+
 export interface GatewayGenericResult {
   ok: boolean;
   error?: string;
@@ -226,6 +361,46 @@ export class GatewayClient {
       ownerUid: params.ownerUid ?? getOwnerUid(),
       ownerGid: params.ownerGid ?? getOwnerGid(),
     }, TIMEOUT_ROOTFS_BUILD);
+  }
+
+  async status(): Promise<GatewayStatusResult> {
+    return this.send("status", undefined, TIMEOUT_STATUS);
+  }
+
+  async vmGet(vmId: string): Promise<GatewayVmGetResult> {
+    return this.send("vm.get", { vmId }, TIMEOUT_VM_GET);
+  }
+
+  async doctor(): Promise<GatewayDoctorResult> {
+    return this.send("doctor", undefined, TIMEOUT_DOCTOR);
+  }
+
+  async rootfsDownload(params: GatewayRootfsDownloadParams): Promise<GatewayRootfsDownloadResult> {
+    return this.send("rootfs.download", {
+      ...params,
+      ownerUid: params.ownerUid ?? getOwnerUid(),
+      ownerGid: params.ownerGid ?? getOwnerGid(),
+    }, TIMEOUT_ROOTFS_DOWNLOAD);
+  }
+
+  async cfSetup(params: GatewayCfSetupParams): Promise<GatewayGenericResult> {
+    return this.send("cloudflare.setup", params, TIMEOUT_CF_SETUP);
+  }
+
+  async cfAddRoute(params: GatewayCfAddRouteParams): Promise<GatewayGenericResult> {
+    return this.send("cloudflare.addRoute", params, TIMEOUT_CF_ROUTE);
+  }
+
+  async cfRemoveRoute(params: GatewayCfRemoveRouteParams): Promise<GatewayGenericResult> {
+    return this.send("cloudflare.removeRoute", params, TIMEOUT_CF_ROUTE);
+  }
+
+  async cfStatus(): Promise<GatewayCfStatusResult> {
+    return this.send("cloudflare.status", undefined, TIMEOUT_CF_STATUS);
+  }
+
+  async extendTimeout(params: GatewayExtendTimeoutParams): Promise<GatewayGenericResult> {
+    return this.send("vm.extendTimeout", params, TIMEOUT_EXTEND_TIMEOUT);
   }
 
   // -- Internal --
