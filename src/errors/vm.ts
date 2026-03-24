@@ -36,14 +36,6 @@ export const vmNotStoppedError = (vmId: string, currentStatus: string): VmError 
     fix: "Run 'vmsan stop <vm-id>' first, or use --force (-f) to stop and remove in one step.",
   });
 
-export const chrootNotFoundError = (vmId: string): VmError =>
-  new VmError("ERR_VM_CHROOT_NOT_FOUND", {
-    vmId,
-    message: `Chroot directory not found for VM ${vmId}`,
-    why: "The VM data may have been removed.",
-    fix: "The VM must be recreated with 'vmsan create'.",
-  });
-
 export const networkSlotsExhaustedError = (): VmError =>
   new VmError("ERR_VM_NETWORK_SLOTS_EXHAUSTED", {
     message: "No available network slots (max 255 VMs)",

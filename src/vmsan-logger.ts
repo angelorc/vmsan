@@ -27,19 +27,3 @@ function wrapConsola(instance: ConsolaInstance): VmsanLogger {
     withTag: (tag: string) => wrapConsola(instance.withTag(tag)),
   };
 }
-
-const noop = (): void => {};
-
-export function createSilentLogger(): VmsanLogger {
-  const silent: VmsanLogger = {
-    debug: noop,
-    info: noop,
-    success: noop,
-    warn: noop,
-    error: noop,
-    start: noop,
-    box: noop,
-    withTag: () => silent,
-  };
-  return silent;
-}

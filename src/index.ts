@@ -7,13 +7,13 @@ export type { VmsanHooks, VmPhase } from "./hooks.ts";
 export { definePlugin } from "./plugin.ts";
 export type { VmsanPlugin } from "./plugin.ts";
 export type { VmsanLogger } from "./vmsan-logger.ts";
-export { createDefaultLogger, createSilentLogger } from "./vmsan-logger.ts";
+export { createDefaultLogger } from "./vmsan-logger.ts";
 
 export { vmsanPaths } from "./paths.ts";
 export type { VmsanPaths } from "./paths.ts";
 
 export { AgentClient } from "./services/agent.ts";
-export type { RunParams, RunEvent, WriteFileEntry, SessionInfo } from "./services/agent.ts";
+export type { RunParams, RunEvent, WriteFileEntry } from "./services/agent.ts";
 export { resolveVmState } from "./lib/vm-context.ts";
 export type { RunningVmContext } from "./lib/vm-context.ts";
 export { VMService } from "./services/vm.ts";
@@ -85,7 +85,6 @@ export {
   vmNotStoppedError,
   vmNotRunningError,
   vmNoAgentTokenError,
-  chrootNotFoundError,
   networkSlotsExhaustedError,
   snapshotNotFoundError,
 } from "./errors/index.ts";
@@ -134,7 +133,6 @@ export {
   findRuntimeRootfs,
 } from "./commands/create/environment.ts";
 export { waitForAgent } from "./lib/vm-context.ts";
-export { markVmAsError } from "./commands/create/cleanup.ts";
 export {
   parseVcpuCount,
   parseMemoryMib,

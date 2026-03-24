@@ -38,20 +38,13 @@ export {
   vmNotStoppedError,
   vmNotRunningError,
   vmNoAgentTokenError,
-  chrootNotFoundError,
   networkSlotsExhaustedError,
   snapshotNotFoundError,
   snapshotCreateFailedError,
 } from "./vm.ts";
 
 export { NetworkError } from "./network.ts";
-export {
-  defaultInterfaceNotFoundError,
-  nftSetupFailedError,
-  nftTeardownFailedError,
-  nftBinaryMissingError,
-  nftTableMissingError,
-} from "./network.ts";
+export { defaultInterfaceNotFoundError } from "./network.ts";
 
 export { TimeoutError } from "./timeout.ts";
 export { socketTimeoutError, lockTimeoutError, agentTimeoutError } from "./timeout.ts";

@@ -12,31 +12,11 @@ export interface HostInfo {
 }
 
 export interface CreateVMRequest {
+  name?: string;
   host_id: string;
-  vcpus: number;
-  memory_mib: number;
-  disk_size_gb: number;
-  runtime: string;
   project?: string;
-  network_policy?: string;
-  domains?: string[];
-  allowed_cidrs?: string[];
-  denied_cidrs?: string[];
-  ports?: number[];
-  bandwidth_mbit?: number;
-  allow_icmp?: boolean;
-  snapshot_id?: string;
-  connect_to?: string[];
   service?: string;
-}
-
-export interface VMInfo {
-  id: string;
-  host_id: string;
-  host_name: string;
-  status: string;
-  project?: string;
-  created_at: string;
+  state: Record<string, unknown>;
 }
 
 export class ServerClient {
@@ -110,8 +90,4 @@ export class ServerClient {
     return this.request("POST", "/api/v1/vms", opts);
   }
 
-  async listVMs(project?: string): Promise<VMInfo[]> {
-    const query = project ? `?project=${encodeURIComponent(project)}` : "";
-    return this.request("GET", `/api/v1/vms${query}`);
-  }
 }

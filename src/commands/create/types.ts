@@ -1,5 +1,3 @@
-import type { VmState } from "../../lib/vm-state.ts";
-
 export const VALID_RUNTIMES = ["base", "node22", "node24", "python3.13"] as const;
 export type Runtime = (typeof VALID_RUNTIMES)[number];
 
@@ -82,5 +80,3 @@ export interface InitialVmStateInput {
   connectTo?: string[];
   service?: string;
 }
-
-export type CreateState = VmState;

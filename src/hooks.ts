@@ -29,12 +29,4 @@ export interface VmsanHooks {
     previousPolicy: NetworkPolicy;
     newPolicy: NetworkPolicy;
   }) => void | Promise<void>;
-
-  // State changes
-  "state:change": (params: {
-    vmId: string;
-    field: string;
-    oldValue: unknown;
-    newValue: unknown;
-  }) => void | Promise<void>;
 }

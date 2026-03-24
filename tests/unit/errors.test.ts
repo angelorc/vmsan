@@ -4,7 +4,6 @@ import { VmsanError } from "../../src/errors/base.ts";
 import { ValidationError } from "../../src/errors/validation.ts";
 import { VmError } from "../../src/errors/vm.ts";
 import { TimeoutError } from "../../src/errors/timeout.ts";
-import { FirecrackerApiError } from "../../src/errors/firecracker.ts";
 import { CloudflareError } from "../../src/errors/cloudflare.ts";
 import { handleCommandError } from "../../src/errors/display.ts";
 import type { CommandLogger } from "../../src/lib/logger/index.ts";
@@ -31,10 +30,8 @@ import {
   vmNotStoppedError,
   vmNotRunningError,
   vmNoAgentTokenError,
-  chrootNotFoundError,
   networkSlotsExhaustedError,
   snapshotNotFoundError,
-  firecrackerApiError,
   defaultInterfaceNotFoundError,
   socketTimeoutError,
   lockTimeoutError,
@@ -81,10 +78,8 @@ describe("error code uniqueness", () => {
       vmNotStoppedError("vm-1", "running"),
       vmNotRunningError("vm-1"),
       vmNoAgentTokenError("vm-1"),
-      chrootNotFoundError("vm-1"),
       networkSlotsExhaustedError(),
       snapshotNotFoundError("snap-1"),
-      firecrackerApiError("PUT", "/boot-source", 400, "invalid"),
       defaultInterfaceNotFoundError(),
       socketTimeoutError("/tmp/sock"),
       lockTimeoutError("state"),
@@ -118,7 +113,6 @@ describe("error hierarchy", () => {
   it("all errors extend VmsanError", () => {
     expect(invalidPortError("80")).toBeInstanceOf(VmsanError);
     expect(vmNotFoundError("vm-1")).toBeInstanceOf(VmsanError);
-    expect(firecrackerApiError("GET", "/", 500, "")).toBeInstanceOf(VmsanError);
     expect(defaultInterfaceNotFoundError()).toBeInstanceOf(VmsanError);
     expect(socketTimeoutError("/sock")).toBeInstanceOf(VmsanError);
     expect(missingBinaryError("fc", "/bin/fc")).toBeInstanceOf(VmsanError);
@@ -149,14 +143,6 @@ describe("error hierarchy", () => {
     expect(err.timeoutMs).toBe(5000);
   });
 
-  it("FirecrackerApiError has method, path, httpStatus", () => {
-    const err = firecrackerApiError("PUT", "/boot-source", 400, "bad");
-    expect(err).toBeInstanceOf(FirecrackerApiError);
-    expect(err.method).toBe("PUT");
-    expect(err.path).toBe("/boot-source");
-    expect(err.httpStatus).toBe(400);
-  });
-
   it("CloudflareError has domain property", () => {
     const err = cloudflareNoZoneError("example.com");
     expect(err).toBeInstanceOf(CloudflareError);
@@ -183,12 +169,6 @@ describe("fix suggestions", () => {
     const err = vmNotRunningError("vm-1");
     expect(err.fix).toBeDefined();
     expect(err.fix).toContain("vmsan start");
-  });
-
-  it("chrootNotFoundError includes fix", () => {
-    const err = chrootNotFoundError("vm-1");
-    expect(err.fix).toBeDefined();
-    expect(err.fix).toContain("vmsan create");
   });
 
   it("missingBinaryError includes install fix", () => {
@@ -257,14 +237,6 @@ describe("toJSON", () => {
     const err = vmNotFoundError("vm-1");
     const json = err.toJSON();
     expect(json.vmId).toBe("vm-1");
-  });
-
-  it("FirecrackerApiError.toJSON includes method, path, httpStatus", () => {
-    const err = firecrackerApiError("PUT", "/boot", 400, "bad");
-    const json = err.toJSON();
-    expect(json.method).toBe("PUT");
-    expect(json.path).toBe("/boot");
-    expect(json.httpStatus).toBe(400);
   });
 
   it("TimeoutError.toJSON includes target", () => {
@@ -340,12 +312,14 @@ describe("handleCommandError JSON enrichment", () => {
 
   it("promotes why to error top level", () => {
     const cmdLog = createTestCmdLog();
-    const err = chrootNotFoundError("vm-1");
+    const err = vmNoAgentTokenError("vm-1");
     handleCommandError(err, cmdLog);
 
     const ctx = cmdLog.getContext();
     const error = ctx.error as Record<string, unknown>;
-    expect(error.why).toBe("The VM data may have been removed.");
+    expect(error.why).toBe(
+      "This VM was created with --from-image (custom image mode) or the vmsan-agent binary was not found during creation.",
+    );
   });
 
   it("preserves standard error fields (name, message, status)", () => {

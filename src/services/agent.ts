@@ -30,13 +30,6 @@ export interface WriteFileEntry {
   content: Buffer;
 }
 
-export interface SessionInfo {
-  sessionId: string;
-  shell: string;
-  createdAt: string;
-  subscriberCount: number;
-}
-
 export interface RunCommandParams extends RunParams {
   signal?: AbortSignal;
   onStdout?: (line: string) => void;
@@ -147,28 +140,6 @@ export class AgentClient {
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`Agent writeFiles failed (${res.status}): ${text}`);
-    }
-  }
-
-  async listShellSessions(): Promise<SessionInfo[]> {
-    const res = await fetch(`${this.baseUrl}/shell/sessions`, {
-      headers: { Authorization: `Bearer ${this.token}` },
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Agent listShellSessions failed (${res.status}): ${text}`);
-    }
-    return res.json() as Promise<SessionInfo[]>;
-  }
-
-  async killShellSession(sessionId: string): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/shell/sessions/${sessionId}/kill`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${this.token}` },
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Agent killShellSession failed (${res.status}): ${text}`);
     }
   }
 
