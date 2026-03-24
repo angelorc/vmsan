@@ -13,14 +13,14 @@ import (
 	"github.com/angelorc/vmsan/hostd/internal/firecracker"
 	"github.com/angelorc/vmsan/hostd/internal/jailer"
 	"github.com/angelorc/vmsan/hostd/internal/netsetup"
-	nftypes "github.com/angelorc/vmsan/nftables"
+	"github.com/angelorc/vmsan/hostd/internal/firewall"
 )
 
 // networkResult holds the results of setupVMNetwork.
 type networkResult struct {
 	NetCfg         netsetup.SetupConfig
 	Policy         string
-	PublishedPorts []nftypes.PublishedPort
+	PublishedPorts []firewall.PublishedPort
 }
 
 // spawnResult holds the results of spawnFirecracker.

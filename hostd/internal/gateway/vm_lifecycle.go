@@ -20,7 +20,7 @@ import (
 	"github.com/angelorc/vmsan/hostd/internal/jailer"
 	"github.com/angelorc/vmsan/hostd/internal/netsetup"
 	"github.com/angelorc/vmsan/hostd/internal/runtimes"
-	nftypes "github.com/angelorc/vmsan/nftables"
+	"github.com/angelorc/vmsan/hostd/internal/firewall"
 )
 
 // Default values for VM creation.
@@ -170,20 +170,20 @@ func effectivePolicy(policy string, domains []string, allowedCidrs []string, den
 		return policy
 	}
 	if len(domains) > 0 || len(allowedCidrs) > 0 || len(deniedCidrs) > 0 {
-		return nftypes.PolicyCustom
+		return firewall.PolicyCustom
 	}
 	return defaultPolicy
 }
 
-// buildPublishedPorts converts a list of port numbers to nftypes.PublishedPort
+// buildPublishedPorts converts a list of port numbers to firewall.PublishedPort
 // entries, mapping each host port to the same guest port on TCP.
-func buildPublishedPorts(ports []int, guestIP string) []nftypes.PublishedPort {
+func buildPublishedPorts(ports []int, guestIP string) []firewall.PublishedPort {
 	if len(ports) == 0 {
 		return nil
 	}
-	published := make([]nftypes.PublishedPort, 0, len(ports))
+	published := make([]firewall.PublishedPort, 0, len(ports))
 	for _, p := range ports {
-		published = append(published, nftypes.PublishedPort{
+		published = append(published, firewall.PublishedPort{
 			HostPort:  uint16(p),
 			GuestIP:   guestIP,
 			GuestPort: uint16(p),

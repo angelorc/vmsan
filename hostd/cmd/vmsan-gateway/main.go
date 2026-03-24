@@ -9,7 +9,6 @@ import (
 	"syscall"
 
 	"github.com/angelorc/vmsan/hostd/internal/gateway"
-	"github.com/angelorc/vmsan/hostd/internal/netsetup"
 )
 
 func main() {
@@ -29,17 +28,11 @@ func main() {
 
 	// Configure binary locations. The gateway runs as root via systemd
 	// and doesn't have the user's ~/.vmsan/bin in its PATH.
-	// Each binary is searched independently since they may be in different dirs.
 	fcDir := findBinary("firecracker", envOr("VMSAN_BIN_DIR", ""))
-	nftDir := findBinary("vmsan-nftables", envOr("VMSAN_BIN_DIR", ""))
 
 	if fcDir != "" {
 		gateway.SetBinDir(fcDir)
 		slog.Info("firecracker/jailer dir", "dir", fcDir)
-	}
-	if nftDir != "" {
-		netsetup.SetNftablesBinDir(nftDir)
-		slog.Info("vmsan-nftables dir", "dir", nftDir)
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)

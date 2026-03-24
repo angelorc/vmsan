@@ -2,14 +2,9 @@ package netsetup
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"log/slog"
-	"os/exec"
-	"path/filepath"
-	"strings"
 
-	nftypes "github.com/angelorc/vmsan/nftables"
+	"github.com/angelorc/vmsan/hostd/internal/firewall"
 )
 
 // FirewallConfig holds firewall-specific config beyond network setup.
@@ -17,74 +12,15 @@ type FirewallConfig struct {
 	Policy         string
 	AllowedCIDRs   []string
 	DeniedCIDRs    []string
-	PublishedPorts []nftypes.PublishedPort
+	PublishedPorts []firewall.PublishedPort
 	SkipDNAT       bool
 	AllowICMP      bool
 	DNSResolvers   []string
 }
 
-// NftablesBinDir is the directory containing the vmsan-nftables binary.
-// If empty, the binary is looked up via $PATH.
-var NftablesBinDir string
-
-// SetNftablesBinDir configures the directory containing the vmsan-nftables binary.
-func SetNftablesBinDir(dir string) {
-	NftablesBinDir = dir
-}
-
-// nftablesBinPath returns the resolved path to the vmsan-nftables binary.
-func nftablesBinPath() string {
-	if NftablesBinDir != "" {
-		return filepath.Join(NftablesBinDir, "vmsan-nftables")
-	}
-	if p, err := exec.LookPath("vmsan-nftables"); err == nil {
-		return p
-	}
-	return "vmsan-nftables"
-}
-
-// execNftables executes the vmsan-nftables binary with JSON stdin and returns
-// the parsed result.
-func execNftables(ctx context.Context, command string, config any) (*nftypes.NftResult, error) {
-	binPath := nftablesBinPath()
-	input, err := json.Marshal(config)
-	if err != nil {
-		return nil, fmt.Errorf("marshal nftables config: %w", err)
-	}
-
-	cmd := exec.CommandContext(ctx, binPath, command)
-	cmd.Stdin = strings.NewReader(string(input))
-
-	out, err := cmd.Output()
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			slog.Debug("vmsan-nftables failed",
-				"command", command,
-				"exit_code", exitErr.ExitCode(),
-				"stderr", string(exitErr.Stderr))
-		}
-
-		// Try to parse stdout even on error (binary writes JSON result)
-		if len(out) > 0 {
-			var result nftypes.NftResult
-			if jsonErr := json.Unmarshal(out, &result); jsonErr == nil {
-				return &result, fmt.Errorf("vmsan-nftables %s: %s", command, result.Error)
-			}
-		}
-		return nil, fmt.Errorf("vmsan-nftables %s: %w", command, err)
-	}
-
-	var result nftypes.NftResult
-	if err := json.Unmarshal(out, &result); err != nil {
-		return nil, fmt.Errorf("parse nftables result: %w", err)
-	}
-
-	return &result, nil
-}
-
-// SetupFirewall creates per-VM nftables rules by calling vmsan-nftables setup.
+// SetupFirewall creates per-VM nftables rules by calling the firewall package directly.
 func SetupFirewall(ctx context.Context, netCfg SetupConfig, fwCfg FirewallConfig) error {
-	cfg := nftypes.SetupConfig{
+	cfg := firewall.SetupConfig{
 		VMId:             netCfg.VMId,
 		Slot:             netCfg.Slot,
 		Policy:           fwCfg.Policy,
@@ -107,19 +43,13 @@ func SetupFirewall(ctx context.Context, netCfg SetupConfig, fwCfg FirewallConfig
 		return fmt.Errorf("firewall setup validation: %w", err)
 	}
 
-	result, err := execNftables(ctx, "setup", cfg)
-	if err != nil {
-		return err
-	}
-	if !result.OK {
-		return fmt.Errorf("firewall setup failed: %s", result.Error)
-	}
-	return nil
+	opts := cfg.ToOptions()
+	return firewall.Setup(ctx, opts)
 }
 
-// TeardownFirewall removes per-VM nftables rules by calling vmsan-nftables teardown.
-func TeardownFirewall(ctx context.Context, netCfg SetupConfig, publishedPorts []nftypes.PublishedPort) error {
-	cfg := nftypes.TeardownConfig{
+// TeardownFirewall removes per-VM nftables rules by calling the firewall package directly.
+func TeardownFirewall(ctx context.Context, netCfg SetupConfig, publishedPorts []firewall.PublishedPort) error {
+	cfg := firewall.TeardownConfig{
 		VMId:             netCfg.VMId,
 		NetNSName:        netCfg.NetNSName,
 		TapDevice:        netCfg.TAPDevice,
@@ -134,19 +64,13 @@ func TeardownFirewall(ctx context.Context, netCfg SetupConfig, publishedPorts []
 		return fmt.Errorf("firewall teardown validation: %w", err)
 	}
 
-	result, err := execNftables(ctx, "teardown", cfg)
-	if err != nil {
-		return err
-	}
-	if !result.OK {
-		return fmt.Errorf("firewall teardown failed: %s", result.Error)
-	}
-	return nil
+	opts := cfg.ToOptions()
+	return firewall.Teardown(ctx, opts)
 }
 
-// VerifyFirewall checks if per-VM nftables table exists by calling vmsan-nftables verify.
-func VerifyFirewall(ctx context.Context, vmId, netnsName string) (*nftypes.VerifyResult, error) {
-	cfg := nftypes.VerifyConfig{
+// VerifyFirewall checks if per-VM nftables table exists by calling the firewall package directly.
+func VerifyFirewall(ctx context.Context, vmId, netnsName string) (*firewall.VerifyResult, error) {
+	cfg := firewall.VerifyConfig{
 		VMId:      vmId,
 		NetNSName: netnsName,
 	}
@@ -155,24 +79,6 @@ func VerifyFirewall(ctx context.Context, vmId, netnsName string) (*nftypes.Verif
 		return nil, fmt.Errorf("firewall verify validation: %w", err)
 	}
 
-	binPath := nftablesBinPath()
-	input, err := json.Marshal(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("marshal verify config: %w", err)
-	}
-
-	cmd := exec.CommandContext(ctx, binPath, "verify")
-	cmd.Stdin = strings.NewReader(string(input))
-
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("vmsan-nftables verify: %w", err)
-	}
-
-	var result nftypes.VerifyResult
-	if err := json.Unmarshal(out, &result); err != nil {
-		return nil, fmt.Errorf("parse verify result: %w", err)
-	}
-
-	return &result, nil
+	opts := cfg.ToOptions()
+	return firewall.Verify(ctx, opts)
 }
