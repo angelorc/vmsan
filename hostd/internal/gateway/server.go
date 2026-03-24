@@ -1,6 +1,5 @@
-// Package gateway implements the vmsan-gateway Unix socket server and
-// JSON-RPC request dispatcher. It manages per-VM proxy resources and
-// provides a control plane for the TypeScript CLI.
+// Package gateway implements the vmsan-gateway gRPC server over a Unix socket.
+// It manages per-VM proxy resources and provides a control plane for the CLI.
 package gateway
 
 import (
@@ -13,8 +12,10 @@ import (
 	"os"
 	"os/user"
 	"strconv"
-	"sync"
 	"time"
+
+	vmsanv1 "github.com/angelorc/vmsan/hostd/gen/vmsan/v1"
+	"google.golang.org/grpc"
 )
 
 // Version is reported by the ping handler. Set at build time via ldflags or
@@ -27,8 +28,10 @@ type Config struct {
 	PIDFile    string
 }
 
-// Server is the vmsan-gateway Unix socket server.
+// Server is the vmsan-gateway gRPC server.
 type Server struct {
+	vmsanv1.UnimplementedGatewayServiceServer
+
 	config         Config
 	manager        *Manager
 	meshManager    *MeshManager
@@ -37,15 +40,11 @@ type Server struct {
 	timeoutManager *TimeoutManager
 	startTime      time.Time
 	cancelFunc     context.CancelFunc // set by Run(), used by shutdown handler
+	grpcServer     *grpc.Server
 }
 
-// Request is the JSON-RPC request envelope.
-type Request struct {
-	Method string          `json:"method"`
-	Params json.RawMessage `json:"params,omitempty"`
-}
-
-// Response is the JSON-RPC response envelope.
+// Response is the internal response envelope used by handler methods.
+// It bridges between the existing handlers and the gRPC layer.
 type Response struct {
 	OK      bool   `json:"ok"`
 	Error   string `json:"error,omitempty"`
@@ -105,7 +104,7 @@ func NewServer(cfg Config, meshManager *MeshManager, slots *SlotAllocator) (*Ser
 	return s, nil
 }
 
-// Run starts the server and blocks until the context is cancelled.
+// Run starts the gRPC server and blocks until the context is cancelled.
 // It removes stale socket and PID files on startup, writes the PID file,
 // and cleans up on shutdown.
 func (s *Server) Run(ctx context.Context) error {
@@ -150,37 +149,30 @@ func (s *Server) Run(ctx context.Context) error {
 		return fmt.Errorf("write PID file: %w", err)
 	}
 
+	// Create and register gRPC server.
+	s.grpcServer = grpc.NewServer()
+	vmsanv1.RegisterGatewayServiceServer(s.grpcServer, s)
+
 	slog.Info("gateway started",
 		"socket", s.config.SocketPath,
 		"pid", os.Getpid(),
+		"protocol", "grpc",
 	)
 
-	// Accept connections until context cancellation.
-	var wg sync.WaitGroup
+	// Graceful shutdown on context cancellation.
 	go func() {
 		<-ctx.Done()
 		slog.Info("shutting down gateway")
-		listener.Close()
+		s.grpcServer.GracefulStop()
 	}()
 
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			if ctx.Err() != nil {
-				break // graceful shutdown
-			}
-			slog.Error("accept error", "error", err)
-			continue
+	// Serve blocks until the server is stopped.
+	if err := s.grpcServer.Serve(listener); err != nil {
+		// grpc.ErrServerStopped is expected on graceful shutdown.
+		if ctx.Err() == nil {
+			return fmt.Errorf("grpc serve: %w", err)
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			s.handleConn(ctx, conn)
-		}()
 	}
-
-	// Wait for in-flight connections to finish.
-	wg.Wait()
 
 	// Graceful shutdown: stop VMs and supervised DNS processes, remove socket, symlink, and PID file.
 	s.manager.StopAll()
@@ -192,78 +184,6 @@ func (s *Server) Run(ctx context.Context) error {
 	return nil
 }
 
-// handleConn reads a single JSON request from the connection, dispatches it,
-// and writes the JSON response.
-func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
-	defer conn.Close()
-
-	var req Request
-	if err := json.NewDecoder(conn).Decode(&req); err != nil {
-		slog.Debug("failed to decode request", "error", err)
-		writeJSON(conn, Response{OK: false, Error: "invalid JSON", Code: "PARSE_ERROR"})
-		return
-	}
-
-	slog.Debug("handling request", "method", req.Method)
-	resp := s.dispatch(ctx, &req)
-	writeJSON(conn, resp)
-}
-
-// dispatch routes a request to the appropriate handler.
-func (s *Server) dispatch(ctx context.Context, req *Request) Response {
-	switch req.Method {
-	case "ping":
-		return s.handlePing()
-	case "vm.start":
-		return s.handleVMStart(req.Params)
-	case "vm.stop":
-		return s.handleVMStop(req.Params)
-	case "vm.updatePolicy":
-		return s.handleVMUpdatePolicy(req.Params)
-	case "status":
-		return s.handleStatus()
-	case "vm.create":
-		return s.handleVMCreate(ctx, req.Params)
-	case "vm.delete":
-		return s.handleVMDelete(ctx, req.Params)
-	case "vm.restart":
-		return s.handleVMRestart(ctx, req.Params)
-	case "vm.fullStop":
-		return s.handleVMFullStop(ctx, req.Params)
-	case "vm.fullUpdatePolicy":
-		return s.handleVMFullUpdatePolicy(ctx, req.Params)
-	case "vm.snapshot.create":
-		return s.handleVMSnapshotCreate(ctx, req.Params)
-	case "rootfs.build":
-		return s.handleRootfsBuild(ctx, req.Params)
-	case "network.setup":
-		return s.handleNetworkSetup(ctx, req.Params)
-	case "network.teardown":
-		return s.handleNetworkTeardown(ctx, req.Params)
-	case "vm.get":
-		return s.handleVMGet(req.Params)
-	case "vm.extendTimeout":
-		return s.handleExtendTimeout(req.Params)
-	case "doctor":
-		return s.handleDoctor()
-	case "rootfs.download":
-		return s.handleRootfsDownload(ctx, req.Params)
-	case "cloudflare.setup":
-		return s.handleCloudflareSetup(req.Params)
-	case "cloudflare.addRoute":
-		return s.handleCloudflareAddRoute(req.Params)
-	case "cloudflare.removeRoute":
-		return s.handleCloudflareRemoveRoute(req.Params)
-	case "cloudflare.status":
-		return s.handleCloudflareStatus()
-	case "health":
-		return s.handleHealth()
-	case "shutdown":
-		return s.handleShutdown(ctx)
-	default:
-		return Response{OK: false, Error: fmt.Sprintf("unknown method: %s", req.Method), Code: "UNKNOWN_METHOD"}
-	}
-}
 
 func (s *Server) handlePing() Response {
 	return Response{
@@ -465,21 +385,6 @@ func (s *Server) handleShutdown(_ context.Context) Response {
 	return Response{OK: true}
 }
 
-func (s *Server) handleVMCreate(ctx context.Context, params json.RawMessage) Response {
-	return s.handleVMCreateImpl(ctx, params)
-}
-
-func (s *Server) handleVMDelete(ctx context.Context, params json.RawMessage) Response {
-	return s.handleVMDeleteImpl(ctx, params)
-}
-
-func (s *Server) handleNetworkSetup(ctx context.Context, params json.RawMessage) Response {
-	return s.handleNetworkSetupImpl(ctx, params)
-}
-
-func (s *Server) handleNetworkTeardown(ctx context.Context, params json.RawMessage) Response {
-	return s.handleNetworkTeardownImpl(ctx, params)
-}
 
 func (s *Server) handleHealth() Response {
 	vms := s.manager.ListVMs()
@@ -501,15 +406,6 @@ func (s *Server) handleHealth() Response {
 			DNSProxies: s.dnsSupervisor.Count(),
 			SNIProxies: len(vms), // one per VM
 		},
-	}
-}
-
-// writeJSON encodes v as JSON and writes it to the connection.
-func writeJSON(conn net.Conn, v any) {
-	enc := json.NewEncoder(conn)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(v); err != nil {
-		slog.Error("failed to write response", "error", err)
 	}
 }
 

@@ -1,0 +1,431 @@
+syntax = "proto3";
+package vmsan.v1;
+option go_package = "github.com/angelorc/vmsan/hostd/gen/vmsan/v1;vmsanv1";
+
+// GatewayService handles VM lifecycle, system health, and status.
+service GatewayService {
+  // System
+  rpc Ping(PingRequest) returns (PingResponse);
+  rpc Health(HealthRequest) returns (HealthResponse);
+  rpc Status(StatusRequest) returns (StatusResponse);
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+  rpc Doctor(DoctorRequest) returns (DoctorResponse);
+
+  // VM lifecycle
+  rpc CreateVM(CreateVMRequest) returns (CreateVMResponse);
+  rpc DeleteVM(DeleteVMRequest) returns (DeleteVMResponse);
+  rpc RestartVM(RestartVMRequest) returns (RestartVMResponse);
+  rpc StartVM(StartVMRequest) returns (StartVMResponse);
+  rpc StopVM(StopVMRequest) returns (StopVMResponse);
+  rpc FullStopVM(FullStopVMRequest) returns (FullStopVMResponse);
+  rpc GetVM(GetVMRequest) returns (GetVMResponse);
+  rpc ExtendTimeout(ExtendTimeoutRequest) returns (ExtendTimeoutResponse);
+
+  // Network policy
+  rpc UpdatePolicy(UpdatePolicyRequest) returns (UpdatePolicyResponse);
+  rpc FullUpdatePolicy(FullUpdatePolicyRequest) returns (FullUpdatePolicyResponse);
+
+  // Snapshots
+  rpc CreateSnapshot(CreateSnapshotRequest) returns (CreateSnapshotResponse);
+
+  // Network setup/teardown
+  rpc SetupNetwork(SetupNetworkRequest) returns (SetupNetworkResponse);
+  rpc TeardownNetwork(TeardownNetworkRequest) returns (TeardownNetworkResponse);
+
+  // Rootfs
+  rpc BuildRootfs(BuildRootfsRequest) returns (BuildRootfsResponse);
+  rpc DownloadRootfs(DownloadRootfsRequest) returns (DownloadRootfsResponse);
+
+  // Cloudflare
+  rpc CloudflareSetup(CloudflareSetupRequest) returns (CloudflareSetupResponse);
+  rpc CloudflareAddRoute(CloudflareAddRouteRequest) returns (CloudflareAddRouteResponse);
+  rpc CloudflareRemoveRoute(CloudflareRemoveRouteRequest) returns (CloudflareRemoveRouteResponse);
+  rpc CloudflareStatus(CloudflareStatusRequest) returns (CloudflareStatusResponse);
+}
+
+// ---------------------------------------------------------------------------
+// Shared types
+// ---------------------------------------------------------------------------
+
+// VMMetadata is the authoritative VM state (mirrors Go VMMetadata struct).
+message VMMetadata {
+  string vm_id = 1;
+  int32 slot = 2;
+  string status = 3;
+  string host_ip = 4;
+  string guest_ip = 5;
+  string mesh_ip = 6;
+  int32 pid = 7;
+  string created_at = 8;
+  string timeout_at = 9;
+  string agent_token = 10;
+  string runtime = 11;
+  int32 vcpus = 12;
+  int32 mem_mib = 13;
+  double disk_size_gb = 14;
+  string project = 15;
+  string service = 16;
+  VMNetworkMeta network = 17;
+  string chroot_dir = 18;
+  string socket_path = 19;
+  string tap_device = 20;
+  string mac_address = 21;
+  string net_ns_name = 22;
+  string veth_host = 23;
+  string veth_guest = 24;
+  string subnet_mask = 25;
+  int32 dns_port = 26;
+  int32 sni_port = 27;
+  int32 http_port = 28;
+}
+
+// VMNetworkMeta holds per-VM network policy metadata.
+message VMNetworkMeta {
+  string policy = 1;
+  repeated string domains = 2;
+  repeated string allowed_cidrs = 3;
+  repeated string denied_cidrs = 4;
+  repeated int32 ports = 5;
+  int32 bandwidth_mbit = 6;
+  bool allow_icmp = 7;
+}
+
+// DoctorCheck represents a single health-check result.
+message DoctorCheck {
+  string category = 1;
+  string name = 2;
+  string status = 3;  // "pass", "fail", "warn"
+  string detail = 4;
+  string fix = 5;
+}
+
+// ---------------------------------------------------------------------------
+// System RPCs
+// ---------------------------------------------------------------------------
+
+message PingRequest {}
+message PingResponse {
+  string version = 1;
+  int32 vms = 2;
+}
+
+message HealthRequest {}
+message HealthResponse {
+  string version = 1;
+  int32 vms = 2;
+  string uptime = 3;
+  int32 dns_proxies = 4;
+  int32 sni_proxies = 5;
+}
+
+message StatusRequest {}
+message StatusResponse {
+  int32 vms = 1;
+  repeated VMMetadata list = 2;
+}
+
+message ShutdownRequest {}
+message ShutdownResponse {}
+
+message DoctorRequest {}
+message DoctorResponse {
+  repeated DoctorCheck checks = 1;
+}
+
+// ---------------------------------------------------------------------------
+// VM lifecycle
+// ---------------------------------------------------------------------------
+
+message CreateVMRequest {
+  int32 vcpus = 1;
+  int32 mem_mib = 2;
+  string runtime = 3;
+  double disk_size_gb = 4;
+  string network_policy = 5;
+  repeated string domains = 6;
+  repeated string allowed_cidrs = 7;
+  repeated string denied_cidrs = 8;
+  repeated int32 ports = 9;
+  int32 bandwidth_mbit = 10;
+  bool allow_icmp = 11;
+  string project = 12;
+  string service = 13;
+  repeated string connect_to = 14;
+  bool skip_dnat = 15;
+  string kernel_path = 16;
+  string rootfs_path = 17;
+  string snapshot_id = 18;
+  string agent_binary = 19;
+  string agent_token = 20;
+  string vm_id = 21;
+  bool disable_seccomp = 22;
+  bool disable_pid_ns = 23;
+  bool disable_cgroup = 24;
+  string seccomp_filter = 25;
+  string jailer_base_dir = 26;
+  int32 owner_uid = 27;
+  int32 owner_gid = 28;
+  int64 timeout_ms = 29;
+  string timeout_at = 30;
+}
+
+message CreateVMResponse {
+  string vm_id = 1;
+  int32 slot = 2;
+  string host_ip = 3;
+  string guest_ip = 4;
+  string mesh_ip = 5;
+  string tap_device = 6;
+  string mac_address = 7;
+  string net_ns_name = 8;
+  string veth_host = 9;
+  string veth_guest = 10;
+  string subnet_mask = 11;
+  string chroot_dir = 12;
+  string socket_path = 13;
+  int32 pid = 14;
+  string agent_token = 15;
+  int32 dns_port = 16;
+  int32 sni_port = 17;
+  int32 http_port = 18;
+}
+
+message DeleteVMRequest {
+  string vm_id = 1;
+  bool force = 2;
+  string jailer_base_dir = 3;
+}
+message DeleteVMResponse {}
+
+message RestartVMRequest {
+  string vm_id = 1;
+  int32 slot = 2;
+  string chroot_dir = 3;
+  string socket_path = 4;
+  string network_policy = 5;
+  repeated string domains = 6;
+  repeated string allowed_cidrs = 7;
+  repeated string denied_cidrs = 8;
+  repeated int32 ports = 9;
+  int32 bandwidth_mbit = 10;
+  bool allow_icmp = 11;
+  bool skip_dnat = 12;
+  string project = 13;
+  string service = 14;
+  repeated string connect_to = 15;
+  bool disable_seccomp = 16;
+  bool disable_pid_ns = 17;
+  bool disable_cgroup = 18;
+  string seccomp_filter = 19;
+  int32 vcpus = 20;
+  int32 mem_mib = 21;
+  string kernel_path = 22;
+  string rootfs_path = 23;
+  string agent_binary = 24;
+  string agent_token = 25;
+  string net_ns_name = 26;
+  string jailer_base_dir = 27;
+}
+// RestartVM returns the same shape as CreateVM.
+message RestartVMResponse {
+  string vm_id = 1;
+  int32 slot = 2;
+  string host_ip = 3;
+  string guest_ip = 4;
+  string mesh_ip = 5;
+  string tap_device = 6;
+  string mac_address = 7;
+  string net_ns_name = 8;
+  string veth_host = 9;
+  string veth_guest = 10;
+  string subnet_mask = 11;
+  string chroot_dir = 12;
+  string socket_path = 13;
+  int32 pid = 14;
+  string agent_token = 15;
+  int32 dns_port = 16;
+  int32 sni_port = 17;
+  int32 http_port = 18;
+}
+
+message StartVMRequest {
+  string vm_id = 1;
+  int32 slot = 2;
+  string policy = 3;
+  repeated string allowed_domains = 4;
+  string project = 5;
+  string service = 6;
+  repeated string connect_to = 7;
+  string veth_host = 8;
+  string net_ns = 9;
+  string guest_dev = 10;
+}
+message StartVMResponse {
+  string vm_id = 1;
+  string policy = 2;
+  string mesh_ip = 3;
+  string mesh_service = 4;
+}
+
+message StopVMRequest {
+  string vm_id = 1;
+  string veth_host = 2;
+  string net_ns = 3;
+  string guest_dev = 4;
+}
+message StopVMResponse {}
+
+message FullStopVMRequest {
+  string vm_id = 1;
+  int32 slot = 2;
+  int32 pid = 3;
+  string net_ns_name = 4;
+  string socket_path = 5;
+  string jailer_base_dir = 6;
+}
+message FullStopVMResponse {}
+
+message GetVMRequest {
+  string vm_id = 1;
+}
+message GetVMResponse {
+  VMMetadata vm = 1;
+}
+
+message ExtendTimeoutRequest {
+  string vm_id = 1;
+  string timeout_at = 2;  // ISO 8601 / RFC3339
+}
+message ExtendTimeoutResponse {}
+
+// ---------------------------------------------------------------------------
+// Network policy
+// ---------------------------------------------------------------------------
+
+message UpdatePolicyRequest {
+  string vm_id = 1;
+  string policy = 2;
+}
+message UpdatePolicyResponse {}
+
+message FullUpdatePolicyRequest {
+  string vm_id = 1;
+  string policy = 2;
+  int32 slot = 3;
+  repeated string domains = 4;
+  repeated string allowed_cidrs = 5;
+  repeated string denied_cidrs = 6;
+  repeated int32 ports = 7;
+  bool allow_icmp = 8;
+  bool skip_dnat = 9;
+  string net_ns_name = 10;
+}
+message FullUpdatePolicyResponse {}
+
+// ---------------------------------------------------------------------------
+// Snapshots
+// ---------------------------------------------------------------------------
+
+message CreateSnapshotRequest {
+  string vm_id = 1;
+  string snapshot_id = 2;
+  string socket_path = 3;
+  string dest_dir = 4;
+  string chroot_dir = 5;
+  string jailer_base_dir = 6;
+  int32 owner_uid = 7;
+  int32 owner_gid = 8;
+}
+message CreateSnapshotResponse {
+  string vm_id = 1;
+  string snapshot_id = 2;
+  string dest_dir = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Network setup/teardown
+// ---------------------------------------------------------------------------
+
+message SetupNetworkRequest {
+  string vm_id = 1;
+  int32 slot = 2;
+  string policy = 3;
+  int32 bandwidth_mbit = 4;
+  bool allow_icmp = 5;
+  bool skip_dnat = 6;
+  repeated string allowed_cidrs = 7;
+  repeated string denied_cidrs = 8;
+  repeated int32 ports = 9;
+}
+message SetupNetworkResponse {}
+
+message TeardownNetworkRequest {
+  string vm_id = 1;
+  int32 slot = 2;
+}
+message TeardownNetworkResponse {}
+
+// ---------------------------------------------------------------------------
+// Rootfs
+// ---------------------------------------------------------------------------
+
+message BuildRootfsRequest {
+  string image_ref = 1;
+  string output_dir = 2;
+  int32 owner_uid = 3;
+  int32 owner_gid = 4;
+}
+message BuildRootfsResponse {
+  string rootfs_path = 1;
+  string image_ref = 2;
+}
+
+message DownloadRootfsRequest {
+  string url = 1;
+  string checksum = 2;
+  string dest_path = 3;
+  int32 owner_uid = 4;
+  int32 owner_gid = 5;
+}
+message DownloadRootfsResponse {
+  string dest_path = 1;
+  string checksum = 2;
+  int64 size = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Cloudflare
+// ---------------------------------------------------------------------------
+
+message CloudflareSetupRequest {
+  string tunnel_token = 1;
+  string config_path = 2;
+  string log_path = 3;
+}
+message CloudflareSetupResponse {
+  int32 pid = 1;
+}
+
+message CloudflareAddRouteRequest {
+  string vm_id = 1;
+  string hostname = 2;
+  string api_token = 3;
+  string tunnel_id = 4;
+  string account_id = 5;
+}
+message CloudflareAddRouteResponse {}
+
+message CloudflareRemoveRouteRequest {
+  string vm_id = 1;
+  string api_token = 2;
+  string tunnel_id = 3;
+  string account_id = 4;
+}
+message CloudflareRemoveRouteResponse {}
+
+message CloudflareStatusRequest {}
+message CloudflareStatusResponse {
+  bool running = 1;
+  int32 pid = 2;
+  string uptime = 3;
+}

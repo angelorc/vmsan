@@ -3,7 +3,7 @@ AGENT := vmsan-agent-host
 SERVER := vmsan-server
 INSTALL_DIR := $(HOME)/.vmsan/bin
 
-.PHONY: build gateway gateway-amd64 gateway-arm64 gateway-all agent agent-amd64 agent-arm64 agent-all server server-amd64 server-arm64 server-all install clean test
+.PHONY: build gateway gateway-amd64 gateway-arm64 gateway-all agent agent-amd64 agent-arm64 agent-all server server-amd64 server-arm64 server-all install clean test proto
 
 gateway:
 	CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o $(GATEWAY) ./cmd/vmsan-gateway
@@ -45,6 +45,12 @@ install: build
 	cp $(GATEWAY) $(INSTALL_DIR)/$(GATEWAY)
 	cp $(AGENT) $(INSTALL_DIR)/$(AGENT)
 	cp $(SERVER) $(INSTALL_DIR)/$(SERVER)
+
+proto:
+	protoc --proto_path=proto \
+		--go_out=gen --go_opt=paths=source_relative \
+		--go-grpc_out=gen --go-grpc_opt=paths=source_relative \
+		proto/vmsan/v1/gateway.proto
 
 test:
 	go test ./...
