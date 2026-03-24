@@ -613,6 +613,11 @@ groupadd -r vmsan 2>/dev/null || true
 REAL_USER="${SUDO_USER:-$(whoami)}"
 usermod -aG vmsan "$REAL_USER" 2>/dev/null || true
 
+# Create gateway runtime directory with correct group ownership
+mkdir -p /run/vmsan
+chown root:vmsan /run/vmsan
+chmod 775 /run/vmsan
+
 # --- firecracker + jailer ---
 
 if [ -x "$VMSAN_DIR/bin/firecracker" ] && [ -x "$VMSAN_DIR/bin/jailer" ]; then
@@ -743,19 +748,24 @@ fi
 # --- vmsan CLI ---
 
 if [ "$INSTALL_MODE" = "source" ]; then
-  info "Installing vmsan CLI from source (${SOURCE_SHA})..."
-  (cd "$VMSAN_SRC" && npm install --ignore-scripts && npx obuild)
-  npm install -g "$VMSAN_SRC"
-  VMSAN_VER=$(vmsan --version 2>/dev/null || echo "unknown")
-  success "vmsan CLI installed from ${SOURCE_LABEL} ($VMSAN_VER)"
-elif command -v vmsan >/dev/null 2>&1; then
-  VMSAN_VER=$(vmsan --version 2>/dev/null || echo "unknown")
-  success "vmsan CLI already installed ($VMSAN_VER)"
+  ensure_go
+  info "Building vmsan from source (${SOURCE_SHA})..."
+  (cd "$VMSAN_SRC/hostd" && CGO_ENABLED=0 GOOS=linux GOARCH="$(go_arch)" go build \
+    -ldflags="-s -w -X main.version=${SOURCE_SHA}" -o "$VMSAN_DIR/bin/vmsan" ./cmd/vmsan)
+  chmod +x "$VMSAN_DIR/bin/vmsan"
+  install -m 0755 "$VMSAN_DIR/bin/vmsan" /usr/local/bin/vmsan
+  VMSAN_VER=$("$VMSAN_DIR/bin/vmsan" --version 2>/dev/null || echo "unknown")
+  success "vmsan built from ${SOURCE_LABEL} ($VMSAN_VER)"
+elif [ -x "$VMSAN_DIR/bin/vmsan" ]; then
+  VMSAN_VER=$("$VMSAN_DIR/bin/vmsan" --version 2>/dev/null || echo "unknown")
+  success "vmsan already installed ($VMSAN_VER)"
 else
-  info "Installing vmsan CLI via npm..."
-  npm install -g vmsan@latest
-  VMSAN_VER=$(vmsan --version 2>/dev/null || echo "unknown")
-  success "vmsan CLI installed ($VMSAN_VER)"
+  VMSAN_URL="https://github.com/$VMSAN_REPO/releases/download/${LATEST_TAG}/vmsan-${ARCH}"
+  download "$VMSAN_URL" "$VMSAN_DIR/bin/vmsan"
+  chmod +x "$VMSAN_DIR/bin/vmsan"
+  install -m 0755 "$VMSAN_DIR/bin/vmsan" /usr/local/bin/vmsan
+  VMSAN_VER=$("$VMSAN_DIR/bin/vmsan" --version 2>/dev/null || echo "unknown")
+  success "vmsan ${LATEST_TAG} installed ($VMSAN_VER)"
 fi
 
 # --- vmsan-agent ---
@@ -777,67 +787,8 @@ else
   success "vmsan-agent ${LATEST_TAG} installed"
 fi
 
-# --- vmsan-nftables ---
-
-NFTABLES_PATH="$VMSAN_DIR/bin/vmsan-nftables"
-
-if [ "$INSTALL_MODE" = "source" ]; then
-  ensure_go
-  info "Building vmsan-nftables from source (${SOURCE_SHA})..."
-  (cd "$VMSAN_SRC/nftables" && CGO_ENABLED=0 GOOS=linux GOARCH="$(go_arch)" go build -ldflags="-s -w" -o "$NFTABLES_PATH" ./cmd/vmsan-nftables)
-  chmod +x "$NFTABLES_PATH"
-  success "vmsan-nftables built from ${SOURCE_LABEL}"
-elif [ -x "$NFTABLES_PATH" ]; then
-  success "vmsan-nftables already installed"
-else
-  NFTABLES_URL="https://github.com/$VMSAN_REPO/releases/download/${LATEST_TAG}/vmsan-nftables-${ARCH}"
-  download "$NFTABLES_URL" "$NFTABLES_PATH"
-  chmod +x "$NFTABLES_PATH"
-  success "vmsan-nftables ${LATEST_TAG} installed"
-fi
-
-# Install vmsan-nftables to system path (gateway needs it)
-install -m 0755 "$NFTABLES_PATH" /usr/local/bin/vmsan-nftables
-
-# --- vmsan-gateway ---
-
-GATEWAY_PATH="$VMSAN_DIR/bin/vmsan-gateway"
-
-if [ "$INSTALL_MODE" = "source" ]; then
-  ensure_go
-  info "Building vmsan-gateway from source (${SOURCE_SHA})..."
-  (cd "$VMSAN_SRC/hostd" && CGO_ENABLED=0 GOOS=linux GOARCH="$(go_arch)" go build -ldflags="-s -w" -o "$GATEWAY_PATH" ./cmd/vmsan-gateway)
-  chmod +x "$GATEWAY_PATH"
-  success "vmsan-gateway built from ${SOURCE_LABEL}"
-elif [ -x "$GATEWAY_PATH" ]; then
-  success "vmsan-gateway already installed"
-else
-  GATEWAY_URL="https://github.com/$VMSAN_REPO/releases/download/${LATEST_TAG}/vmsan-gateway-${ARCH}"
-  download "$GATEWAY_URL" "$GATEWAY_PATH"
-  chmod +x "$GATEWAY_PATH"
-  success "vmsan-gateway ${LATEST_TAG} installed"
-fi
-
-# Install vmsan-gateway to system path (systemd service expects it here)
-install -m 0755 "$GATEWAY_PATH" /usr/local/bin/vmsan-gateway
-
-# --- vmsan-server / vmsan-agent-host ---
-
-SERVER_PATH="$VMSAN_DIR/bin/vmsan-server"
-AGENT_HOST_PATH="$VMSAN_DIR/bin/vmsan-agent-host"
-
-if [ "$INSTALL_MODE" = "source" ]; then
-  ensure_go
-  info "Building vmsan-server from source (${SOURCE_SHA})..."
-  (cd "$VMSAN_SRC/hostd" && CGO_ENABLED=0 GOOS=linux GOARCH="$(go_arch)" go build -ldflags="-s -w" -o "$SERVER_PATH" ./cmd/vmsan-server)
-  chmod +x "$SERVER_PATH"
-  success "vmsan-server built from ${SOURCE_LABEL}"
-
-  info "Building vmsan-agent-host from source (${SOURCE_SHA})..."
-  (cd "$VMSAN_SRC/hostd" && CGO_ENABLED=0 GOOS=linux GOARCH="$(go_arch)" go build -ldflags="-s -w" -o "$AGENT_HOST_PATH" ./cmd/vmsan-agent-host)
-  chmod +x "$AGENT_HOST_PATH"
-  success "vmsan-agent-host built from ${SOURCE_LABEL}"
-fi
+# Backward-compat symlink: vmsan-gateway -> vmsan
+ln -sf /usr/local/bin/vmsan /usr/local/bin/vmsan-gateway 2>/dev/null || true
 
 # --- dnsproxy ---
 
@@ -1302,7 +1253,7 @@ requested_sha=$REQUESTED_SHA
 resolved_sha=$SOURCE_SHA
 source_label=$SOURCE_LABEL
 latest_release=$LATEST_TAG
-cli_version=$VMSAN_VER
+cli_version=$("$VMSAN_DIR/bin/vmsan" --version 2>/dev/null || echo "unknown")
 runtime_distribution=$RUNTIME_DISTRIBUTION
 runtime_manifest_url=$RUNTIME_MANIFEST_URL
 runtime_recipe_version=$RUNTIME_RECIPE_VERSION_INSTALLED
@@ -1314,21 +1265,28 @@ EOF
 # --- systemd service ---
 
 if command -v systemctl >/dev/null 2>&1; then
-  # Install gateway systemd service unit (group was created earlier)
-  GATEWAY_SERVICE_SRC=""
-  if [ "$INSTALL_MODE" = "source" ] && [ -f "$VMSAN_SRC/hostd/cmd/vmsan-gateway/vmsan-gateway.service" ]; then
-    GATEWAY_SERVICE_SRC="$VMSAN_SRC/hostd/cmd/vmsan-gateway/vmsan-gateway.service"
-  fi
+  cat > /etc/systemd/system/vmsan-gateway.service <<SVCEOF
+[Unit]
+Description=vmsan gateway daemon
+After=network.target
 
-  if [ -n "$GATEWAY_SERVICE_SRC" ]; then
-    # Service file already has ExecStart=/usr/local/bin/vmsan-gateway — no patching needed
-    cp "$GATEWAY_SERVICE_SRC" /etc/systemd/system/vmsan-gateway.service
-    systemctl daemon-reload
-    systemctl enable vmsan-gateway 2>/dev/null || true
-    # Start or restart the gateway
-    systemctl restart vmsan-gateway 2>/dev/null || systemctl start vmsan-gateway 2>/dev/null || true
-    success "vmsan-gateway systemd service installed and started"
-  fi
+[Service]
+Type=simple
+ExecStartPre=/bin/mkdir -p /run/vmsan
+ExecStartPre=/bin/chown root:vmsan /run/vmsan
+ExecStartPre=/bin/chmod 775 /run/vmsan
+ExecStart=/usr/local/bin/vmsan gateway
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+  systemctl daemon-reload
+  systemctl enable vmsan-gateway 2>/dev/null || true
+  systemctl restart vmsan-gateway 2>/dev/null || systemctl start vmsan-gateway 2>/dev/null || true
+  success "vmsan-gateway systemd service installed and started"
 
   REAL_USER="${SUDO_USER:-$(whoami)}"
   if [ "$REAL_USER" != "root" ]; then
@@ -1353,20 +1311,15 @@ RUNTIME_STATUS="${RUNTIME_STATUS:-none}"
 echo ""
 success "vmsan environment ready at $VMSAN_DIR"
 echo ""
+echo "  vmsan        $VMSAN_DIR/bin/vmsan"
 echo "  Firecracker  $VMSAN_DIR/bin/firecracker"
 echo "  Jailer       $VMSAN_DIR/bin/jailer"
 echo "  Kernel       $VMSAN_DIR/kernels/$KERNEL_FILE"
 echo "  Rootfs       $VMSAN_DIR/rootfs/$ROOTFS_FILE"
 echo "  Runtimes     $RUNTIME_STATUS"
 echo "  Agent        $AGENT_PATH"
-if [ -x "$SERVER_PATH" ]; then
-  echo "  Server       $SERVER_PATH"
-fi
-if [ -x "$AGENT_HOST_PATH" ]; then
-  echo "  Agent host   $AGENT_HOST_PATH"
-fi
 echo "  cloudflared  $CLOUDFLARED_PATH ($CF_STATUS)"
-echo "  CLI          $(command -v vmsan 2>/dev/null || echo 'vmsan (npm global)')"
+echo "  CLI          /usr/local/bin/vmsan"
 if [ "$INSTALL_MODE" = "source" ]; then
   echo "  Source       $SOURCE_SHA ($SOURCE_LABEL)"
 else

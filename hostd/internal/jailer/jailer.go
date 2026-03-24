@@ -182,7 +182,7 @@ func Spawn(cfg SpawnConfig) error {
 	args = append(args, "--")
 	args = append(args, fcArgs...)
 
-	cmd := exec.Command("sudo", args...)
+	cmd := exec.Command(args[0], args[1:]...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("spawn jailer: %w: %s", err, string(output))
@@ -252,7 +252,7 @@ func configureRootfs(cfg Config, paths Paths) error {
 	}
 
 	// Mount
-	cmd := exec.Command("sudo", "mount", "-o", "loop", paths.RootfsPath, tmpMount)
+	cmd := exec.Command("mount", "-o", "loop", paths.RootfsPath, tmpMount)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		os.RemoveAll(tmpMount)
 		return fmt.Errorf("mount rootfs: %w: %s", err, string(output))
@@ -262,7 +262,7 @@ func configureRootfs(cfg Config, paths Paths) error {
 	func() {
 		defer func() {
 			// Always try to unmount
-			umount := exec.Command("sudo", "umount", tmpMount)
+			umount := exec.Command("umount", tmpMount)
 			if err := umount.Run(); err != nil {
 				slog.Debug("unmount failed", "path", tmpMount, "error", err)
 			}
@@ -419,7 +419,7 @@ func fixUbuntuOwnership(tmpMount string) error {
 		if err1 != nil || err2 != nil {
 			return nil
 		}
-		cmd := exec.Command("sudo", "chown", "-R", fmt.Sprintf("%d:%d", uid, gid), ubuntuHome)
+		cmd := exec.Command("chown", "-R", fmt.Sprintf("%d:%d", uid, gid), ubuntuHome)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("chown ubuntu home: %w: %s", err, string(output))
 		}

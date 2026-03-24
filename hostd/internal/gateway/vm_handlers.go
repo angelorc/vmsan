@@ -688,21 +688,21 @@ func (s *Server) handleRootfsBuild(_ context.Context, params json.RawMessage) Re
 	}
 	defer os.RemoveAll(mountDir)
 
-	mountCmd := exec.Command("sudo", "mount", "-o", "loop", rootfsPath, mountDir)
+	mountCmd := exec.Command("mount", "-o", "loop", rootfsPath, mountDir)
 	if output, err := mountCmd.CombinedOutput(); err != nil {
 		return Response{OK: false, Error: fmt.Sprintf("mount: %s: %s", err, string(output)), Code: "BUILD_ERROR"}
 	}
 	defer func() {
-		exec.Command("sudo", "umount", mountDir).Run()
+		exec.Command("umount", mountDir).Run()
 	}()
 
-	copyCmd := exec.Command("sudo", "cp", "-a", extractDir+"/.", mountDir)
+	copyCmd := exec.Command("cp", "-a", extractDir+"/.", mountDir)
 	if output, err := copyCmd.CombinedOutput(); err != nil {
 		return Response{OK: false, Error: fmt.Sprintf("copy to rootfs: %s: %s", err, string(output)), Code: "BUILD_ERROR"}
 	}
 
 	// Unmount before chown.
-	exec.Command("sudo", "umount", mountDir).Run()
+	exec.Command("umount", mountDir).Run()
 
 	// Clean up tar file.
 	os.Remove(tarPath)
