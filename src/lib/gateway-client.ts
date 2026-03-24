@@ -9,8 +9,6 @@ import { consola } from "consola";
 // ---------------------------------------------------------------------------
 
 const TIMEOUT_PING = 5_000;
-const TIMEOUT_STATUS = 5_000;
-const TIMEOUT_HEALTH = 5_000;
 const TIMEOUT_CREATE = 120_000;
 const TIMEOUT_RESTART = 120_000;
 const TIMEOUT_STOP = 30_000;
@@ -21,45 +19,7 @@ const TIMEOUT_UPDATE_POLICY = 10_000;
 const TIMEOUT_SHUTDOWN = 5_000;
 
 // ---------------------------------------------------------------------------
-// Existing interfaces (backward-compatible)
-// ---------------------------------------------------------------------------
-
-export interface GatewayVmConfig {
-  vmId: string;
-  slot: number;
-  policy: string;
-  allowedDomains?: string[];
-  project?: string;
-  service?: string;
-  connectTo?: string[];
-  vethHost?: string;
-  netns?: string;
-  guestDev?: string;
-}
-
-export interface GatewayVmResult {
-  ok: boolean;
-  error?: string;
-  code?: string;
-  vm?: {
-    vmId: string;
-    slot: number;
-    policy: string;
-    dnsPort: number;
-    sniPort: number;
-    httpPort: number;
-    meshIp?: string;
-  };
-}
-
-export interface GatewayPingResult {
-  ok: boolean;
-  version: string;
-  vms: number;
-}
-
-// ---------------------------------------------------------------------------
-// New interfaces — matching Go param/response structs
+// Interfaces — matching Go param/response structs
 // ---------------------------------------------------------------------------
 
 export interface GatewayVmCreateParams {
@@ -220,29 +180,13 @@ function getOwnerGid(): number {
 export class GatewayClient {
   constructor(private socketPath: string = "/run/vmsan/gateway.sock") {}
 
-  // -- Existing methods (backward-compatible) --
-
-  async vmStart(config: GatewayVmConfig): Promise<GatewayVmResult> {
-    return this.send("vm.start", config, TIMEOUT_CREATE);
-  }
-
-  async vmStop(vmId: string): Promise<void> {
-    await this.send("vm.stop", { vmId }, TIMEOUT_STOP);
-  }
-
-  async vmUpdatePolicy(vmId: string, policy: string, allowedDomains?: string[]): Promise<void> {
-    await this.send("vm.updatePolicy", { vmId, policy, allowedDomains }, TIMEOUT_UPDATE_POLICY);
-  }
-
-  async ping(): Promise<GatewayPingResult> {
+  async ping(): Promise<{ ok: boolean; version: string; vms: number }> {
     return this.send("ping", undefined, TIMEOUT_PING);
   }
 
   async shutdown(): Promise<void> {
     await this.send("shutdown", undefined, TIMEOUT_SHUTDOWN);
   }
-
-  // -- New methods (full lifecycle) --
 
   async vmCreate(params: GatewayVmCreateParams): Promise<GatewayVmCreateResult> {
     return this.send("vm.create", {

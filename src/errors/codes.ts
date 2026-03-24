@@ -23,8 +23,6 @@ export type VmErrorCode =
   | "ERR_VM_SNAPSHOT_NOT_FOUND"
   | "ERR_VM_SNAPSHOT_CREATE_FAILED";
 
-export type FirecrackerErrorCode = "ERR_FIRECRACKER_API";
-
 export type NetworkErrorCode =
   | "ERR_NETWORK_DEFAULT_INTERFACE"
   | "ERR_NFT_SETUP_FAILED"
@@ -54,7 +52,6 @@ export type CloudflareErrorCode =
 export type VmsanErrorCode =
   | ValidationErrorCode
   | VmErrorCode
-  | FirecrackerErrorCode
   | NetworkErrorCode
   | TimeoutErrorCode
   | SetupErrorCode

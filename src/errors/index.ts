@@ -2,7 +2,6 @@ export type {
   VmsanErrorCode,
   ValidationErrorCode,
   VmErrorCode,
-  FirecrackerErrorCode,
   NetworkErrorCode,
   TimeoutErrorCode,
   SetupErrorCode,
@@ -44,9 +43,6 @@ export {
   snapshotNotFoundError,
   snapshotCreateFailedError,
 } from "./vm.ts";
-
-export { FirecrackerApiError } from "./firecracker.ts";
-export { firecrackerApiError } from "./firecracker.ts";
 
 export { NetworkError } from "./network.ts";
 export {

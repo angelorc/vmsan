@@ -64,7 +64,7 @@ describe("GatewayClient", () => {
 
   // ---- Request serialization ----
 
-  it("sends correct method and params for vm.start", async () => {
+  it("sends correct method and params for vm.create", async () => {
     let receivedRequest: { method: string; params?: unknown } | null = null;
 
     server = createMockGateway(socketPath, (req) => {
@@ -74,51 +74,47 @@ describe("GatewayClient", () => {
         vm: {
           vmId: "vm-abc123",
           slot: 5,
-          policy: "custom",
-          dnsPort: 10053,
-          sniPort: 10443,
-          httpPort: 10080,
+          hostIp: "198.19.5.1",
+          guestIp: "198.19.5.2",
+          tapDevice: "fhvm5",
+          macAddress: "AA:FC:00:00:00:06",
+          netnsName: "vmsan-5",
+          vethHost: "veth-h-5",
+          vethGuest: "veth-g-5",
+          subnetMask: "255.255.255.252",
+          chrootDir: "/tmp/jailer/firecracker/vm-abc123/root",
+          socketPath: "/tmp/jailer/firecracker/vm-abc123/root/run/firecracker.socket",
+          pid: 12345,
+          dnsPort: 10058,
+          sniPort: 10448,
+          httpPort: 10703,
         },
       };
     });
 
-    // Wait for server to be ready
     await new Promise((r) => server!.once("listening", r));
 
     const client = new GatewayClient(socketPath);
-    await client.vmStart({
+    const result = await client.vmCreate({
       vmId: "vm-abc123",
-      slot: 5,
-      policy: "custom",
-      allowedDomains: ["example.com", "*.github.com"],
+      vcpus: 2,
+      memMib: 256,
+      networkPolicy: "allow-all",
+      kernelPath: "/tmp/vmlinux",
+      rootfsPath: "/tmp/rootfs.ext4",
     });
 
     expect(receivedRequest).not.toBeNull();
-    expect(receivedRequest!.method).toBe("vm.start");
-    expect(receivedRequest!.params).toEqual({
-      vmId: "vm-abc123",
-      slot: 5,
-      policy: "custom",
-      allowedDomains: ["example.com", "*.github.com"],
-    });
+    expect(receivedRequest!.method).toBe("vm.create");
+    expect((receivedRequest!.params as Record<string, unknown>).vmId).toBe("vm-abc123");
+    expect((receivedRequest!.params as Record<string, unknown>).vcpus).toBe(2);
+    expect(result.ok).toBe(true);
+    expect(result.vm).toBeDefined();
+    expect(result.vm!.vmId).toBe("vm-abc123");
+    expect(result.vm!.pid).toBe(12345);
   });
 
-  it("sends correct method for vm.stop", async () => {
-    let receivedMethod = "";
-
-    server = createMockGateway(socketPath, (req) => {
-      receivedMethod = req.method;
-      return { ok: true };
-    });
-    await new Promise((r) => server!.once("listening", r));
-
-    const client = new GatewayClient(socketPath);
-    await client.vmStop("vm-abc123");
-
-    expect(receivedMethod).toBe("vm.stop");
-  });
-
-  it("sends correct method and params for vm.updatePolicy", async () => {
+  it("sends correct method and params for vm.fullStop", async () => {
     let receivedRequest: { method: string; params?: unknown } | null = null;
 
     server = createMockGateway(socketPath, (req) => {
@@ -128,14 +124,30 @@ describe("GatewayClient", () => {
     await new Promise((r) => server!.once("listening", r));
 
     const client = new GatewayClient(socketPath);
-    await client.vmUpdatePolicy("vm-abc123", "allow-all", ["example.com"]);
+    await client.vmFullStop({ vmId: "vm-abc123", slot: 5 });
 
-    expect(receivedRequest!.method).toBe("vm.updatePolicy");
-    expect(receivedRequest!.params).toEqual({
+    expect(receivedRequest!.method).toBe("vm.fullStop");
+    expect((receivedRequest!.params as Record<string, unknown>).vmId).toBe("vm-abc123");
+  });
+
+  it("sends correct method and params for vm.fullUpdatePolicy", async () => {
+    let receivedRequest: { method: string; params?: unknown } | null = null;
+
+    server = createMockGateway(socketPath, (req) => {
+      receivedRequest = req;
+      return { ok: true };
+    });
+    await new Promise((r) => server!.once("listening", r));
+
+    const client = new GatewayClient(socketPath);
+    await client.vmFullUpdatePolicy({
       vmId: "vm-abc123",
       policy: "allow-all",
-      allowedDomains: ["example.com"],
+      domains: ["example.com"],
     });
+
+    expect(receivedRequest!.method).toBe("vm.fullUpdatePolicy");
+    expect((receivedRequest!.params as Record<string, unknown>).policy).toBe("allow-all");
   });
 
   it("sends correct method for ping", async () => {
@@ -171,35 +183,6 @@ describe("GatewayClient", () => {
 
   // ---- Response parsing ----
 
-  it("parses vm.start response with VM details", async () => {
-    server = createMockGateway(socketPath, () => ({
-      ok: true,
-      vm: {
-        vmId: "vm-test1",
-        slot: 2,
-        policy: "custom",
-        dnsPort: 20053,
-        sniPort: 20443,
-        httpPort: 20080,
-      },
-    }));
-    await new Promise((r) => server!.once("listening", r));
-
-    const client = new GatewayClient(socketPath);
-    const result = await client.vmStart({
-      vmId: "vm-test1",
-      slot: 2,
-      policy: "custom",
-    });
-
-    expect(result.ok).toBe(true);
-    expect(result.vm).toBeDefined();
-    expect(result.vm!.vmId).toBe("vm-test1");
-    expect(result.vm!.dnsPort).toBe(20053);
-    expect(result.vm!.sniPort).toBe(20443);
-    expect(result.vm!.httpPort).toBe(20080);
-  });
-
   it("parses error response", async () => {
     server = createMockGateway(socketPath, () => ({
       ok: false,
@@ -209,10 +192,9 @@ describe("GatewayClient", () => {
     await new Promise((r) => server!.once("listening", r));
 
     const client = new GatewayClient(socketPath);
-    const result = await client.vmStart({
+    const result = await client.vmCreate({
       vmId: "vm-dup",
-      slot: 5,
-      policy: "allow-all",
+      networkPolicy: "allow-all",
     });
 
     expect(result.ok).toBe(false);

@@ -12,17 +12,8 @@ export { createDefaultLogger, createSilentLogger } from "./vmsan-logger.ts";
 export { vmsanPaths } from "./paths.ts";
 export type { VmsanPaths } from "./paths.ts";
 
-export { FirecrackerClient, firecrackerFetch } from "./services/firecracker.ts";
-export type {
-  paths as FirecrackerPaths,
-  components as FirecrackerComponents,
-} from "./generated/firecracker-api.d.ts";
 export { AgentClient } from "./services/agent.ts";
 export type { RunParams, RunEvent, WriteFileEntry, SessionInfo } from "./services/agent.ts";
-export { TimeoutExtender } from "./lib/timeout-extender.ts";
-export type { TimeoutExtenderOptions } from "./lib/timeout-extender.ts";
-export { spawnTimeoutKiller } from "./lib/timeout-killer.ts";
-export type { SpawnTimeoutKillerOpts } from "./lib/timeout-killer.ts";
 export { resolveVmState } from "./lib/vm-context.ts";
 export type { RunningVmContext } from "./lib/vm-context.ts";
 export { VMService } from "./services/vm.ts";
@@ -39,20 +30,10 @@ export type { VmStateStore, VmState, VmNetwork } from "./lib/vm-state.ts";
 export { MemoryVmStateStore } from "./stores/memory.ts";
 export { SqliteVmStateStore, createStateStore } from "./lib/state/index.ts";
 export type { HostState, SyncLogEntry } from "./lib/state/index.ts";
-export { NetworkManager } from "./lib/network.ts";
-export type { NetworkConfig } from "./lib/network.ts";
 export { GatewayClient, ensureGatewayRunning } from "./lib/gateway-client.ts";
-export type { GatewayVmConfig, GatewayVmResult, GatewayPingResult } from "./lib/gateway-client.ts";
-export type {
-  JailerPaths,
-  PrepareChrootConfig,
-  SpawnJailerConfig,
-  CgroupConfig,
-} from "./lib/jailer.ts";
 export { ShellSession, connectShell } from "./lib/shell/index.ts";
 export type { ShellSessionOptions } from "./lib/shell/index.ts";
 export { FileLock } from "./lib/file-lock.ts";
-export { PidFile } from "./lib/pid-file.ts";
 export {
   generateVmId,
   safeKill,
@@ -71,7 +52,6 @@ export type {
   VmsanErrorCode,
   ValidationErrorCode,
   VmErrorCode,
-  FirecrackerErrorCode,
   NetworkErrorCode,
   TimeoutErrorCode,
   SetupErrorCode,
@@ -109,7 +89,6 @@ export {
   networkSlotsExhaustedError,
   snapshotNotFoundError,
 } from "./errors/index.ts";
-export { FirecrackerApiError, firecrackerApiError } from "./errors/index.ts";
 export { NetworkError, defaultInterfaceNotFoundError } from "./errors/index.ts";
 export {
   TimeoutError,
@@ -143,7 +122,6 @@ export type {
   ParsedCreateInput,
   CreateSummaryInput,
   InitialVmStateInput,
-  CreateLifecycleState,
   Runtime,
   NetworkPolicy,
   VALID_RUNTIMES,
@@ -173,7 +151,6 @@ export {
   parseConnectTo,
 } from "./commands/create/validation.ts";
 export type { ImageReference } from "./commands/create/validation.ts";
-export { ensureSeccompFilter, compileSeccompFilter } from "./lib/seccomp.ts";
 export { resolveImageRootfs } from "./commands/create/image-rootfs.ts";
 
 // Secrets
@@ -185,9 +162,3 @@ export { CloudflareService, resolveTunnelHostnames } from "./services/cloudflare
 export type { CloudflareConfig, TunnelRoute } from "./services/cloudflare.ts";
 export { CloudflareError } from "./errors/cloudflare.ts";
 export { cleanupCloudflareResources } from "./lib/cloudflare-cleanup.ts";
-
-export async function getFirecrackerVersion(dir?: string): Promise<string | undefined> {
-  const { vmsanPaths: paths } = await import("./paths.ts");
-  const { FirecrackerClient: FC } = await import("./services/firecracker.ts");
-  return FC.getVersion(dir || paths().baseDir);
-}
