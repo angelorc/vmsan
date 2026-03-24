@@ -87,6 +87,8 @@ type vmCreateParams struct {
 	JailerBaseDir  string   `json:"jailerBaseDir,omitempty"`
 	OwnerUID       int      `json:"ownerUid,omitempty"`
 	OwnerGID       int      `json:"ownerGid,omitempty"`
+	TimeoutMs      int64    `json:"timeoutMs,omitempty"`
+	TimeoutAt      string   `json:"timeoutAt,omitempty"` // ISO 8601
 }
 
 // vmCreateResponse is the response for vm.create.
@@ -602,6 +604,8 @@ func (s *Server) handleVMCreateImpl(ctx context.Context, params json.RawMessage)
 		}
 	}
 
+	pid := findFirecrackerPID(paths)
+
 	slog.Info("vm created",
 		"vmId", vmId,
 		"slot", slot,
@@ -610,6 +614,62 @@ func (s *Server) handleVMCreateImpl(ctx context.Context, params json.RawMessage)
 		"vcpus", p.VCPUs,
 		"memMib", p.MemMiB,
 	)
+
+	// Write authoritative VM metadata to /run/vmsan/vms/{vmId}.json.
+	meta := &VMMetadata{
+		VMId:       vmId,
+		Slot:       slot,
+		Status:     "running",
+		HostIP:     hostIP,
+		GuestIP:    guestIP,
+		MeshIP:     meshIP,
+		PID:        pid,
+		CreatedAt:  time.Now().UTC().Format(time.RFC3339),
+		AgentToken: agentToken,
+		Runtime:    p.Runtime,
+		VCPUs:      p.VCPUs,
+		MemMiB:     p.MemMiB,
+		DiskSizeGb: p.DiskSizeGb,
+		Project:    p.Project,
+		Service:    p.Service,
+		Network: VMNetworkMeta{
+			Policy:        policy,
+			Domains:       p.Domains,
+			AllowedCIDRs:  p.AllowedCIDRs,
+			DeniedCIDRs:   p.DeniedCIDRs,
+			Ports:         p.Ports,
+			BandwidthMbit: p.BandwidthMbit,
+			AllowICMP:     p.AllowICMP,
+		},
+		ChrootDir:  paths.ChrootDir,
+		SocketPath: paths.SocketPath,
+		TAPDevice:  tapDevice,
+		MACAddress: macAddress,
+		NetNSName:  netnsName,
+		VethHost:   vethHost,
+		VethGuest:  vethGuest,
+		SubnetMask: netsetup.VMSubnetMask,
+		DNSPort:    netsetup.DNSPort(slot),
+		SNIPort:    netsetup.SNIPort(slot),
+		HTTPPort:   netsetup.HTTPPort(slot),
+	}
+	if err := writeVMMetadata(meta); err != nil {
+		slog.Warn("failed to write VM metadata", "vmId", vmId, "error", err)
+	}
+
+	// Start timeout if configured.
+	if p.TimeoutAt != "" {
+		if t, err := time.Parse(time.RFC3339, p.TimeoutAt); err == nil {
+			s.timeoutManager.Set(vmId, t)
+			meta.TimeoutAt = p.TimeoutAt
+			writeVMMetadata(meta)
+		}
+	} else if p.TimeoutMs > 0 {
+		t := time.Now().Add(time.Duration(p.TimeoutMs) * time.Millisecond)
+		s.timeoutManager.Set(vmId, t)
+		meta.TimeoutAt = t.UTC().Format(time.RFC3339)
+		writeVMMetadata(meta)
+	}
 
 	return Response{
 		OK: true,
@@ -627,7 +687,7 @@ func (s *Server) handleVMCreateImpl(ctx context.Context, params json.RawMessage)
 			SubnetMask: netsetup.VMSubnetMask,
 			ChrootDir:  paths.ChrootDir,
 			SocketPath: paths.SocketPath,
-			PID:        findFirecrackerPID(paths),
+			PID:        pid,
 			AgentToken: agentToken,
 			DNSPort:    netsetup.DNSPort(slot),
 			SNIPort:    netsetup.SNIPort(slot),
@@ -724,6 +784,10 @@ func (s *Server) handleVMDeleteImpl(ctx context.Context, params json.RawMessage)
 
 	// 10. Release slot.
 	s.slots.Release(p.VMId)
+
+	// 11. Cancel timeout and remove metadata.
+	s.timeoutManager.Cancel(p.VMId)
+	deleteVMMetadata(p.VMId)
 
 	slog.Info("vm deleted", "vmId", p.VMId, "slot", slot)
 	return Response{OK: true}

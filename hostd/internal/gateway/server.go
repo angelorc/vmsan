@@ -29,13 +29,14 @@ type Config struct {
 
 // Server is the vmsan-gateway Unix socket server.
 type Server struct {
-	config        Config
-	manager       *Manager
-	meshManager   *MeshManager
-	dnsSupervisor *DNSSupervisor
-	slots         *SlotAllocator
-	startTime     time.Time
-	cancelFunc    context.CancelFunc // set by Run(), used by shutdown handler
+	config         Config
+	manager        *Manager
+	meshManager    *MeshManager
+	dnsSupervisor  *DNSSupervisor
+	slots          *SlotAllocator
+	timeoutManager *TimeoutManager
+	startTime      time.Time
+	cancelFunc     context.CancelFunc // set by Run(), used by shutdown handler
 }
 
 // Request is the JSON-RPC request envelope.
@@ -93,13 +94,15 @@ func NewServer(cfg Config, meshManager *MeshManager, slots *SlotAllocator) (*Ser
 		return nil, errors.New("PID file path is required")
 	}
 	dnsSup := NewDNSSupervisor(slog.Default())
-	return &Server{
+	s := &Server{
 		config:        cfg,
 		manager:       NewManager(dnsSup),
 		meshManager:   meshManager,
 		dnsSupervisor: dnsSup,
 		slots:         slots,
-	}, nil
+	}
+	s.timeoutManager = NewTimeoutManager(s.onVMTimeout)
+	return s, nil
 }
 
 // Run starts the server and blocks until the context is cancelled.
@@ -237,6 +240,22 @@ func (s *Server) dispatch(ctx context.Context, req *Request) Response {
 		return s.handleNetworkSetup(ctx, req.Params)
 	case "network.teardown":
 		return s.handleNetworkTeardown(ctx, req.Params)
+	case "vm.get":
+		return s.handleVMGet(req.Params)
+	case "vm.extendTimeout":
+		return s.handleExtendTimeout(req.Params)
+	case "doctor":
+		return s.handleDoctor()
+	case "rootfs.download":
+		return s.handleRootfsDownload(ctx, req.Params)
+	case "cloudflare.setup":
+		return s.handleCloudflareSetup(req.Params)
+	case "cloudflare.addRoute":
+		return s.handleCloudflareAddRoute(req.Params)
+	case "cloudflare.removeRoute":
+		return s.handleCloudflareRemoveRoute(req.Params)
+	case "cloudflare.status":
+		return s.handleCloudflareStatus()
 	case "health":
 		return s.handleHealth()
 	case "shutdown":
@@ -346,11 +365,99 @@ func (s *Server) handleVMUpdatePolicy(params json.RawMessage) Response {
 }
 
 func (s *Server) handleStatus() Response {
-	vms := s.manager.ListVMs()
-	return Response{OK: true, VMs: len(vms), List: vms}
+	metas, err := listVMMetadata()
+	if err != nil {
+		// Fall back to manager state if metadata is unavailable.
+		vms := s.manager.ListVMs()
+		return Response{OK: true, VMs: len(vms), List: vms}
+	}
+	return Response{OK: true, VMs: len(metas), List: metas}
+}
+
+// handleVMGet returns the full metadata for a single VM.
+func (s *Server) handleVMGet(params json.RawMessage) Response {
+	var p struct {
+		VMId string `json:"vmId"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return Response{OK: false, Error: "invalid params", Code: "PARSE_ERROR"}
+	}
+	if p.VMId == "" {
+		return Response{OK: false, Error: "vmId is required", Code: "VALIDATION_ERROR"}
+	}
+	meta, err := readVMMetadata(p.VMId)
+	if err != nil {
+		return Response{OK: false, Error: "VM not found: " + p.VMId, Code: "NOT_FOUND"}
+	}
+	return Response{OK: true, VM: meta}
+}
+
+// extendTimeoutParams holds the parameters for vm.extendTimeout.
+type extendTimeoutParams struct {
+	VMId      string `json:"vmId"`
+	TimeoutAt string `json:"timeoutAt"` // ISO 8601
+}
+
+// handleExtendTimeout updates the timeout for a running VM.
+func (s *Server) handleExtendTimeout(params json.RawMessage) Response {
+	var p extendTimeoutParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return Response{OK: false, Error: "invalid params: " + err.Error(), Code: "PARSE_ERROR"}
+	}
+	if p.VMId == "" {
+		return Response{OK: false, Error: "vmId is required", Code: "VALIDATION_ERROR"}
+	}
+	if p.TimeoutAt == "" {
+		return Response{OK: false, Error: "timeoutAt is required", Code: "VALIDATION_ERROR"}
+	}
+
+	timeoutAt, err := time.Parse(time.RFC3339, p.TimeoutAt)
+	if err != nil {
+		return Response{OK: false, Error: "invalid timeoutAt format (expected RFC3339): " + err.Error(), Code: "VALIDATION_ERROR"}
+	}
+
+	if err := s.timeoutManager.Extend(p.VMId, timeoutAt); err != nil {
+		return Response{OK: false, Error: err.Error(), Code: "TIMEOUT_ERROR"}
+	}
+
+	// Update metadata.
+	if err := updateVMMetadataFields(p.VMId, func(m *VMMetadata) {
+		m.TimeoutAt = p.TimeoutAt
+	}); err != nil {
+		slog.Warn("failed to update timeout metadata", "vmId", p.VMId, "error", err)
+	}
+
+	return Response{OK: true}
+}
+
+// onVMTimeout is called when a VM's timeout expires.
+func (s *Server) onVMTimeout(vmId string) {
+	slog.Info("VM timeout expired, stopping", "vmId", vmId)
+	meta, err := readVMMetadata(vmId)
+	if err != nil {
+		slog.Error("timeout: failed to read metadata", "vmId", vmId, "error", err)
+		return
+	}
+	params := vmFullStopParams{
+		VMId:       vmId,
+		Slot:       meta.Slot,
+		PID:        meta.PID,
+		NetNSName:  meta.NetNSName,
+		SocketPath: meta.SocketPath,
+	}
+	raw, _ := json.Marshal(params)
+	resp := s.handleVMFullStop(context.Background(), raw)
+	if !resp.OK {
+		slog.Error("timeout: fullStop failed", "vmId", vmId, "error", resp.Error)
+	}
+	updateVMMetadataFields(vmId, func(m *VMMetadata) {
+		m.Status = "stopped"
+		m.PID = 0
+	})
 }
 
 func (s *Server) handleShutdown(_ context.Context) Response {
+	s.timeoutManager.CancelAll()
 	s.manager.StopAll()
 	if s.cancelFunc != nil {
 		s.cancelFunc()

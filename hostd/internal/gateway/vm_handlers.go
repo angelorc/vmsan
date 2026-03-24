@@ -217,6 +217,47 @@ func (s *Server) handleVMRestart(ctx context.Context, params json.RawMessage) Re
 		"guestIp", netCfg.GuestIP,
 	)
 
+	// Write authoritative VM metadata.
+	policy := effectivePolicy(p.NetworkPolicy, p.Domains, p.AllowedCIDRs, p.DeniedCIDRs)
+	meta := &VMMetadata{
+		VMId:       p.VMId,
+		Slot:       p.Slot,
+		Status:     "running",
+		HostIP:     netCfg.HostIP,
+		GuestIP:    netCfg.GuestIP,
+		PID:        spawnRes.PID,
+		CreatedAt:  time.Now().UTC().Format(time.RFC3339),
+		AgentToken: spawnRes.AgentToken,
+		Runtime:    defaultRuntime,
+		VCPUs:      p.VCPUs,
+		MemMiB:     p.MemMiB,
+		Project:    p.Project,
+		Service:    p.Service,
+		Network: VMNetworkMeta{
+			Policy:        policy,
+			Domains:       p.Domains,
+			AllowedCIDRs:  p.AllowedCIDRs,
+			DeniedCIDRs:   p.DeniedCIDRs,
+			Ports:         p.Ports,
+			BandwidthMbit: p.BandwidthMbit,
+			AllowICMP:     p.AllowICMP,
+		},
+		ChrootDir:  spawnRes.Paths.ChrootDir,
+		SocketPath: spawnRes.Paths.SocketPath,
+		TAPDevice:  netCfg.TAPDevice,
+		MACAddress: netCfg.MACAddress,
+		NetNSName:  netCfg.NetNSName,
+		VethHost:   netCfg.VethHost,
+		VethGuest:  netCfg.VethGuest,
+		SubnetMask: netsetup.VMSubnetMask,
+		DNSPort:    netsetup.DNSPort(p.Slot),
+		SNIPort:    netsetup.SNIPort(p.Slot),
+		HTTPPort:   netsetup.HTTPPort(p.Slot),
+	}
+	if err := writeVMMetadata(meta); err != nil {
+		slog.Warn("failed to write VM metadata on restart", "vmId", p.VMId, "error", err)
+	}
+
 	return Response{
 		OK: true,
 		VM: vmCreateResponse{
@@ -346,6 +387,15 @@ func (s *Server) handleVMFullStop(ctx context.Context, params json.RawMessage) R
 		}
 	}
 
+	// 5. Cancel timeout and update metadata.
+	s.timeoutManager.Cancel(p.VMId)
+	if err := updateVMMetadataFields(p.VMId, func(m *VMMetadata) {
+		m.Status = "stopped"
+		m.PID = 0
+	}); err != nil {
+		slog.Debug("metadata update failed", "vmId", p.VMId, "error", err)
+	}
+
 	slog.Info("vm stopped (full)", "vmId", p.VMId, "slot", slot)
 	return Response{OK: true}
 }
@@ -421,6 +471,18 @@ func (s *Server) handleVMFullUpdatePolicy(ctx context.Context, params json.RawMe
 		if err := netsetup.SetupFirewall(ctx, netCfg, fwCfg); err != nil {
 			return Response{OK: false, Error: fmt.Sprintf("setup firewall with new policy: %s", err), Code: "FIREWALL_ERROR"}
 		}
+	}
+
+	// Update metadata with new policy.
+	if err := updateVMMetadataFields(p.VMId, func(m *VMMetadata) {
+		m.Network.Policy = p.Policy
+		m.Network.Domains = p.Domains
+		m.Network.AllowedCIDRs = p.AllowedCIDRs
+		m.Network.DeniedCIDRs = p.DeniedCIDRs
+		m.Network.Ports = p.Ports
+		m.Network.AllowICMP = p.AllowICMP
+	}); err != nil {
+		slog.Debug("metadata update for policy failed", "vmId", p.VMId, "error", err)
 	}
 
 	slog.Info("vm policy updated (full)", "vmId", p.VMId, "policy", p.Policy)
