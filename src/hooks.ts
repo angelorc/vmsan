@@ -1,6 +1,41 @@
 import type { VmState } from "./lib/vm-state.ts";
-import type { CreateVmOptions } from "./services/vm.ts";
-import type { NetworkPolicy } from "./commands/create/types.ts";
+
+export type NetworkPolicy = "allow-all" | "deny-all" | "custom";
+export type Runtime = "base" | "node22" | "node24" | "python3.13";
+
+export interface ImageReference {
+  full: string;
+  name: string;
+  tag: string;
+  cacheKey: string;
+}
+
+export interface CreateVmOptions {
+  vcpus?: number;
+  memMib?: number;
+  diskSizeGb?: number;
+  kernelPath?: string;
+  rootfsPath?: string;
+  fromImage?: ImageReference;
+  project?: string;
+  runtime?: Runtime;
+  networkPolicy?: NetworkPolicy;
+  domains?: string[];
+  allowedCidrs?: string[];
+  deniedCidrs?: string[];
+  ports?: number[];
+  bandwidthMbit?: number;
+  allowIcmp?: boolean;
+  disableNetns?: boolean;
+  disableSeccomp?: boolean;
+  disablePidNs?: boolean;
+  disableCgroup?: boolean;
+  timeoutMs?: number;
+  snapshotId?: string;
+  skipDnat?: boolean;
+  connectTo?: string[];
+  service?: string;
+}
 
 export type VmPhase = "create" | "start" | "stop" | "remove";
 

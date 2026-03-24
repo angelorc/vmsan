@@ -59,8 +59,6 @@ export {
   kvmUnavailableError,
 } from "./setup.ts";
 
-export { handleCommandError } from "./display.ts";
-
 export { CloudflareError } from "./cloudflare.ts";
 export {
   cloudflareNotConfiguredError,

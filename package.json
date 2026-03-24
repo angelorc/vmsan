@@ -9,9 +9,6 @@
     "type": "git",
     "url": "https://github.com/angelorc/vmsan.git"
   },
-  "bin": {
-    "vmsan": "./dist/bin/cli.mjs"
-  },
   "files": [
     "dist"
   ],
@@ -41,14 +38,11 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.8.0",
-    "citty": "^0.2.1",
     "cloudflare": "^5.2.0",
     "consola": "^3.4.2",
     "evlog": "^2.1.0",
     "hookable": "^6.0.1",
     "p-retry": "^7.1.1",
-    "proper-lockfile": "^4.1.2",
-    "smol-toml": "^1.6.0",
     "tar-stream": "^3.1.8",
     "ws": "^8.19.0"
   },
@@ -57,7 +51,6 @@
     "@changesets/cli": "^2.30.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.3.3",
-    "@types/proper-lockfile": "^4.1.4",
     "@types/tar-stream": "^3.1.4",
     "@types/ws": "^8.18.1",
     "automd": "^0.4.3",

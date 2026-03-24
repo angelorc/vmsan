@@ -5,7 +5,6 @@ import { createStateStore } from "./lib/state/index.ts";
 import type { VmsanHooks } from "./hooks.ts";
 import type { VmsanPlugin } from "./plugin.ts";
 import { createDefaultLogger, type VmsanLogger } from "./vmsan-logger.ts";
-import { VMService } from "./services/vm.ts";
 import { cloudflarePlugin } from "./plugins/cloudflare.ts";
 
 export interface VmsanOptions {
@@ -41,9 +40,8 @@ export function createVmsanContext(options?: VmsanOptions): VmsanContext {
   return buildContext(options);
 }
 
-export async function createVmsan(options?: VmsanOptions): Promise<VMService> {
+export async function createVmsan(options?: VmsanOptions): Promise<VmsanContext> {
   const ctx = buildContext(options);
-  const vmsan = new VMService(ctx);
 
   const builtinPlugins: VmsanPlugin[] = [cloudflarePlugin(ctx.paths.baseDir)];
   const allPlugins = [...builtinPlugins, ...(options?.plugins ?? [])];
@@ -51,5 +49,5 @@ export async function createVmsan(options?: VmsanOptions): Promise<VMService> {
     await plugin.setup(ctx);
   }
 
-  return vmsan;
+  return ctx;
 }
