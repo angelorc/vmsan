@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach } from "vitest";
-import { accessSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { validateEnvironment } from "../../src/commands/create/environment.ts";
 
 vi.mock("node:fs", async (importOriginal) => {
@@ -7,31 +7,25 @@ vi.mock("node:fs", async (importOriginal) => {
   return {
     ...actual,
     existsSync: vi.fn(),
-    accessSync: vi.fn(),
   };
 });
 
-describe("validateEnvironment KVM check", () => {
+describe("validateEnvironment", () => {
   beforeEach(() => {
     vi.mocked(existsSync).mockReset();
-    vi.mocked(accessSync).mockReset();
   });
 
-  test("throws ERR_SETUP_KVM_UNAVAILABLE on missing KVM", () => {
+  test("does not check KVM directly — gateway handles KVM validation", () => {
     // Firecracker and Jailer binaries exist
     vi.mocked(existsSync).mockReturnValue(true);
 
-    // /dev/kvm is not accessible
-    vi.mocked(accessSync).mockImplementation(() => {
-      throw new Error("EACCES: permission denied, access '/dev/kvm'");
-    });
+    // Should not throw — KVM access is now checked by the gateway doctor RPC
+    expect(() => validateEnvironment("/fake/base")).not.toThrow();
+  });
 
-    try {
-      validateEnvironment("/fake/base");
-      expect.unreachable("should have thrown");
-    } catch (err: unknown) {
-      const error = err as { code: string };
-      expect(error.code).toBe("ERR_SETUP_KVM_UNAVAILABLE");
-    }
+  test("throws when firecracker binary is missing", () => {
+    vi.mocked(existsSync).mockReturnValue(false);
+
+    expect(() => validateEnvironment("/fake/base")).toThrow();
   });
 });
