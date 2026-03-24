@@ -1,483 +1,40 @@
 import type { CommandDef } from "citty";
 import { defineCommand } from "citty";
-import { accessSync, constants, existsSync, readFileSync, readdirSync, statfsSync } from "node:fs";
-import { execSync } from "node:child_process";
-import { basename, join } from "node:path";
 import { consola } from "consola";
 import { createCommandLogger, getOutputMode } from "../lib/logger/index.ts";
 import { handleCommandError } from "../errors/index.ts";
-import type { VmsanPaths } from "../paths.ts";
-import { vmsanPaths } from "../paths.ts";
+import { GatewayClient, type GatewayDoctorCheck } from "../lib/gateway-client.ts";
 
 interface CheckResult {
   category: string;
   name: string;
-  status: "pass" | "fail";
+  status: "pass" | "fail" | "warn";
   detail: string;
   fix?: string;
 }
 
-function checkKvm(): CheckResult {
-  try {
-    accessSync("/dev/kvm", constants.R_OK | constants.W_OK);
-    return { category: "System", name: "KVM", status: "pass", detail: "/dev/kvm" };
-  } catch {
-    return {
-      category: "System",
-      name: "KVM",
-      status: "fail",
-      detail: "KVM not available",
-      fix: "Enable KVM in BIOS or load the kvm module: sudo modprobe kvm",
-    };
-  }
-}
-
-function checkDiskSpace(baseDir: string): CheckResult {
-  try {
-    const stats = statfsSync(baseDir);
-    const freeBytes = stats.bfree * stats.bsize;
-    const freeGB = Math.floor(freeBytes / 1_073_741_824);
-    if (freeGB >= 5) {
-      return {
-        category: "System",
-        name: "Disk space",
-        status: "pass",
-        detail: `${freeGB} GB free`,
-      };
-    }
-    return {
-      category: "System",
-      name: "Disk space",
-      status: "fail",
-      detail: `Low disk space (${freeGB} GB free)`,
-      fix: "Free up disk space. vmsan needs at least 5 GB.",
-    };
-  } catch {
-    return {
-      category: "System",
-      name: "Disk space",
-      status: "fail",
-      detail: "Could not check disk space",
-      fix: `Ensure ${baseDir} exists and is accessible.`,
-    };
-  }
-}
-
-function checkDefaultInterface(): CheckResult {
-  try {
-    const output = execSync("ip route show default", { encoding: "utf-8", stdio: "pipe" }).trim();
-    const match = output.match(/dev\s+(\S+)/);
-    if (match) {
-      return { category: "System", name: "Default interface", status: "pass", detail: match[1] };
-    }
-    return {
-      category: "System",
-      name: "Default interface",
-      status: "fail",
-      detail: "No default route",
-      fix: "Configure a default network route.",
-    };
-  } catch {
-    return {
-      category: "System",
-      name: "Default interface",
-      status: "fail",
-      detail: "No default route",
-      fix: "Configure a default network route.",
-    };
-  }
-}
-
-function checkTunDevice(): CheckResult {
-  try {
-    accessSync("/dev/net/tun", constants.R_OK | constants.W_OK);
-    return { category: "System", name: "TUN device", status: "pass", detail: "/dev/net/tun" };
-  } catch {
-    return {
-      category: "System",
-      name: "TUN device",
-      status: "fail",
-      detail: "/dev/net/tun not accessible",
-      fix: "Load the tun kernel module: sudo modprobe tun",
-    };
-  }
-}
-
-function checkJailerFilesystem(jailerBaseDir: string): CheckResult {
-  try {
-    const mounts = readFileSync("/proc/mounts", "utf-8");
-    let bestMatch = "";
-    let bestOptions = "";
-    for (const line of mounts.split("\n")) {
-      const parts = line.split(" ");
-      if (parts.length < 4) continue;
-      const mountpoint = parts[1];
-      const isAncestor =
-        jailerBaseDir === mountpoint ||
-        jailerBaseDir.startsWith(mountpoint.endsWith("/") ? mountpoint : `${mountpoint}/`);
-      if (isAncestor && mountpoint.length > bestMatch.length) {
-        bestMatch = mountpoint;
-        bestOptions = parts[3];
-      }
-    }
-    if (!bestMatch) {
-      return {
-        category: "System",
-        name: "Jailer filesystem",
-        status: "pass",
-        detail: "Check skipped",
-      };
-    }
-    const options = bestOptions.split(",");
-    if (options.includes("nodev")) {
-      return {
-        category: "System",
-        name: "Jailer filesystem",
-        status: "fail",
-        detail: `${bestMatch} mounted with nodev`,
-        fix: `The jailer needs device nodes to work. Remount without nodev: sudo mount -o remount,dev ${bestMatch}`,
-      };
-    }
-    return { category: "System", name: "Jailer filesystem", status: "pass", detail: bestMatch };
-  } catch {
-    return {
-      category: "System",
-      name: "Jailer filesystem",
-      status: "pass",
-      detail: "Check skipped",
-    };
-  }
-}
-
-function checkFirecracker(binDir: string): CheckResult {
-  const fcPath = join(binDir, "firecracker");
-  if (!existsSync(fcPath)) {
-    return {
-      category: "Binaries",
-      name: "Firecracker",
-      status: "fail",
-      detail: "Not found",
-      fix: 'Run "curl -fsSL https://vmsan.dev/install | bash" to install.',
-    };
-  }
-  try {
-    const version = execSync(`"${fcPath}" --version`, { encoding: "utf-8", stdio: "pipe" }).trim();
-    return { category: "Binaries", name: "Firecracker", status: "pass", detail: version };
-  } catch {
-    return { category: "Binaries", name: "Firecracker", status: "pass", detail: "Found" };
-  }
-}
-
-function checkJailer(binDir: string): CheckResult {
-  const jailerPath = join(binDir, "jailer");
-  if (!existsSync(jailerPath)) {
-    return {
-      category: "Binaries",
-      name: "Jailer",
-      status: "fail",
-      detail: "Not found",
-      fix: 'Run "curl -fsSL https://vmsan.dev/install | bash" to install.',
-    };
-  }
-  return { category: "Binaries", name: "Jailer", status: "pass", detail: "Found" };
-}
-
-function checkAgent(agentBin: string): CheckResult {
-  if (!existsSync(agentBin)) {
-    return {
-      category: "Binaries",
-      name: "Agent",
-      status: "fail",
-      detail: "Not found",
-      fix: 'Run "curl -fsSL https://vmsan.dev/install | bash" to install.',
-    };
-  }
-  return { category: "Binaries", name: "Agent", status: "pass", detail: "Found" };
-}
-
-function checkNftablesBinary(nftablesBin: string): CheckResult {
-  if (!existsSync(nftablesBin)) {
-    return {
-      category: "Binaries",
-      name: "vmsan-nftables",
-      status: "fail",
-      detail: "Not found",
-      fix: 'Run "curl -fsSL https://vmsan.dev/install | bash" to install.',
-    };
-  }
-  return { category: "Binaries", name: "vmsan-nftables", status: "pass", detail: "Found" };
-}
-
-function hasLoadedKernelModule(name: string): boolean {
-  if (existsSync(`/sys/module/${name}`)) {
-    return true;
-  }
-
-  try {
-    const modules = readFileSync("/proc/modules", "utf-8");
-    return modules.split("\n").some((line) => line.startsWith(`${name} `));
-  } catch {
-    return false;
-  }
-}
-
-function commandErrorText(error: unknown): string {
-  const parts: string[] = [];
-
-  if (error instanceof Error && error.message) {
-    parts.push(error.message);
-  }
-
-  if (typeof error === "object" && error !== null) {
-    const stdout = "stdout" in error ? (error as { stdout?: unknown }).stdout : undefined;
-    const stderr = "stderr" in error ? (error as { stderr?: unknown }).stderr : undefined;
-
-    for (const stream of [stdout, stderr]) {
-      if (typeof stream === "string" && stream.trim()) {
-        parts.push(stream);
-      } else if (stream && typeof stream === "object" && "toString" in stream) {
-        const text = String(stream).trim();
-        if (text) parts.push(text);
-      }
-    }
-  }
-
-  return parts.join("\n");
-}
-
-function isPermissionDeniedErrorText(text: string): boolean {
-  const lower = text.toLowerCase();
-  return (
-    lower.includes("permission denied") ||
-    lower.includes("operation not permitted") ||
-    lower.includes("eperm") ||
-    text.includes("PERMISSION_DENIED")
-  );
-}
-
-function checkNftablesKernel(nftablesBin: string): CheckResult {
-  try {
-    // Use vmsan-nftables verify (netlink-based) instead of the nft CLI.
-    // vmsan-nftables uses netlink directly and doesn't require the nft package.
-    execSync(`"${nftablesBin}" verify`, {
-      input: '{"vmId":"_doctor_probe"}',
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    return {
-      category: "System",
-      name: "nftables kernel",
-      status: "pass",
-      detail: "nftables kernel support verified",
-    };
-  } catch (error) {
-    const errorText = commandErrorText(error);
-    if (isPermissionDeniedErrorText(errorText) && hasLoadedKernelModule("nf_tables")) {
-      return {
-        category: "System",
-        name: "nftables kernel",
-        status: "pass",
-        detail: "nf_tables module loaded (unprivileged netlink probe returned EPERM)",
-      };
-    }
-
-    return {
-      category: "System",
-      name: "nftables kernel",
-      status: "fail",
-      detail: "nftables kernel support not available",
-      fix: "Load the nftables kernel module: sudo modprobe nf_tables",
-    };
-  }
-}
-
-function checkHostFirewall(): CheckResult {
-  const active: string[] = [];
-  try {
-    const ufwOutput = execSync("ufw status", { encoding: "utf-8", stdio: "pipe" }).trim();
-    if (ufwOutput.includes("Status: active")) {
-      active.push("ufw");
-    }
-  } catch {
-    // ufw not installed or not accessible
-  }
-  try {
-    execSync("systemctl is-active firewalld", { encoding: "utf-8", stdio: "pipe" });
-    active.push("firewalld");
-  } catch {
-    // firewalld not active or not installed
-  }
-
-  if (active.length > 0) {
-    return {
-      category: "System",
-      name: "Host firewall",
-      status: "fail",
-      detail: `${active.join(", ")} active`,
-      fix: `Disable ${active.join(" and ")} or add rules to allow vmsan traffic. Host firewalls can conflict with vmsan's nftables rules.`,
-    };
-  }
-  return { category: "System", name: "Host firewall", status: "pass", detail: "No conflicts" };
-}
-
-function checkKernel(kernelsDir: string): CheckResult {
-  try {
-    if (!existsSync(kernelsDir)) {
-      return {
-        category: "Images",
-        name: "Kernel",
-        status: "fail",
-        detail: "Not found",
-        fix: 'Run "curl -fsSL https://vmsan.dev/install | bash" to install.',
-      };
-    }
-    const files = readdirSync(kernelsDir).filter((f) => f.startsWith("vmlinux"));
-    if (files.length === 0) {
-      return {
-        category: "Images",
-        name: "Kernel",
-        status: "fail",
-        detail: "Not found",
-        fix: 'Run "curl -fsSL https://vmsan.dev/install | bash" to install.',
-      };
-    }
-    const latest = files.sort().at(-1)!;
-    return { category: "Images", name: "Kernel", status: "pass", detail: latest };
-  } catch {
-    return {
-      category: "Images",
-      name: "Kernel",
-      status: "fail",
-      detail: "Not found",
-      fix: 'Run "curl -fsSL https://vmsan.dev/install | bash" to install.',
-    };
-  }
-}
-
-function checkRootfs(rootfsDir: string): CheckResult {
-  const rootfsPath = join(rootfsDir, "ubuntu-24.04.ext4");
-  if (existsSync(rootfsPath)) {
-    return {
-      category: "Images",
-      name: "Rootfs (base)",
-      status: "pass",
-      detail: basename(rootfsPath),
-    };
-  }
+function mapGatewayCheck(check: GatewayDoctorCheck): CheckResult {
   return {
-    category: "Images",
-    name: "Rootfs (base)",
-    status: "fail",
-    detail: "Not found",
-    fix: 'Run "curl -fsSL https://vmsan.dev/install | bash" to install.',
+    category: check.category,
+    name: check.name,
+    status: check.status,
+    detail: check.detail,
+    fix: check.fix,
   };
 }
 
-function checkGatewayBinary(gatewayBin: string): CheckResult {
-  if (!existsSync(gatewayBin)) {
-    return {
-      category: "Binaries",
-      name: "vmsan-gateway",
-      status: "fail",
-      detail: "Not found",
-      fix: 'Run "curl -fsSL https://vmsan.dev/install | bash" to install.',
-    };
+export async function runDoctorChecks(): Promise<CheckResult[]> {
+  const gateway = new GatewayClient();
+  const result = await gateway.doctor();
+  if (!result.ok) {
+    throw new Error(result.error ?? "Gateway doctor RPC failed");
   }
-  return { category: "Binaries", name: "vmsan-gateway", status: "pass", detail: "Found" };
-}
-
-function checkDnsproxyBinary(dnsproxyBin: string): CheckResult {
-  if (!existsSync(dnsproxyBin)) {
-    return {
-      category: "Binaries",
-      name: "dnsproxy",
-      status: "fail",
-      detail: "Not found",
-      fix: 'Run "curl -fsSL https://vmsan.dev/install | bash" to install.',
-    };
-  }
-  return { category: "Binaries", name: "dnsproxy", status: "pass", detail: "Found" };
-}
-
-function checkGatewayDaemon(): CheckResult {
-  // Check both new and old PID file paths
-  const pidFiles = ["/run/vmsan/gateway.pid", "/run/vmsan-gateway.pid"];
-  let pid: string | null = null;
-
-  for (const pidFile of pidFiles) {
-    if (existsSync(pidFile)) {
-      try {
-        pid = readFileSync(pidFile, "utf-8").trim();
-        break;
-      } catch {
-        // try next
-      }
-    }
-  }
-
-  if (!pid) {
-    // Check socket existence as fallback
-    const socketPath = "/run/vmsan/gateway.sock";
-    if (existsSync(socketPath)) {
-      return {
-        category: "Services",
-        name: "Gateway daemon",
-        status: "pass",
-        detail: "Socket exists (daemon likely running)",
-      };
-    }
-    return {
-      category: "Services",
-      name: "Gateway daemon",
-      status: "warn",
-      detail: "Not running",
-      fix: "Start with: sudo systemctl start vmsan-gateway",
-    };
-  }
-
-  const procPath = `/proc/${pid}`;
-  if (existsSync(procPath)) {
-    return {
-      category: "Services",
-      name: "Gateway daemon",
-      status: "pass",
-      detail: `Running (PID ${pid})`,
-    };
-  }
-
-  return {
-    category: "Services",
-    name: "Gateway daemon",
-    status: "fail",
-    detail: `Stale PID file (PID ${pid} not running)`,
-    fix: "Restart with: sudo systemctl restart vmsan-gateway",
-  };
-}
-
-export function runDoctorChecks(paths?: VmsanPaths): CheckResult[] {
-  const p = paths ?? vmsanPaths();
-  return [
-    checkKvm(),
-    checkTunDevice(),
-    checkDiskSpace(p.baseDir),
-    checkDefaultInterface(),
-    checkNftablesKernel(p.nftablesBin),
-    checkHostFirewall(),
-    checkJailerFilesystem(p.jailerBaseDir),
-    checkFirecracker(p.binDir),
-    checkJailer(p.binDir),
-    checkAgent(p.agentBin),
-    checkNftablesBinary(p.nftablesBin),
-    checkGatewayBinary(p.gatewayBin),
-    checkDnsproxyBinary(p.dnsproxyBin),
-    checkGatewayDaemon(),
-    checkKernel(p.kernelsDir),
-    checkRootfs(p.rootfsDir),
-  ];
+  return (result.list ?? []).map(mapGatewayCheck);
 }
 
 const PASS = "\x1b[32mok\x1b[0m";
 const FAIL = "\x1b[31mFAIL\x1b[0m";
+const WARN = "\x1b[33mWARN\x1b[0m";
 
 function formatHumanOutput(checks: CheckResult[]): string {
   const lines: string[] = [];
@@ -491,19 +48,20 @@ function formatHumanOutput(checks: CheckResult[]): string {
     }
 
     const dots = ".".repeat(Math.max(1, 30 - check.name.length));
-    const statusStr = check.status === "pass" ? PASS : FAIL;
+    const statusStr = check.status === "pass" ? PASS : check.status === "warn" ? WARN : FAIL;
     const detail = check.detail;
     lines.push(`    ${check.name} ${dots} ${statusStr} (${detail})`);
 
-    if (check.status === "fail" && check.fix) {
+    if (check.status !== "pass" && check.fix) {
       lines.push(`      \x1b[33mFix: ${check.fix}\x1b[0m`);
     }
   }
 
   const passed = checks.filter((c) => c.status === "pass").length;
   const failed = checks.filter((c) => c.status === "fail").length;
+  const warned = checks.filter((c) => c.status === "warn").length;
   lines.push("");
-  lines.push(`  Result: ${passed} passed, ${failed} failed`);
+  lines.push(`  Result: ${passed} passed, ${failed} failed${warned > 0 ? `, ${warned} warnings` : ""}`);
 
   return lines.join("\n");
 }
@@ -517,7 +75,7 @@ const doctorCommand = defineCommand({
     const cmdLog = createCommandLogger("doctor");
 
     try {
-      const checks = runDoctorChecks();
+      const checks = await runDoctorChecks();
       const passed = checks.filter((c) => c.status === "pass").length;
       const failed = checks.filter((c) => c.status === "fail").length;
 

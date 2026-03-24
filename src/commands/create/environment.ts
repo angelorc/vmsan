@@ -1,4 +1,4 @@
-import { accessSync, constants, existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { VmsanPaths } from "../../paths.ts";
 import type { Runtime } from "./types.ts";
@@ -9,7 +9,6 @@ import {
   noRootfsDirError,
   noExt4RootfsError,
   snapshotNotFoundError,
-  kvmUnavailableError,
 } from "../../errors/index.ts";
 import { SetupError } from "../../errors/index.ts";
 
@@ -24,11 +23,8 @@ export function validateEnvironment(baseDir: string): void {
     throw missingBinaryError("Jailer", jailerPath);
   }
 
-  try {
-    accessSync("/dev/kvm", constants.R_OK | constants.W_OK);
-  } catch {
-    throw kvmUnavailableError();
-  }
+  // KVM access is checked by the gateway's doctor RPC.
+  // The gateway runs as root and will fail with a clear error if KVM isn't available.
 }
 
 export function findKernel(baseDir: string): string {

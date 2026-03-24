@@ -29,7 +29,7 @@ async function setupTunnelRoutes(
   cloudflare.addRoutes(routes);
   await Promise.all(hostnames.map((h) => cloudflare.addDns(h, tunnelId)));
   await cloudflare.pushConfig();
-  cloudflare.ensureRunning();
+  await cloudflare.ensureRunning();
   return { hostnames, primaryHostname: hostnames[0] };
 }
 

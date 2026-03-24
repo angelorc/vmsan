@@ -1,13 +1,11 @@
 import { randomBytes } from "node:crypto";
-import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { spawn } from "node:child_process";
 import Cloudflare from "cloudflare";
 import { consola } from "consola";
 import pRetry, { AbortError } from "p-retry";
-import { mkdirSecure, sleepSync, toError, writeSecure } from "../lib/utils.ts";
-import { FileLock } from "../lib/file-lock.ts";
-import { PidFile } from "../lib/pid-file.ts";
+import { mkdirSecure, toError, writeSecure } from "../lib/utils.ts";
+import { GatewayClient } from "../lib/gateway-client.ts";
 import {
   cloudflareNotConfiguredError,
   cloudflareTunnelNoIdError,
@@ -38,8 +36,7 @@ export class CloudflareService {
   private readonly routesPath: string;
   private readonly logPath: string;
   private readonly cloudflaredBin: string;
-  private readonly lock: FileLock;
-  private readonly pidFile: PidFile;
+  private readonly gateway: GatewayClient;
 
   constructor(baseDir: string) {
     this.cfDir = join(baseDir, "cloudflare");
@@ -47,8 +44,7 @@ export class CloudflareService {
     this.routesPath = join(this.cfDir, "routes.json");
     this.logPath = join(this.cfDir, "cloudflared.log");
     this.cloudflaredBin = join(baseDir, "bin", "cloudflared");
-    this.lock = new FileLock(join(this.cfDir, "lock"), "Cloudflare");
-    this.pidFile = new PidFile(join(this.cfDir, "cloudflared.pid"));
+    this.gateway = new GatewayClient();
   }
 
   private getClient(token: string): Cloudflare {
@@ -82,8 +78,13 @@ export class CloudflareService {
     return existsSync(this.cloudflaredBin);
   }
 
-  isRunning(): boolean {
-    return this.pidFile.read() !== null;
+  async isRunning(): Promise<boolean> {
+    try {
+      const result = await this.gateway.cfStatus();
+      return result.ok && result.vm?.running === true;
+    } catch {
+      return false;
+    }
   }
 
   getHostnames(vmId: string): string[] {
@@ -93,70 +94,68 @@ export class CloudflareService {
   }
 
   async createTunnel(): Promise<{ tunnelId: string }> {
-    return this.lock.runAsync(async () => {
-      const config = this.load();
-      if (!config) throw cloudflareNotConfiguredError();
+    const config = this.load();
+    if (!config) throw cloudflareNotConfiguredError();
 
-      const previousTunnelId = config.tunnelId;
+    const previousTunnelId = config.tunnelId;
 
-      if (config.tunnelId && config.tunnelToken) {
-        return { tunnelId: config.tunnelId };
-      }
+    if (config.tunnelId && config.tunnelToken) {
+      return { tunnelId: config.tunnelId };
+    }
 
-      const client = this.getClient(config.token);
-      const accountId = config.accountId || (await this.resolveAccountId(client, config.domain));
-      const tunnelSecret = randomBytes(32).toString("base64");
-      const tunnelName =
-        config.tunnelId && !config.tunnelToken ? `vmsan-${Date.now().toString(36)}` : "vmsan";
+    const client = this.getClient(config.token);
+    const accountId = config.accountId || (await this.resolveAccountId(client, config.domain));
+    const tunnelSecret = randomBytes(32).toString("base64");
+    const tunnelName =
+      config.tunnelId && !config.tunnelToken ? `vmsan-${Date.now().toString(36)}` : "vmsan";
 
-      let tunnel: { id?: string; token?: string };
-      try {
+    let tunnel: { id?: string; token?: string };
+    try {
+      tunnel = await client.zeroTrust.tunnels.cloudflared.create({
+        account_id: accountId,
+        name: tunnelName,
+        tunnel_secret: tunnelSecret,
+        config_src: "cloudflare",
+      });
+    } catch (err) {
+      const errMsg = toError(err).message;
+      if (errMsg.includes("409") || errMsg.toLowerCase().includes("conflict")) {
+        consola.debug(`Tunnel name "${tunnelName}" already exists, cleaning up stale tunnel...`);
+        await this.deleteExistingTunnel(client, accountId, tunnelName);
         tunnel = await client.zeroTrust.tunnels.cloudflared.create({
           account_id: accountId,
           name: tunnelName,
           tunnel_secret: tunnelSecret,
           config_src: "cloudflare",
         });
+      } else {
+        throw err;
+      }
+    }
+
+    const tunnelId = tunnel.id;
+    if (!tunnelId) throw cloudflareTunnelNoIdError();
+
+    const tunnelToken = (tunnel as Record<string, unknown>).token as string | undefined;
+
+    config.tunnelId = tunnelId;
+    config.accountId = accountId;
+    config.tunnelToken = tunnelToken;
+    this.save(config);
+
+    if (previousTunnelId && previousTunnelId !== tunnelId) {
+      try {
+        await client.zeroTrust.tunnels.cloudflared.delete(previousTunnelId, {
+          account_id: accountId,
+        });
       } catch (err) {
-        const errMsg = toError(err).message;
-        if (errMsg.includes("409") || errMsg.toLowerCase().includes("conflict")) {
-          consola.debug(`Tunnel name "${tunnelName}" already exists, cleaning up stale tunnel...`);
-          await this.deleteExistingTunnel(client, accountId, tunnelName);
-          tunnel = await client.zeroTrust.tunnels.cloudflared.create({
-            account_id: accountId,
-            name: tunnelName,
-            tunnel_secret: tunnelSecret,
-            config_src: "cloudflare",
-          });
-        } else {
-          throw err;
-        }
+        consola.debug(
+          `Failed to delete previous tunnel ${previousTunnelId}: ${toError(err).message}`,
+        );
       }
+    }
 
-      const tunnelId = tunnel.id;
-      if (!tunnelId) throw cloudflareTunnelNoIdError();
-
-      const tunnelToken = (tunnel as Record<string, unknown>).token as string | undefined;
-
-      config.tunnelId = tunnelId;
-      config.accountId = accountId;
-      config.tunnelToken = tunnelToken;
-      this.save(config);
-
-      if (previousTunnelId && previousTunnelId !== tunnelId) {
-        try {
-          await client.zeroTrust.tunnels.cloudflared.delete(previousTunnelId, {
-            account_id: accountId,
-          });
-        } catch (err) {
-          consola.debug(
-            `Failed to delete previous tunnel ${previousTunnelId}: ${toError(err).message}`,
-          );
-        }
-      }
-
-      return { tunnelId };
-    });
+    return { tunnelId };
   }
 
   async pushConfig(): Promise<void> {
@@ -196,22 +195,20 @@ export class CloudflareService {
 
   addRoutes(newRoutes: TunnelRoute[]): void {
     if (newRoutes.length === 0) return;
-    this.lock.run(() => {
-      let routes = this.loadRoutes();
-      for (const route of newRoutes) {
-        routes = routes.filter((r) => r.vmId !== route.vmId || r.hostname !== route.hostname);
-        routes.push(route);
-      }
-      this.saveRoutes(routes);
-    });
+    // Gateway serializes all requests — no file lock needed.
+    let routes = this.loadRoutes();
+    for (const route of newRoutes) {
+      routes = routes.filter((r) => r.vmId !== route.vmId || r.hostname !== route.hostname);
+      routes.push(route);
+    }
+    this.saveRoutes(routes);
   }
 
   removeRoute(vmId: string): void {
-    this.lock.run(() => {
-      const routes = this.loadRoutes();
-      const filtered = routes.filter((r) => r.vmId !== vmId);
-      this.saveRoutes(filtered);
-    });
+    // Gateway serializes all requests — no file lock needed.
+    const routes = this.loadRoutes();
+    const filtered = routes.filter((r) => r.vmId !== vmId);
+    this.saveRoutes(filtered);
   }
 
   async addDns(hostname: string, tunnelId: string): Promise<void> {
@@ -267,62 +264,27 @@ export class CloudflareService {
     }
   }
 
-  start(): void {
-    if (this.pidFile.read() !== null) {
-      this.stop();
-    }
-
-    if (!this.isInstalled()) {
-      throw cloudflaredNotFoundError();
-    }
-
+  async start(): Promise<void> {
     const config = this.load();
     if (!config?.tunnelToken) {
       throw cloudflareConfigNotFoundError();
     }
 
     mkdirSecure(this.cfDir);
-    const logFd = openSync(this.logPath, "a", 0o600);
 
-    try {
-      const child = spawn(
-        this.cloudflaredBin,
-        ["tunnel", "--no-autoupdate", "run", "--token", config.tunnelToken],
-        {
-          detached: true,
-          stdio: ["ignore", logFd, logFd],
-        },
-      );
-      child.unref();
-      this.pidFile.write(child.pid!);
-    } finally {
-      try {
-        closeSync(logFd);
-      } catch (err) {
-        consola.debug(`Failed to close log fd: ${toError(err).message}`);
-      }
-    }
+    const result = await this.gateway.cfSetup({
+      tunnelToken: config.tunnelToken,
+      logPath: this.logPath,
+    });
 
-    sleepSync(1000);
-    if (this.pidFile.read() === null) {
-      let logTail = "";
-      try {
-        const lines = readFileSync(this.logPath, "utf-8").trim().split("\n");
-        logTail = lines.slice(-8).join("\n");
-      } catch (err) {
-        consola.debug(`Could not read cloudflared log: ${toError(err).message}`);
-      }
-      throw cloudflaredStartFailedError(logTail || undefined);
+    if (!result.ok) {
+      throw cloudflaredStartFailedError(result.error ?? undefined);
     }
   }
 
-  stop(): void {
-    this.pidFile.kill("SIGTERM");
-  }
-
-  ensureRunning(): void {
-    if (this.pidFile.read() !== null) return;
-    this.start();
+  async ensureRunning(): Promise<void> {
+    if (await this.isRunning()) return;
+    await this.start();
   }
 
   private async deleteExistingTunnel(

@@ -67,6 +67,8 @@ export interface VmStateStore {
 }
 
 export function findFreeNetworkSlot(states: VmState[]): number {
+  // Network slot allocation is now authoritative in the gateway.
+  // This function is kept for backward compat but only checks local state.
   const usedSlots = new Set<number>();
   for (const state of states) {
     if (state.status === "error") continue;
@@ -74,9 +76,6 @@ export function findFreeNetworkSlot(states: VmState[]): number {
     if (slot !== null) {
       usedSlots.add(slot);
     }
-  }
-  for (const slot of getActiveTapSlots()) {
-    usedSlots.add(slot);
   }
 
   for (let slot = 0; slot <= 254; slot++) {
@@ -149,22 +148,9 @@ export class FileVmStateStore implements VmStateStore {
   }
 }
 
+/** @deprecated Gateway now owns slot allocation. Kept for backward compat. */
 export function getActiveTapSlots(): Set<number> {
-  const slots = new Set<number>();
-  try {
-    for (const iface of readdirSync("/sys/class/net")) {
-      // Match TAP devices (fhvmN) and veth host ends (veth-h-N)
-      const tapMatch = /^fhvm(\d+)$/.exec(iface);
-      const vethMatch = /^veth-h-(\d+)$/.exec(iface);
-      const match = tapMatch || vethMatch;
-      if (!match) continue;
-      const slot = Number(match[1]);
-      if (Number.isInteger(slot) && slot >= 0 && slot <= 254) {
-        slots.add(slot);
-      }
-    }
-  } catch {
-    // /sys/class/net may not be readable on some systems
-  }
-  return slots;
+  // Slot allocation is now authoritative in the gateway.
+  // Return empty set — the gateway is the single source of truth.
+  return new Set<number>();
 }

@@ -59,6 +59,7 @@ export interface GatewayVmCreateParams {
   ownerUid?: number;
   ownerGid?: number;
   jailerBaseDir?: string;
+  timeoutMs?: number;
 }
 
 export interface GatewayVmCreateResult {

@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import { existsSync } from "node:fs";
 import type { VmsanContext } from "../context.ts";
 import type { VmState, VmStateStore } from "../lib/vm-state.ts";
@@ -23,13 +22,11 @@ import {
   mutuallyExclusiveFlagsError,
 } from "../errors/index.ts";
 import { generateVmId, toError } from "../lib/utils.ts";
-import { spawnTimeoutKiller } from "../lib/timeout-killer.ts";
 import { waitForAgent } from "../lib/vm-context.ts";
 import { AgentClient } from "./agent.ts";
 import { SnapshotService } from "./snapshot.ts";
 import { GatewayClient } from "../lib/gateway-client.ts";
 import { slotFromVmHostIp } from "../lib/network-address.ts";
-import { FileLock } from "../lib/file-lock.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -202,6 +199,7 @@ export class VMService {
         disablePidNs: opts.disablePidNs,
         disableCgroup: opts.disableCgroup,
         jailerBaseDir: paths.jailerBaseDir,
+        timeoutMs: opts.timeoutMs,
       });
 
       if (!result.ok || !result.vm) {
@@ -257,15 +255,7 @@ export class VMService {
 
       log.success(`VM ${vmId} is running (PID: ${gw.pid})`);
 
-      // Timeout killer
-      if (opts.timeoutMs && gw.pid) {
-        spawnTimeoutKiller({
-          vmId,
-          pid: gw.pid,
-          timeoutMs: opts.timeoutMs,
-          stateFile: join(paths.vmsDir, `${vmId}.json`),
-        });
-      }
+      // Timeout enforcement is handled by the gateway via timeoutMs param.
 
       // Forward published ports to localhost inside the VM
       if (gw.agentToken && opts.ports?.length) {
@@ -493,88 +483,84 @@ export class VMService {
     deniedCidrs: string[],
     allowIcmp?: boolean,
   ): Promise<UpdatePolicyResult> {
-    const stateFile = join(this.paths.vmsDir, `${vmId}.json`);
-    const fileLock = new FileLock(stateFile, `update-policy-${vmId}`);
+    // Gateway serializes all requests — no file lock needed.
+    const state = this.store.load(vmId);
+    if (!state) {
+      return {
+        vmId,
+        success: false,
+        previousPolicy: policy,
+        newPolicy: policy,
+        error: vmNotFoundError(vmId),
+      };
+    }
 
-    return fileLock.runAsync(async () => {
-      const state = this.store.load(vmId);
-      if (!state) {
-        return {
-          vmId,
-          success: false,
-          previousPolicy: policy,
-          newPolicy: policy,
-          error: vmNotFoundError(vmId),
-        };
+    const previousPolicy = state.network.networkPolicy as NetworkPolicy;
+
+    if (state.status !== "running") {
+      return {
+        vmId,
+        success: false,
+        previousPolicy,
+        newPolicy: policy,
+        error: vmNotRunningError(vmId),
+      };
+    }
+
+    try {
+      // Resolve allowIcmp: explicit flag wins, otherwise preserve existing
+      const effectiveAllowIcmp = allowIcmp ?? state.network.allowIcmp ?? false;
+
+      // Derive slot from stored network config
+      const slot = slotFromVmHostIp(state.network.hostIp);
+
+      // Delegate to gateway
+      const gateway = new GatewayClient();
+      const result = await gateway.vmFullUpdatePolicy({
+        vmId,
+        policy,
+        slot,
+        domains,
+        allowedCidrs,
+        deniedCidrs,
+        ports: state.network.publishedPorts,
+        allowIcmp: effectiveAllowIcmp,
+        skipDnat: state.network.skipDnat,
+        netnsName: state.network.netnsName,
+      });
+
+      if (!result.ok) {
+        throw new Error(result.error ?? "Gateway vm.fullUpdatePolicy failed");
       }
 
-      const previousPolicy = state.network.networkPolicy as NetworkPolicy;
-
-      if (state.status !== "running") {
-        return {
-          vmId,
-          success: false,
-          previousPolicy,
-          newPolicy: policy,
-          error: vmNotRunningError(vmId),
-        };
-      }
-
-      try {
-        // Resolve allowIcmp: explicit flag wins, otherwise preserve existing
-        const effectiveAllowIcmp = allowIcmp ?? state.network.allowIcmp ?? false;
-
-        // Derive slot from stored network config
-        const slot = slotFromVmHostIp(state.network.hostIp);
-
-        // Delegate to gateway
-        const gateway = new GatewayClient();
-        const result = await gateway.vmFullUpdatePolicy({
-          vmId,
-          policy,
-          slot,
-          domains,
+      this.store.update(vmId, {
+        network: {
+          ...state.network,
+          networkPolicy: policy,
+          allowedDomains: domains,
           allowedCidrs,
           deniedCidrs,
-          ports: state.network.publishedPorts,
           allowIcmp: effectiveAllowIcmp,
-          skipDnat: state.network.skipDnat,
-          netnsName: state.network.netnsName,
-        });
+        },
+      });
 
-        if (!result.ok) {
-          throw new Error(result.error ?? "Gateway vm.fullUpdatePolicy failed");
-        }
+      // Hook: network:policyChange
+      await this.hooks.callHook("network:policyChange", {
+        vmId,
+        previousPolicy,
+        newPolicy: policy,
+      });
 
-        this.store.update(vmId, {
-          network: {
-            ...state.network,
-            networkPolicy: policy,
-            allowedDomains: domains,
-            allowedCidrs,
-            deniedCidrs,
-            allowIcmp: effectiveAllowIcmp,
-          },
-        });
-
-        // Hook: network:policyChange
-        await this.hooks.callHook("network:policyChange", {
-          vmId,
-          previousPolicy,
-          newPolicy: policy,
-        });
-
-        return { vmId, success: true, previousPolicy, newPolicy: policy };
-      } catch (err) {
-        return {
-          vmId,
-          success: false,
-          previousPolicy,
-          newPolicy: policy,
-          error: toError(err),
-        };
-      }
-    });
+      return { vmId, success: true, previousPolicy, newPolicy: policy };
+    } catch (err) {
+      return {
+        vmId,
+        success: false,
+        previousPolicy,
+        newPolicy: policy,
+        error: toError(err),
+      };
+    }
   }
 
   // -----------------------------------------------------------------------

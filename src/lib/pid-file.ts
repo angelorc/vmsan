@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { safeKill } from "./utils.ts";
 
 export class PidFile {
@@ -11,16 +11,5 @@ export class PidFile {
     if (safeKill(pid, 0)) return pid;
     rmSync(this.path, { force: true });
     return null;
-  }
-
-  write(pid: number): void {
-    writeFileSync(this.path, String(pid));
-  }
-
-  kill(signal: NodeJS.Signals = "SIGTERM"): void {
-    const pid = this.read();
-    if (pid === null) return;
-    safeKill(pid, signal);
-    rmSync(this.path, { force: true });
   }
 }

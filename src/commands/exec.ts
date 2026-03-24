@@ -9,7 +9,7 @@ import { resolveVmState, waitForAgent } from "../lib/vm-context.ts";
 import { AgentClient } from "../services/agent.ts";
 import type { RunParams } from "../services/agent.ts";
 import { ShellSession } from "../lib/shell/index.ts";
-import { TimeoutExtender } from "../lib/timeout-extender.ts";
+import { GatewayClient } from "../lib/gateway-client.ts";
 
 function shellEscape(s: string): string {
   if (/^[a-zA-Z0-9._\-/=:@]+$/.test(s)) return s;
@@ -162,15 +162,17 @@ const execCommand = defineCommand({
 
         const injectedCmd = "clear; " + parts.join(" ") + "; exit $?\n";
 
-        // Wire timeout extension
-        let extender: TimeoutExtender | null = null;
+        // Wire timeout extension via gateway RPC
+        let extendInterval: ReturnType<typeof setInterval> | null = null;
         if (!args["no-extend-timeout"] && state.timeoutMs) {
-          extender = new TimeoutExtender({
-            vmId: args.vmId,
-            store,
-            paths,
-          });
-          extender.start();
+          const gateway = new GatewayClient();
+          const intervalMs = 5 * 60 * 1000; // 5 minutes
+          const extend = () => {
+            const newTimeoutAt = new Date(Date.now() + state.timeoutMs!).toISOString();
+            gateway.extendTimeout({ vmId: args.vmId, timeoutAt: newTimeoutAt }).catch(() => {});
+          };
+          extend(); // immediate extension
+          extendInterval = setInterval(extend, intervalMs);
         }
 
         try {
@@ -184,7 +186,7 @@ const execCommand = defineCommand({
 
           await shell.connect();
         } finally {
-          extender?.stop();
+          if (extendInterval) clearInterval(extendInterval);
         }
 
         cmdLog.set({
