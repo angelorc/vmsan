@@ -25,15 +25,29 @@ export type {
   StartVmResult,
 } from "./services/vm.ts";
 
-export { FileVmStateStore, getActiveTapSlots, findFreeNetworkSlot } from "./lib/vm-state.ts";
+export { FileVmStateStore } from "./lib/vm-state.ts";
 export type { VmStateStore, VmState, VmNetwork } from "./lib/vm-state.ts";
 export { MemoryVmStateStore } from "./stores/memory.ts";
 export { SqliteVmStateStore, createStateStore } from "./lib/state/index.ts";
 export type { HostState, SyncLogEntry } from "./lib/state/index.ts";
 export { GatewayClient, ensureGatewayRunning } from "./lib/gateway-client.ts";
+export type {
+  GatewayVmMetadata,
+  GatewayVmNetworkMeta,
+  GatewayStatusResult,
+  GatewayVmGetResult,
+  GatewayDoctorCheck,
+  GatewayDoctorResult,
+  GatewayRootfsDownloadParams,
+  GatewayRootfsDownloadResult,
+  GatewayCfSetupParams,
+  GatewayCfAddRouteParams,
+  GatewayCfRemoveRouteParams,
+  GatewayCfStatusResult,
+  GatewayExtendTimeoutParams,
+} from "./lib/gateway-client.ts";
 export { ShellSession, connectShell } from "./lib/shell/index.ts";
 export type { ShellSessionOptions } from "./lib/shell/index.ts";
-export { FileLock } from "./lib/file-lock.ts";
 export {
   generateVmId,
   safeKill,
