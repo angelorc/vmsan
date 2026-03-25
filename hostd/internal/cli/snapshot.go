@@ -13,6 +13,7 @@ import (
 	"github.com/angelorc/vmsan/hostd/internal/gwclient"
 	"github.com/angelorc/vmsan/hostd/internal/output"
 	"github.com/angelorc/vmsan/hostd/internal/paths"
+	"github.com/angelorc/vmsan/hostd/internal/vmstate"
 	"github.com/spf13/cobra"
 )
 
@@ -22,9 +23,9 @@ var snapshotCmd = &cobra.Command{
 }
 
 var snapshotCreateCmd = &cobra.Command{
-	Use:   "create <vmId> [snapshotId]",
+	Use:   "create <vmId>",
 	Short: "Create a snapshot of a VM",
-	Args:  cobra.RangeArgs(1, 2),
+	Args:  cobra.ExactArgs(1),
 	RunE:  runSnapshotCreate,
 }
 
@@ -53,10 +54,17 @@ func init() {
 
 func runSnapshotCreate(_ *cobra.Command, args []string) error {
 	vmID := args[0]
-	snapshotID := ""
-	if len(args) > 1 {
-		snapshotID = args[1]
+	snapshotID := fmt.Sprintf("%s-%d", vmID, time.Now().Unix())
+
+	// Load VM state to get socketPath, chrootDir, etc.
+	p := paths.Resolve()
+	store := vmstate.NewStore(p.VmsDir)
+	state, err := store.Load(vmID)
+	if err != nil {
+		return fmt.Errorf("VM %s not found", vmID)
 	}
+
+	destDir := filepath.Join(p.SnapshotsDir, snapshotID)
 
 	gw, err := gwclient.New()
 	if err != nil {
@@ -68,12 +76,32 @@ func runSnapshotCreate(_ *cobra.Command, args []string) error {
 	defer cancel()
 
 	resp, err := gw.CreateSnapshot(ctx, &vmsanv1.CreateSnapshotRequest{
-		VmId:       vmID,
-		SnapshotId: snapshotID,
+		VmId:         vmID,
+		SnapshotId:   snapshotID,
+		SocketPath:   state.APISocket,
+		DestDir:      destDir,
+		ChrootDir:    state.ChrootDir,
+		JailerBaseDir: p.JailerBaseDir,
+		OwnerUid:     int32(os.Getuid()),
+		OwnerGid:     int32(os.Getgid()),
 	})
 	if err != nil {
 		return fmt.Errorf("create snapshot: %w", err)
 	}
+
+	// Save metadata.json alongside the snapshot files for restore
+	metadata, _ := json.MarshalIndent(map[string]any{
+		"vmId":       vmID,
+		"snapshotId": snapshotID,
+		"project":    state.Project,
+		"runtime":    state.Runtime,
+		"vcpuCount":  state.VcpuCount,
+		"memSizeMib": state.MemSizeMib,
+		"agentToken": state.AgentToken,
+		"agentPort":  state.AgentPort,
+		"network":    state.Network,
+	}, "", "  ")
+	_ = os.WriteFile(filepath.Join(destDir, "metadata.json"), metadata, 0644)
 
 	if jsonOutput {
 		data, _ := json.MarshalIndent(map[string]string{

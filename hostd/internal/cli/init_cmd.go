@@ -53,7 +53,11 @@ func initNonInteractive(detected *config.DetectionResult) error {
 		return fmt.Errorf("could not auto-detect start command; run vmsan init without --yes for interactive mode")
 	}
 
-	return writeToml(runtime, build, start, "", "", "")
+	// Derive project name from current directory
+	cwd, _ := os.Getwd()
+	project := sanitizeName(lastPathSegment(cwd))
+
+	return writeToml(runtime, build, start, "", "", project)
 }
 
 func initInteractive(detected *config.DetectionResult) error {

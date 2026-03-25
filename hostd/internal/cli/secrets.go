@@ -43,6 +43,7 @@ var secretsUnsetCmd = &cobra.Command{
 func init() {
 	for _, cmd := range []*cobra.Command{secretsSetCmd, secretsListCmd, secretsUnsetCmd} {
 		cmd.Flags().String("config", "vmsan.toml", "Path to vmsan.toml")
+		cmd.Flags().String("project", "", "Project name (overrides vmsan.toml)")
 	}
 	secretsCmd.AddCommand(secretsSetCmd)
 	secretsCmd.AddCommand(secretsListCmd)
@@ -51,13 +52,17 @@ func init() {
 }
 
 func resolveProject(cmd *cobra.Command) (string, error) {
+	// --project flag takes priority over vmsan.toml
+	if project, _ := cmd.Flags().GetString("project"); project != "" {
+		return project, nil
+	}
 	cfgPath, _ := cmd.Flags().GetString("config")
 	cfg, err := config.LoadVmsanToml(cfgPath)
 	if err != nil {
-		return "", fmt.Errorf("load config: %w (needed to determine project name)", err)
+		return "", fmt.Errorf("load config: %w (needed to determine project name; use --project flag or create vmsan.toml)", err)
 	}
 	if cfg.Project == "" {
-		return "", fmt.Errorf("no project name in %s; add project = \"name\" to your vmsan.toml", cfgPath)
+		return "", fmt.Errorf("no project name in %s; add project = \"name\" or use --project flag", cfgPath)
 	}
 	return cfg.Project, nil
 }
@@ -71,13 +76,25 @@ func runSecretsSet(cmd *cobra.Command, args []string) error {
 	p := paths.Resolve()
 	store := secrets.NewStore(p.BaseDir)
 
-	for _, arg := range args {
+	// Support both "KEY=VALUE" and "KEY VALUE" formats
+	i := 0
+	for i < len(args) {
+		arg := args[i]
 		idx := strings.IndexByte(arg, '=')
-		if idx < 1 {
-			return fmt.Errorf("invalid secret format %q (expected KEY=VALUE)", arg)
+		var key, value string
+		if idx >= 1 {
+			// KEY=VALUE format
+			key = arg[:idx]
+			value = arg[idx+1:]
+			i++
+		} else if i+1 < len(args) {
+			// KEY VALUE format (two separate args)
+			key = arg
+			value = args[i+1]
+			i += 2
+		} else {
+			return fmt.Errorf("invalid secret format %q (expected KEY=VALUE or KEY VALUE)", arg)
 		}
-		key := arg[:idx]
-		value := arg[idx+1:]
 
 		if err := store.Set(project, key, value); err != nil {
 			return fmt.Errorf("set %s: %w", key, err)

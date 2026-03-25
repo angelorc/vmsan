@@ -61,7 +61,7 @@ if [ -n "$VM_ALLOW" ]; then
     skip_test "dig or netns not available for ECH test"
   fi
 
-  DNS_LOGS=$(run_vmsan logs dns "$VM_ALLOW" 2>&1 || echo "")
+  DNS_LOGS=$(run_vmsan logs "$VM_ALLOW" dns 2>&1 || echo "")
   assert_contains "$DNS_LOGS" "example.com" "vmsan logs dns shows recorded query"
 
   remove_vm "$VM_ALLOW"
@@ -235,7 +235,7 @@ if [ -n "$VM_UPDATE" ]; then
   sleep 8
 
   # Update policy from allow-all to deny-all
-  UPDATE_OUT=$(run_vmsan network update "$VM_UPDATE" --network-policy deny-all 2>&1 || echo "FAIL")
+  UPDATE_OUT=$(run_vmsan network update "$VM_UPDATE" --policy deny-all 2>&1 || echo "FAIL")
   if echo "$UPDATE_OUT" | grep -qi "fail\|error"; then
     assert_eq "failed" "success" "policy update to deny-all"
   else

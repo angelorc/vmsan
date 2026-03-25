@@ -65,10 +65,10 @@ func runList(cmd *cobra.Command, _ []string) error {
 				"service":   vm.Service,
 			})
 		}
-		data, _ := json.MarshalIndent(map[string]any{
+		data, _ := json.Marshal(map[string]any{
 			"count": len(resp.List),
 			"vms":   vms,
-		}, "", "  ")
+		})
 		fmt.Println(string(data))
 		return nil
 	}

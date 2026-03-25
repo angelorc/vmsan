@@ -148,16 +148,19 @@ cli_user_groups() {
 }
 
 gateway_rpc() {
-  local method="$1" params="${2:-{}}"
-  echo "{\"method\":\"${method}\",\"params\":${params}}" \
-    | socat -t5 - UNIX-CONNECT:/run/vmsan/gateway.sock 2>/dev/null
+  # Gateway uses gRPC (not JSON-RPC). Map old RPC method names to CLI commands.
+  local method="$1"
+  case "$method" in
+    ping)   run_vmsan doctor >/dev/null 2>&1 && echo '{"ok":true}' ;;
+    health) run_vmsan doctor >/dev/null 2>&1 && echo '{"ok":true}' ;;
+    status) run_vmsan --json list 2>/dev/null ;;
+    *)      echo '{"error":"unknown method"}' ;;
+  esac
 }
 
 gateway_rpc_cli() {
-  local method="$1" params="${2:-{}}"
-  run_as_cli_shell \
-    "printf '%s\n' '{\"method\":\"${method}\",\"params\":${params}}' | socat -t5 - UNIX-CONNECT:/run/vmsan/gateway.sock" \
-    2>/dev/null
+  local method="$1"
+  gateway_rpc "$method"
 }
 
 sqlite_query() {
@@ -446,7 +449,8 @@ wait_for_gateway() {
   local elapsed=0
   echo -n "  Waiting for gateway..."
   while [ $elapsed -lt $timeout ]; do
-    if echo '{"method":"ping"}' | socat - UNIX-CONNECT:/run/vmsan/gateway.sock >/dev/null 2>&1; then
+    # Gateway uses gRPC — check via CLI or socket existence + systemd status
+    if [ -S /run/vmsan/gateway.sock ] && run_vmsan --json list >/dev/null 2>&1; then
       echo " ready (${elapsed}s)"
       return 0
     fi

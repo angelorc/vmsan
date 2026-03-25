@@ -42,9 +42,23 @@ func Resolve() Paths {
 		RegistryDir:   filepath.Join(base, "registry", "rootfs"),
 		SnapshotsDir:  filepath.Join(base, "snapshots"),
 		SeccompDir:    filepath.Join(base, "seccomp"),
-		SeccompFilter: filepath.Join(base, "seccomp", "default.json"),
+		SeccompFilter: resolveSeccompFilter(base),
 		AgentPort:     9119,
 	}
+}
+
+// resolveSeccompFilter returns the path to a seccomp filter, preferring
+// the Firecracker-provided one (firecracker-default.json) over a custom one.
+// Returns empty string if no filter found — Firecracker will use its built-in.
+func resolveSeccompFilter(base string) string {
+	seccompDir := filepath.Join(base, "seccomp")
+	// Prefer Firecracker's official filter (extracted from release tarball)
+	fc := filepath.Join(seccompDir, "firecracker-default.json")
+	if _, err := os.Stat(fc); err == nil {
+		return fc
+	}
+	// Empty string = Firecracker uses its built-in default (safest fallback)
+	return ""
 }
 
 func resolveBaseDir() string {

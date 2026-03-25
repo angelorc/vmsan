@@ -243,7 +243,6 @@ validate_source_tree() {
   [ -f "$dir/package.json" ] || error "Invalid source tree: missing $dir/package.json"
   [ -d "$dir/agent" ] || error "Invalid source tree: missing $dir/agent"
   [ -d "$dir/hostd" ] || error "Invalid source tree: missing $dir/hostd"
-  [ -d "$dir/nftables" ] || error "Invalid source tree: missing $dir/nftables"
 }
 
 resolve_commit_sha() {
@@ -1289,9 +1288,6 @@ SVCEOF
   success "vmsan-gateway systemd service installed and started"
 
   REAL_USER="${SUDO_USER:-$(whoami)}"
-  if [ "$REAL_USER" != "root" ]; then
-    info "User $REAL_USER is in vmsan group — run 'newgrp vmsan' or re-login to activate"
-  fi
 fi
 
 # --- summary ---
@@ -1332,5 +1328,26 @@ if [ "$CF_STATUS" = "configured" ]; then
   echo ""
 elif [ "$CF_STATUS" = "not configured" ]; then
   echo "  To configure Cloudflare later, re-run this installer."
+  echo ""
+fi
+
+# --- next steps ---
+
+REAL_USER="${SUDO_USER:-$(whoami)}"
+if [ "$REAL_USER" != "root" ] && ! id -nG "$REAL_USER" 2>/dev/null | grep -qw vmsan; then
+  echo ""
+  echo "  \033[1;33m>>> IMPORTANT: Activate group membership before using vmsan <<<\033[0m"
+  echo ""
+  echo "  Your user ($REAL_USER) was added to the 'vmsan' group."
+  echo "  This is required to communicate with the gateway daemon."
+  echo ""
+  echo "  Run one of these:"
+  echo "    newgrp vmsan          # activate in current shell"
+  echo "    # or log out and back in for permanent activation"
+  echo ""
+  echo "  Then verify with:  vmsan doctor"
+  echo ""
+elif [ "$REAL_USER" != "root" ]; then
+  echo "  Ready to use: vmsan doctor"
   echo ""
 fi

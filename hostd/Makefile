@@ -18,6 +18,11 @@ build-all: build-amd64 build-arm64
 install: build
 	mkdir -p $(INSTALL_DIR)
 	cp $(BINARY) $(INSTALL_DIR)/$(BINARY)
+	@if [ -w /usr/local/bin ]; then \
+		cp $(BINARY) /usr/local/bin/$(BINARY); \
+	else \
+		echo "Run 'sudo cp $(INSTALL_DIR)/$(BINARY) /usr/local/bin/$(BINARY)' to update system binary"; \
+	fi
 
 proto:
 	protoc --proto_path=proto \

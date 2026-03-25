@@ -221,10 +221,8 @@ func checkBinaries() []DoctorCheck {
 	}{
 		{"firecracker", true},
 		{"jailer", true},
-		{"vmsan-agent-host", false},
+		{"vmsan", true},
 		{"vmsan-agent", false},
-		{"vmsan-nftables", true},
-		{"vmsan-gateway", true},
 		{"dnsproxy", false},
 	}
 	var checks []DoctorCheck
@@ -254,11 +252,11 @@ func checkKernelImage() DoctorCheck {
 		"/srv/kernel",
 		"/srv/jailer",
 	}
-	// Also check ~/.vmsan/kernel/ for each user.
+	// Also check ~/.vmsan/kernels/ for each user.
 	if entries, err := os.ReadDir("/home"); err == nil {
 		for _, e := range entries {
 			if e.IsDir() {
-				searchDirs = append(searchDirs, filepath.Join("/home", e.Name(), ".vmsan", "kernel"))
+				searchDirs = append(searchDirs, filepath.Join("/home", e.Name(), ".vmsan", "kernels"))
 			}
 		}
 	}

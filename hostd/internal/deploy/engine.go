@@ -82,17 +82,37 @@ func DeployService(ctx context.Context, opts DeployServiceOptions) *ServiceDeplo
 		return result
 	}
 
-	// Phase 1: Create VM
-	setStatus(StatusCreating)
-	vmID, guestIP, err := createServiceVM(ctx, opts)
-	if err != nil {
-		return fail(fmt.Errorf("create VM: %w", err))
+	// Check for existing running VM — reuse it instead of creating a new one
+	p := paths.Resolve()
+	store := vmstate.NewStore(p.VmsDir)
+	var vmID, guestIP, token string
+
+	existingVMs, _ := store.List()
+	for _, vm := range existingVMs {
+		if vm.Project == opts.Project && vm.Network.Service == opts.ServiceName && vm.Status == "running" {
+			vmID = vm.ID
+			guestIP = vm.Network.GuestIP
+			if vm.AgentToken != nil {
+				token = *vm.AgentToken
+			}
+			break
+		}
+	}
+
+	if vmID == "" {
+		// Phase 1: Create VM
+		setStatus(StatusCreating)
+		var err error
+		vmID, guestIP, token, err = createServiceVM(ctx, opts)
+		if err != nil {
+			return fail(fmt.Errorf("create VM: %w", err))
+		}
 	}
 	result.VmID = vmID
 
 	// Phase 2: Wait for agent
 	agentURL := fmt.Sprintf("http://%s:%d", guestIP, opts.Paths.AgentPort)
-	agent := agentclient.New(agentURL, "") // token set during create
+	agent := agentclient.New(agentURL, token)
 	if err := waitForAgentReady(ctx, agent); err != nil {
 		return fail(fmt.Errorf("agent not ready: %w", err))
 	}
@@ -156,7 +176,7 @@ func DeployService(ctx context.Context, opts DeployServiceOptions) *ServiceDeplo
 	return result
 }
 
-func createServiceVM(ctx context.Context, opts DeployServiceOptions) (string, string, error) {
+func createServiceVM(ctx context.Context, opts DeployServiceOptions) (vmID, guestIP, agentToken string, err error) {
 	cfg := opts.ServiceCfg
 	p := paths.Resolve()
 
@@ -171,14 +191,14 @@ func createServiceVM(ctx context.Context, opts DeployServiceOptions) (string, st
 	rootfsPath := vmutil.AutoDetectRootfs(p.RootfsDir, runtime)
 
 	// Generate agent token
-	agentToken := vmutil.GenerateToken()
+	agentToken = vmutil.GenerateToken()
 
 	// Resolve disk size (default 10 GB)
 	var diskSizeGb float64 = 10
 	if cfg.Disk != "" {
 		parsed, err := vmutil.ParseDiskSize(cfg.Disk)
 		if err != nil {
-			return "", "", fmt.Errorf("parse disk size: %w", err)
+			return "", "", "", fmt.Errorf("parse disk size: %w", err)
 		}
 		diskSizeGb = float64(parsed)
 	}
@@ -219,7 +239,7 @@ func createServiceVM(ctx context.Context, opts DeployServiceOptions) (string, st
 		Domains:       cfg.AllowedDomains,
 		Ports:         ports,
 		Project:       opts.Project,
-		Service:       cfg.Service,
+		Service:       opts.ServiceName,
 		ConnectTo:     cfg.ConnectTo,
 		KernelPath:    kernelPath,
 		RootfsPath:    rootfsPath,
@@ -233,7 +253,7 @@ func createServiceVM(ctx context.Context, opts DeployServiceOptions) (string, st
 
 	resp, err := opts.Gateway.CreateVM(ctx, req)
 	if err != nil {
-		return "", "", fmt.Errorf("gateway CreateVM: %w", err)
+		return "", "", "", fmt.Errorf("gateway CreateVM: %w", err)
 	}
 
 	// Build and save local state
@@ -265,7 +285,7 @@ func createServiceVM(ctx context.Context, opts DeployServiceOptions) (string, st
 			FirewallBackend: "nftables",
 			ConnectTo:      cfg.ConnectTo,
 			MeshIP:         resp.MeshIp,
-			Service:        cfg.Service,
+			Service:        opts.ServiceName,
 		},
 		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
 		AgentToken:   &agentToken,
@@ -275,10 +295,10 @@ func createServiceVM(ctx context.Context, opts DeployServiceOptions) (string, st
 
 	store := vmstate.NewStore(p.VmsDir)
 	if err := store.Save(state); err != nil {
-		return "", "", fmt.Errorf("save state: %w", err)
+		return "", "", "", fmt.Errorf("save state: %w", err)
 	}
 
-	return resp.VmId, resp.GuestIp, nil
+	return resp.VmId, resp.GuestIp, agentToken, nil
 }
 
 func waitForAgentReady(ctx context.Context, agent *agentclient.Client) error {

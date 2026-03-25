@@ -240,8 +240,8 @@ assert_not_empty "$VM_CUSTOM" "VM created with custom resources"
 
 if [ -n "$VM_CUSTOM" ]; then
   sleep 5
-  MEM=$(get_vm_field "$VM_CUSTOM" "memSizeMib")
-  VCPUS=$(get_vm_field "$VM_CUSTOM" "vcpuCount")
+  MEM=$(get_vm_field "$VM_CUSTOM" "memMib")
+  VCPUS=$(get_vm_field "$VM_CUSTOM" "vcpus")
   assert_eq "$MEM" "256" "VM has 256 MiB memory"
   assert_eq "$VCPUS" "2" "VM has 2 vCPUs"
 

@@ -96,7 +96,7 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	}
 
 	if jsonOutput {
-		data, _ := json.MarshalIndent(statuses, "", "  ")
+		data, _ := json.Marshal(map[string]any{"services": statuses})
 		fmt.Println(string(data))
 		return nil
 	}

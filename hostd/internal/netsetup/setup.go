@@ -42,7 +42,9 @@ func SetupNamespace(cfg SetupConfig) error {
 	}
 
 	// Clean up stale namespace if it exists from a previous lifecycle
-	_ = run("ip", "netns", "delete", cfg.NetNSName)
+	if fileExists("/var/run/netns/" + cfg.NetNSName) {
+		_ = run("ip", "netns", "delete", cfg.NetNSName)
+	}
 
 	// 1. Create namespace
 	if err := run("ip", "netns", "add", cfg.NetNSName); err != nil {
@@ -179,11 +181,17 @@ func TeardownNamespace(cfg SetupConfig) error {
 	}
 
 	// Delete namespace — auto-cleans veth pair, TAP, rules inside
+	nsPath := "/var/run/netns/" + cfg.NetNSName
+	if !fileExists(nsPath) {
+		return nil // already gone
+	}
 	if err := run("ip", "netns", "delete", cfg.NetNSName); err != nil {
 		slog.Debug("namespace teardown: netns delete failed, retrying", "netns", cfg.NetNSName, "error", err)
 		time.Sleep(500 * time.Millisecond)
-		if err := run("ip", "netns", "delete", cfg.NetNSName); err != nil {
-			slog.Warn("namespace teardown: netns delete retry failed", "netns", cfg.NetNSName, "error", err)
+		if fileExists(nsPath) {
+			if err := run("ip", "netns", "delete", cfg.NetNSName); err != nil {
+				slog.Debug("namespace teardown: netns delete retry failed", "netns", cfg.NetNSName, "error", err)
+			}
 		}
 	}
 
@@ -198,12 +206,19 @@ func TeardownTAP(tapDevice, netnsName string) error {
 	return run("ip", "link", "delete", tapDevice)
 }
 
-// TeardownThrottle removes tc qdisc from TAP device.
+// TeardownThrottle removes tc qdisc from TAP device (best-effort, silent if none set).
 func TeardownThrottle(tapDevice, netnsName string) error {
+	var err error
 	if netnsName != "" {
-		return nsRun(netnsName, "tc", "qdisc", "del", "dev", tapDevice, "root")
+		err = nsRun(netnsName, "tc", "qdisc", "del", "dev", tapDevice, "root")
+	} else {
+		err = run("tc", "qdisc", "del", "dev", tapDevice, "root")
 	}
-	return run("tc", "qdisc", "del", "dev", tapDevice, "root")
+	// "Cannot delete qdisc with handle of zero" means no qdisc was set — not an error
+	if err != nil && strings.Contains(err.Error(), "handle of zero") {
+		return nil
+	}
+	return err
 }
 
 // DetectDefaultInterface finds the host's default network interface.
@@ -223,12 +238,12 @@ func DetectDefaultInterface() (string, error) {
 }
 
 // run executes a command with explicit argument list (no shell injection).
+// Stderr is captured (not dumped to gateway output) to avoid noisy false positives.
 func run(args ...string) error {
 	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s: %w", strings.Join(args, " "), err)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
 	}
 	return nil
 }

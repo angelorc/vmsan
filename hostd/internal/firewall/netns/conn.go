@@ -84,7 +84,8 @@ func NewConn(ctx context.Context, netnsName string) (*NetNSConn, error) {
 	nsPath := filepath.Join("/var/run/netns", netnsName)
 	fd, err := os.Open(nsPath)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to open netns", "netns", netnsName, "path", nsPath, "error", err)
+		// During teardown the netns may already be deleted — this is expected, not an error.
+		slog.DebugContext(ctx, "netns not available", "netns", netnsName, "path", nsPath, "error", err)
 		return nil, &NetNSError{
 			Op:    "enter",
 			NetNS: netnsName,

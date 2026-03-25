@@ -221,17 +221,24 @@ func expandDisk(rootfsPath string, diskSizeGb float64) error {
 		return fmt.Errorf("truncate: %w: %s", err, string(output))
 	}
 
-	// e2fsck -fy: force check + auto-fix. Exit code <4 is OK.
+	// e2fsck -fy: force check + auto-fix before resize.
 	e2fsck := exec.Command("e2fsck", "-fy", rootfsPath)
-	e2fsck.Run() // ignore exit code; only fail on >= 4
-	if e2fsck.ProcessState != nil && e2fsck.ProcessState.ExitCode() >= 4 {
-		return fmt.Errorf("e2fsck failed with exit code %d", e2fsck.ProcessState.ExitCode())
+	e2fsckOut, e2fsckErr := e2fsck.CombinedOutput()
+	e2fsckExit := -1
+	if e2fsck.ProcessState != nil {
+		e2fsckExit = e2fsck.ProcessState.ExitCode()
+	}
+	slog.Debug("e2fsck completed", "exit", e2fsckExit, "output", string(e2fsckOut), "err", e2fsckErr)
+	if e2fsckExit >= 4 {
+		return fmt.Errorf("e2fsck failed (exit %d): %s", e2fsckExit, string(e2fsckOut))
 	}
 
 	// resize2fs
 	cmd = exec.Command("resize2fs", rootfsPath)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("resize2fs: %w: %s", err, string(output))
+	resizeOut, resizeErr := cmd.CombinedOutput()
+	slog.Debug("resize2fs completed", "output", string(resizeOut), "err", resizeErr)
+	if resizeErr != nil {
+		return fmt.Errorf("resize2fs: %w: %s", resizeErr, string(resizeOut))
 	}
 
 	// tune2fs: set reserved blocks to 0
@@ -252,19 +259,37 @@ func configureRootfs(cfg Config, paths Paths) error {
 	}
 
 	// Mount
+	slog.Debug("mounting rootfs", "src", paths.RootfsPath, "dst", tmpMount)
 	cmd := exec.Command("mount", "-o", "loop", paths.RootfsPath, tmpMount)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		os.RemoveAll(tmpMount)
 		return fmt.Errorf("mount rootfs: %w: %s", err, string(output))
 	}
 
+	// Verify mount actually worked — stale loop mounts from previous failed
+	// attempts can cause mount to return exit 0 but show an empty filesystem.
+	etcDir := filepath.Join(tmpMount, "etc")
+	if _, err := os.Stat(etcDir); err != nil {
+		entries, _ := os.ReadDir(tmpMount)
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		// Check for stale loop devices on this file
+		losetup, _ := exec.Command("losetup", "-j", paths.RootfsPath).CombinedOutput()
+		exec.Command("umount", "-l", tmpMount).Run()
+		os.RemoveAll(tmpMount)
+		return fmt.Errorf("mount rootfs: mounted but /etc missing (contents: %v, losetup: %s) — likely stale loop device from previous attempt", names, strings.TrimSpace(string(losetup)))
+	}
+
 	var prepareErr error
 	func() {
 		defer func() {
-			// Always try to unmount
-			umount := exec.Command("umount", tmpMount)
-			if err := umount.Run(); err != nil {
-				slog.Debug("unmount failed", "path", tmpMount, "error", err)
+			// Always unmount — try normal first, then lazy as fallback.
+			// Stale mounts from failed attempts can block future VM creation.
+			if err := exec.Command("umount", tmpMount).Run(); err != nil {
+				slog.Warn("umount failed, trying lazy unmount", "path", tmpMount, "error", err)
+				exec.Command("umount", "-l", tmpMount).Run()
 			}
 			os.RemoveAll(tmpMount)
 		}()
@@ -429,7 +454,7 @@ func fixUbuntuOwnership(tmpMount string) error {
 	return nil
 }
 
-// copyFile copies src to dst using io.Copy.
+// copyFile copies src to dst.
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {

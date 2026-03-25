@@ -12,6 +12,7 @@ import (
 	"time"
 
 	vmsanv1 "github.com/angelorc/vmsan/hostd/gen/vmsan/v1"
+	"github.com/angelorc/vmsan/hostd/internal/agentclient"
 	"github.com/angelorc/vmsan/hostd/internal/gwclient"
 	"github.com/angelorc/vmsan/hostd/internal/paths"
 	"github.com/angelorc/vmsan/hostd/internal/server"
@@ -53,6 +54,7 @@ func init() {
 	f.String("connect-to", "", "Mesh connections (comma-separated service:port pairs)")
 	f.String("service", "", "Register as mesh service (e.g. --service web)")
 	f.String("host", "", "Remote host server address for multi-host creation")
+	f.Bool("connect", false, "Open interactive shell after VM is created")
 
 	rootCmd.AddCommand(createCmd)
 }
@@ -252,6 +254,30 @@ func runCreate(cmd *cobra.Command, _ []string) error {
 		fmt.Println(string(data))
 	} else {
 		printCreateSummary(resp, state, p)
+	}
+
+	// --connect: open interactive shell after creation
+	connectAfter, _ := f.GetBool("connect")
+	if connectAfter && agentToken != "" {
+		fmt.Println("  Waiting for agent...")
+		if err := waitForAgent(ctx, resp.GuestIp, p.AgentPort); err != nil {
+			return fmt.Errorf("agent not ready: %w", err)
+		}
+		fmt.Println("  Agent ready. Connecting...")
+
+		closeInfo, err := agentclient.RunShell(agentclient.ShellOptions{
+			Host:  resp.GuestIp,
+			Port:  p.AgentPort,
+			Token: agentToken,
+		})
+		if err != nil {
+			return err
+		}
+		if !closeInfo.SessionDestroyed && closeInfo.SessionID != "" {
+			dim := "\x1b[2m"
+			reset := "\x1b[0m"
+			fmt.Fprintf(os.Stderr, "\n%sResume this session with:\n  vmsan connect %s --session %s%s\n", dim, resp.VmId, closeInfo.SessionID, reset)
+		}
 	}
 
 	return nil

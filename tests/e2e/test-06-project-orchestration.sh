@@ -282,7 +282,8 @@ else
     assert_eq "$WEB_HEALTH" "healthy" "health checks report web as healthy"
   fi
 
-  LOGS_OUT=$(run_as_cli_user timeout 10 vmsan logs web --lines 20 --no-follow 2>&1 || true)
+  sleep 3  # wait for app to start and write logs
+  LOGS_OUT=$(run_as_cli_user timeout 10 vmsan logs "$WEB_VM_ID" --lines 20 2>&1 || true)
   if echo "$LOGS_OUT" | grep -q "web-started"; then
     assert_eq "found" "found" "vmsan logs streams application output"
   else
