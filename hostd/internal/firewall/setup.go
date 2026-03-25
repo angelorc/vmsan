@@ -46,7 +46,6 @@ func Setup(ctx context.Context, opts *SetupOptions) error {
 	defer runtime.UnlockOSThread()
 
 	var hostBypassSetup bool
-	var hostIptablesSetup bool
 
 	if err := setupVMTable(ctx, opts); err != nil {
 		return err
@@ -62,9 +61,10 @@ func Setup(ctx context.Context, opts *SetupOptions) error {
 	}
 
 	// Host-side iptables FORWARD/MASQUERADE/DNAT.
-	// Required for Docker coexistence: nftables chains can't override
-	// iptables-nft FORWARD DROP policy.
-	if opts.Policy != PolicyDenyAll {
+	// Only needed for Docker coexistence: Docker's iptables-nft backend may
+	// set a FORWARD policy of DROP that nftables alone can't override.
+	// Skip entirely when iptables is not installed (pure nftables is sufficient).
+	if opts.Policy != PolicyDenyAll && IptablesAvailable() {
 		executor := NewRealIptablesExecutor()
 		if err := addHostIptables(ctx, opts, executor); err != nil {
 			// Rollback: clean up previous steps
@@ -74,12 +74,6 @@ func Setup(ctx context.Context, opts *SetupOptions) error {
 			_ = deleteVMTable(ctx, &TeardownOptions{VMId: opts.VMId, NetNSName: opts.NetNSName})
 			return fmt.Errorf("host iptables: %w", err)
 		}
-		hostIptablesSetup = true
-	}
-
-	// Verify host iptables setup succeeded if we attempted it
-	if opts.Policy != PolicyDenyAll && !hostIptablesSetup {
-		slog.WarnContext(ctx, "host iptables not set up but policy requires it", "vm_id", opts.VMId)
 	}
 
 	slog.DebugContext(ctx, "firewall setup complete", "vm_id", opts.VMId)

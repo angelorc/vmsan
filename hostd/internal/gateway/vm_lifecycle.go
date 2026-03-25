@@ -31,8 +31,10 @@ const (
 	defaultDiskSizeGb = 0
 	defaultPolicy     = "deny-all"
 	agentPort         = 9119
-	jailerBaseDir = "/srv/jailer"
 )
+
+// jailerBaseDir is set at startup via SetJailerBaseDir.
+var jailerBaseDir string
 
 // Binary paths — configurable at startup via SetBinDir().
 var (
@@ -55,6 +57,13 @@ func SetBinDir(dir string) {
 	}
 	firecrackerBin = dir + "/firecracker"
 	jailerBin = dir + "/jailer"
+}
+
+// SetJailerBaseDir sets the default jailer chroot base directory.
+func SetJailerBaseDir(dir string) {
+	if dir != "" {
+		jailerBaseDir = dir
+	}
 }
 
 // vmCreateParams holds the parameters for vm.create.

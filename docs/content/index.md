@@ -1,8 +1,8 @@
 ---
 title: Home
 seo:
-  title: vmsan - Firecracker microVM Sandbox Toolkit
-  description: Spin up isolated Firecracker microVMs in seconds. Full lifecycle management, network isolation, Docker image support, and interactive shell access.
+  title: vmsan - Firecracker microVM Platform
+  description: Spin up isolated Firecracker microVMs in seconds. Declarative deployments, mesh networking, multi-host scaling, and privilege-separated architecture.
 ---
 
 ::u-page-hero
@@ -19,8 +19,7 @@ orientation: horizontal
 vmsan
 
 #description
-Firecracker made simple. Spin up secure microVMs in milliseconds, from install to interactive shell in one command 
-`vmsan create --connect`
+Firecracker made simple. Declare your services in `vmsan.toml`, deploy with `vmsan up`, and scale across hosts with a single control plane.
 
 #headline
   :::u-button
@@ -80,27 +79,28 @@ title: One command is all it takes
     ---
     spotlight: true
     title: Install vmsan
-    description: Install the CLI in seconds with a single command.
+    description: Install the platform in seconds. Go binaries, Firecracker, kernel, runtimes — everything you need.
     ---
     ```bash [Terminal]
     curl -fsSL https://vmsan.dev/install | bash
     ✔ vmsan installed successfully
-    vmsan --version
-    vmsan 0.1.0
+    vmsan doctor
+    ✔ All checks passed
     ```
     ::::
 
     ::::u-page-card
     ---
     spotlight: true
-    title: Or jump straight in
-    description: Add --connect to land in a shell instantly.
+    title: Define and deploy
+    description: Declare your services in vmsan.toml and bring them up with a single command.
     ---
     ```bash [Terminal]
-    vmsan create --connect
-    ✔ VM created: vm-f91c4e0
-    ✔ Connected to vm-f91c4e0
-    root@vm-f91c4e0:~#
+    vmsan init
+    # edit vmsan.toml
+    vmsan up
+    ✔ api running at 198.19.1.2
+    ✔ worker running at 198.19.2.2
     ```
     ::::
   :::
@@ -109,7 +109,7 @@ title: One command is all it takes
 ::u-page-section
 ---
 title: Everything you need for secure workloads.
-description: vmsan wraps Firecracker with a batteries-included CLI. No boilerplate. No complex infrastructure. Just fast, secure VMs.
+description: vmsan wraps Firecracker with a privilege-separated architecture, declarative config, and mesh networking. No boilerplate. No complex infrastructure.
 ---
 #features
   :::u-page-feature
@@ -125,8 +125,35 @@ description: vmsan wraps Firecracker with a batteries-included CLI. No boilerpla
   ---
   icon: i-lucide-shield-check
   title: Hardened by default
-  description: Jailer chroot, seccomp-bpf filters, PID namespaces, and cgroups. Enterprise-grade security out of the box.
+  description: Privilege-separated gateway, jailer chroot, seccomp-bpf filters, defense-in-depth egress filtering, and cgroups. Enterprise-grade security out of the box.
   to: /guide/networking
+  ---
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-file-code
+  title: Declarative deployments
+  description: Define services, resources, secrets, and network policies in vmsan.toml. Deploy everything with vmsan up.
+  to: /guide/project-config
+  ---
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-waypoints
+  title: Mesh networking
+  description: VMs discover each other by name with automatic DNS and routing. Build multi-service architectures without manual IP management.
+  to: /guide/mesh-networking
+  ---
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-server
+  title: Multi-host ready
+  description: Scale across bare-metal servers with a control plane. Register hosts, schedule VMs, and manage fleets from one CLI.
+  to: /guide/multi-host
   ---
   :::
 
@@ -134,17 +161,8 @@ description: vmsan wraps Firecracker with a batteries-included CLI. No boilerpla
   ---
   icon: i-lucide-terminal
   title: Native interactive shell
-  description: Connect directly to running VMs via a seamless WebSocket PTY terminal. Leave SSH behind.
+  description: Connect directly to running VMs via a seamless WebSocket PTY terminal. Stream logs in real time. Leave SSH behind.
   to: /guide/vm-lifecycle#connect-to-a-running-vm
-  ---
-  :::
-
-  :::u-page-feature
-  ---
-  icon: i-lucide-file-up
-  title: Instant file sync
-  description: Push and pull files securely over the agent API. No SCP or complex folder mounting required.
-  to: /guide/file-operations
   ---
   :::
 
@@ -182,7 +200,7 @@ description: Powerful isolation primitives wrapped in an intuitive developer exp
     to: /guide/networking
     icon: i-lucide-network
     title: Granular network control
-    description: Enforce strict allow-all or deny-all rules. Route traffic via custom domain and CIDR policies. Throttle bandwidth instantly.
+    description: Enforce strict allow-all or deny-all rules. Route traffic via custom domain and CIDR policies. Defense-in-depth filtering across DNS, SNI, and nftables layers.
     ---
     ```bash [Network Isolation]
     vmsan create \
@@ -213,30 +231,33 @@ description: Powerful isolation primitives wrapped in an intuitive developer exp
     spotlight: true
     to: /guide/vm-lifecycle#connect-to-a-running-vm
     icon: i-lucide-terminal-square
-    title: Zero-config interactive shell
-    description: Access your VMs with a full WebSocket PTY terminal. Upload and download files effortlessly. No SSH keys required.
+    title: Shell, logs, and file sync
+    description: Access VMs with a full PTY terminal. Stream logs in real time. Upload and download files effortlessly. No SSH keys required.
     ---
-    ```bash [Shell & Files]
+    ```bash [Shell & Logs]
     vmsan connect vm-a3f7b2c
-    vmsan upload vm-a3f7b2c ./app.js /app.js
-    vmsan download vm-a3f7b2c /app.log ./
+    vmsan logs vm-a3f7b2c --follow
+    vmsan upload vm-a3f7b2c ./app.js /app/
     ```
     ::::
 
     ::::u-page-card
     ---
     spotlight: true
-    to: /api/cli-reference
-    icon: i-lucide-braces
-    title: Built for automation
-    description: Every single command supports structured --json output. Script your infrastructure. Automate your workflows.
+    to: /guide/project-config
+    icon: i-lucide-file-code
+    title: Declarative deploy
+    description: Define your entire stack in vmsan.toml. One command to bring it all up, one command to tear it down.
     ---
-    ```bash [JSON Output]
-    vmsan list --json
-    [{"id":"vm-a3f7b2c","status":"running",
-      "runtime":"node22","memory":128,
-      "cpus":1,"ip":"198.19.1.2",
-      "networkPolicy":"allow-all"}]
+    ```toml [vmsan.toml]
+    [services.api]
+    runtime = "node22"
+    memory = 512
+    command = "node server.js"
+
+    [services.worker]
+    runtime = "python3.13"
+    command = "python worker.py"
     ```
     ::::
   :::

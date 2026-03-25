@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 )
 
 // IptablesExecutor defines the interface for executing iptables commands.
@@ -51,6 +52,21 @@ func (e *RealIptablesExecutor) Save(ctx context.Context, netns string) (string, 
 		return "", fmt.Errorf("iptables-save: %w", err)
 	}
 	return string(out), nil
+}
+
+var (
+	iptablesOnce   sync.Once
+	iptablesExists bool
+)
+
+// IptablesAvailable reports whether the iptables binary is installed.
+// The result is cached after the first call.
+func IptablesAvailable() bool {
+	iptablesOnce.Do(func() {
+		_, err := exec.LookPath("iptables")
+		iptablesExists = err == nil
+	})
+	return iptablesExists
 }
 
 // Restore runs iptables-restore with the given rules.

@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/angelorc/vmsan/hostd/internal/firewall"
 )
 
 // DoctorCheck represents a single health check result.
@@ -35,6 +37,7 @@ func runDoctorChecks() []DoctorCheck {
 	checks = append(checks, checkNftablesKernel())
 	checks = append(checks, checkHostFirewall())
 	checks = append(checks, checkJailerFilesystem())
+	checks = append(checks, checkIptables())
 	checks = append(checks, checkBinaries()...)
 	checks = append(checks, checkKernelImage())
 	checks = append(checks, checkRootfsImage())
@@ -214,6 +217,25 @@ func checkJailerFilesystem() DoctorCheck {
 	return check
 }
 
+func checkIptables() DoctorCheck {
+	check := DoctorCheck{Category: "firewall", Name: "iptables"}
+	if !firewall.IptablesAvailable() {
+		// iptables is only needed for Docker coexistence.
+		if _, dockerErr := exec.LookPath("docker"); dockerErr == nil {
+			check.Status = "warn"
+			check.Detail = "iptables not found but Docker is installed — Docker's FORWARD DROP policy may block VM traffic"
+			check.Fix = "Install iptables: apt install iptables"
+			return check
+		}
+		check.Status = "pass"
+		check.Detail = "iptables not installed (not needed — no Docker detected)"
+		return check
+	}
+	check.Status = "pass"
+	check.Detail = "iptables available"
+	return check
+}
+
 func checkBinaries() []DoctorCheck {
 	binaries := []struct {
 		name     string
@@ -245,22 +267,25 @@ func checkBinaries() []DoctorCheck {
 	return checks
 }
 
-func checkKernelImage() DoctorCheck {
-	check := DoctorCheck{Category: "images", Name: "kernel image"}
-	// Search for vmlinux* files in common locations.
-	searchDirs := []string{
-		"/srv/kernel",
-		"/srv/jailer",
+// vmsanSearchDirs returns ~/.vmsan/<subdir> for the current user and all /home/* users.
+func vmsanSearchDirs(subdir string) []string {
+	var dirs []string
+	if home, err := os.UserHomeDir(); err == nil {
+		dirs = append(dirs, filepath.Join(home, ".vmsan", subdir))
 	}
-	// Also check ~/.vmsan/kernels/ for each user.
 	if entries, err := os.ReadDir("/home"); err == nil {
 		for _, e := range entries {
 			if e.IsDir() {
-				searchDirs = append(searchDirs, filepath.Join("/home", e.Name(), ".vmsan", "kernels"))
+				dirs = append(dirs, filepath.Join("/home", e.Name(), ".vmsan", subdir))
 			}
 		}
 	}
-	for _, dir := range searchDirs {
+	return dirs
+}
+
+func checkKernelImage() DoctorCheck {
+	check := DoctorCheck{Category: "images", Name: "kernel image"}
+	for _, dir := range vmsanSearchDirs("kernels") {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			continue
@@ -281,18 +306,7 @@ func checkKernelImage() DoctorCheck {
 
 func checkRootfsImage() DoctorCheck {
 	check := DoctorCheck{Category: "images", Name: "rootfs image"}
-	searchDirs := []string{
-		"/srv/rootfs",
-		"/srv/jailer",
-	}
-	if entries, err := os.ReadDir("/home"); err == nil {
-		for _, e := range entries {
-			if e.IsDir() {
-				searchDirs = append(searchDirs, filepath.Join("/home", e.Name(), ".vmsan", "rootfs"))
-			}
-		}
-	}
-	for _, dir := range searchDirs {
+	for _, dir := range vmsanSearchDirs("rootfs") {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			continue

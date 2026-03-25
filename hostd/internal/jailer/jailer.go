@@ -170,13 +170,20 @@ func Spawn(cfg SpawnConfig) error {
 
 	// Seccomp is handled by Firecracker (not the jailer) since v1.5+.
 	// When neither flag is passed, Firecracker uses its built-in default filter.
+	// The filter file must be copied into the chroot because Firecracker runs
+	// inside the jail and cannot access host paths.
 	if cfg.DisableSeccomp {
 		fcArgs = append(fcArgs, "--no-seccomp")
 	} else if cfg.SeccompFilter != "" {
-		if _, err := os.Stat(cfg.SeccompFilter); err == nil {
-			fcArgs = append(fcArgs, "--seccomp-filter", cfg.SeccompFilter)
+		chrootFilter := filepath.Join(cfg.Paths.RootDir, "seccomp-filter.bpf")
+		if cpErr := copyFile(cfg.SeccompFilter, chrootFilter); cpErr == nil {
+			if err := os.Chown(chrootFilter, cfg.UID, cfg.GID); err != nil {
+				slog.Warn("failed to chown seccomp filter", "error", err)
+			}
+			fcArgs = append(fcArgs, "--seccomp-filter", "seccomp-filter.bpf")
+		} else {
+			slog.Debug("seccomp filter copy failed, using built-in default", "error", cpErr)
 		}
-		// If filter path is invalid, fall through to Firecracker's built-in default.
 	}
 
 	args = append(args, "--")
@@ -341,6 +348,16 @@ func configureRootfs(cfg Config, paths Paths) error {
 		// Fix ubuntu home ownership
 		if err := fixUbuntuOwnership(tmpMount); err != nil {
 			slog.Debug("fix ubuntu ownership failed", "error", err)
+		}
+
+		// Set cap_net_raw on ping so non-root users can use it.
+		for _, p := range []string{
+			filepath.Join(tmpMount, "usr", "bin", "ping"),
+			filepath.Join(tmpMount, "bin", "ping"),
+		} {
+			if err := exec.Command("setcap", "cap_net_raw+ep", p).Run(); err == nil {
+				break
+			}
 		}
 	}()
 

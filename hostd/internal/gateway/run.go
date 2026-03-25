@@ -2,11 +2,13 @@ package gateway
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
+
+	"github.com/angelorc/vmsan/hostd/internal/paths"
 )
 
 // RunGateway starts the gateway daemon. This contains all the logic previously
@@ -20,6 +22,11 @@ func RunGateway() {
 
 	socketPath := envOr("VMSAN_SOCKET", "/run/vmsan/gateway.sock")
 	pidFile := envOr("VMSAN_PID_FILE", "/run/vmsan/gateway.pid")
+
+	// Resolve paths using the same logic as the CLI.
+	// This ensures the gateway and CLI agree on jailer dir, binary locations, etc.
+	p := paths.Resolve()
+	SetJailerBaseDir(p.JailerBaseDir)
 
 	// Configure binary locations. The gateway runs as root via systemd
 	// and doesn't have the user's ~/.vmsan/bin in its PATH.
@@ -66,23 +73,28 @@ func envOr(key, fallback string) string {
 }
 
 // findBinaryDir locates the directory containing the named binary.
-// Search order: explicit override, /usr/local/bin, /usr/bin, any /home/*/.vmsan/bin.
+// Search order: explicit override, ~/.vmsan/bin, /usr/local/bin, /usr/bin, /home/*/.vmsan/bin.
 func findBinaryDir(name, override string) string {
 	if override != "" {
-		if _, err := os.Stat(override + "/" + name); err == nil {
+		if _, err := os.Stat(filepath.Join(override, name)); err == nil {
 			return override
 		}
 	}
-	for _, dir := range []string{"/usr/local/bin", "/usr/bin"} {
-		if _, err := os.Stat(dir + "/" + name); err == nil {
+	if home, err := os.UserHomeDir(); err == nil {
+		dir := filepath.Join(home, ".vmsan", "bin")
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
 			return dir
 		}
 	}
-	// Scan /home/*/.vmsan/bin
+	for _, dir := range []string{"/usr/local/bin", "/usr/bin"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			return dir
+		}
+	}
 	entries, _ := os.ReadDir("/home")
 	for _, e := range entries {
-		dir := fmt.Sprintf("/home/%s/.vmsan/bin", e.Name())
-		if _, err := os.Stat(dir + "/" + name); err == nil {
+		dir := filepath.Join("/home", e.Name(), ".vmsan", "bin")
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
 			return dir
 		}
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime"
+	"time"
 
 	"github.com/google/nftables"
 
@@ -33,10 +34,15 @@ func Teardown(ctx context.Context, opts *TeardownOptions) error {
 		errs = append(errs, fmt.Errorf("teardown host bypass: %w", err))
 	}
 
-	// Host-side iptables cleanup (best-effort)
-	if opts.GuestIP != "" || opts.TapDevice != "" {
+	// Host-side iptables cleanup (best-effort).
+	// Only runs when iptables is installed (matches the conditional in Setup).
+	// Uses a detached context with timeout so cleanup completes even if the
+	// gRPC request context was canceled (e.g. user pressed Ctrl+C).
+	if (opts.GuestIP != "" || opts.TapDevice != "") && IptablesAvailable() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		executor := NewRealIptablesExecutor()
-		if err := removeHostIptables(ctx, opts, executor); err != nil {
+		if err := removeHostIptables(cleanupCtx, opts, executor); err != nil {
 			errs = append(errs, fmt.Errorf("host iptables cleanup: %w", err))
 		}
 	}

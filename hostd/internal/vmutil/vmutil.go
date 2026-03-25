@@ -26,13 +26,20 @@ func AutoDetectKernel(kernelsDir string) string {
 }
 
 // AutoDetectRootfs finds the best rootfs image for the given runtime.
+// Search order: exact runtime match, then "base", then "ubuntu-24.04" fallback.
 func AutoDetectRootfs(rootfsDir, runtime string) string {
 	candidates := []string{
 		filepath.Join(rootfsDir, runtime+".ext4"),
 		filepath.Join(rootfsDir, runtime+".squashfs"),
-		filepath.Join(rootfsDir, "base.ext4"),
-		filepath.Join(rootfsDir, "base.squashfs"),
 	}
+	if runtime != "base" {
+		candidates = append(candidates,
+			filepath.Join(rootfsDir, "base.ext4"),
+			filepath.Join(rootfsDir, "base.squashfs"),
+		)
+	}
+	// Fallback to ubuntu rootfs (install.sh default name)
+	candidates = append(candidates, filepath.Join(rootfsDir, "ubuntu-24.04.ext4"))
 	for _, c := range candidates {
 		if _, err := os.Stat(c); err == nil {
 			return c

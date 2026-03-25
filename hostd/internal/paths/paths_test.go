@@ -64,9 +64,9 @@ func TestResolve_Default(t *testing.T) {
 		t.Errorf("SeccompDir = %q, want %q", p.SeccompDir, wantSeccomp)
 	}
 
-	wantFilter := filepath.Join(wantBase, "seccomp", "default.json")
-	if p.SeccompFilter != wantFilter {
-		t.Errorf("SeccompFilter = %q, want %q", p.SeccompFilter, wantFilter)
+	// SeccompFilter resolves to the first existing .bpf file, or empty string.
+	if p.SeccompFilter != "" && !strings.HasSuffix(p.SeccompFilter, ".bpf") {
+		t.Errorf("SeccompFilter = %q, want .bpf suffix or empty", p.SeccompFilter)
 	}
 
 	if !strings.HasSuffix(p.BaseDir, ".vmsan") {

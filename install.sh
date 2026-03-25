@@ -749,7 +749,7 @@ fi
 if [ "$INSTALL_MODE" = "source" ]; then
   ensure_go
   info "Building vmsan from source (${SOURCE_SHA})..."
-  (cd "$VMSAN_SRC/hostd" && CGO_ENABLED=0 GOOS=linux GOARCH="$(go_arch)" go build \
+  (cd "$VMSAN_SRC/hostd" && CGO_ENABLED=0 GOOS=linux GOARCH="$(go_arch)" go build -buildvcs=false \
     -ldflags="-s -w -X main.version=${SOURCE_SHA}" -o "$VMSAN_DIR/bin/vmsan" ./cmd/vmsan)
   chmod +x "$VMSAN_DIR/bin/vmsan"
   install -m 0755 "$VMSAN_DIR/bin/vmsan" /usr/local/bin/vmsan
@@ -774,7 +774,7 @@ AGENT_PATH="$VMSAN_DIR/bin/vmsan-agent"
 if [ "$INSTALL_MODE" = "source" ]; then
   ensure_go
   info "Building vmsan-agent from source (${SOURCE_SHA})..."
-  (cd "$VMSAN_SRC/agent" && CGO_ENABLED=0 GOOS=linux GOARCH="$(go_arch)" go build -ldflags="-s -w" -o "$AGENT_PATH" .)
+  (cd "$VMSAN_SRC/agent" && CGO_ENABLED=0 GOOS=linux GOARCH="$(go_arch)" go build -buildvcs=false -ldflags="-s -w" -o "$AGENT_PATH" .)
   chmod +x "$AGENT_PATH"
   success "vmsan-agent built from ${SOURCE_LABEL}"
 elif [ -x "$AGENT_PATH" ]; then
@@ -919,26 +919,35 @@ else
 fi
 
 # Compile JSON to BPF using seccompiler-bin (extracted from Firecracker tarball)
-if [ -f "$SECCOMP_JSON" ] && [ ! -f "$SECCOMP_BPF" ]; then
-  SECCOMPILER=""
-  if [ -x "$SECCOMPILER_BIN" ]; then
-    SECCOMPILER="$SECCOMPILER_BIN"
-  elif command -v seccompiler-bin >/dev/null 2>&1; then
-    SECCOMPILER="seccompiler-bin"
-  fi
+SECCOMPILER=""
+if [ -x "$SECCOMPILER_BIN" ]; then
+  SECCOMPILER="$SECCOMPILER_BIN"
+elif command -v seccompiler-bin >/dev/null 2>&1; then
+  SECCOMPILER="seccompiler-bin"
+fi
 
-  if [ -n "$SECCOMPILER" ]; then
-    SECCOMP_ARCH="x86_64"
-    [ "$ARCH" = "aarch64" ] && SECCOMP_ARCH="aarch64"
-    if "$SECCOMPILER" --input-file "$SECCOMP_JSON" --target-arch "$SECCOMP_ARCH" --output-file "$SECCOMP_BPF" 2>/dev/null; then
-      chmod 600 "$SECCOMP_BPF"
-      success "Seccomp BPF filter compiled"
-    else
-      warn "Seccomp BPF compilation failed — VMs will run without seccomp"
-    fi
+SECCOMP_ARCH="x86_64"
+[ "$ARCH" = "aarch64" ] && SECCOMP_ARCH="aarch64"
+
+# Compile the official Firecracker filter (preferred — most compatible)
+FC_SECCOMP_JSON="$SECCOMP_DIR/firecracker-default.json"
+FC_SECCOMP_BPF="$SECCOMP_DIR/firecracker-default.bpf"
+if [ -n "$SECCOMPILER" ] && [ -f "$FC_SECCOMP_JSON" ] && [ ! -f "$FC_SECCOMP_BPF" ]; then
+  if "$SECCOMPILER" --input-file "$FC_SECCOMP_JSON" --target-arch "$SECCOMP_ARCH" --output-file "$FC_SECCOMP_BPF" 2>/dev/null; then
+    chmod 600 "$FC_SECCOMP_BPF"
+    success "Seccomp BPF filter compiled (firecracker-default)"
   else
-    warn "seccompiler-bin not found — VMs will run without seccomp"
+    warn "Seccomp BPF compilation failed — VMs will use Firecracker built-in filter"
   fi
+fi
+
+# Also compile the vmsan custom filter as fallback
+if [ -n "$SECCOMPILER" ] && [ -f "$SECCOMP_JSON" ] && [ ! -f "$SECCOMP_BPF" ]; then
+  if "$SECCOMPILER" --input-file "$SECCOMP_JSON" --target-arch "$SECCOMP_ARCH" --output-file "$SECCOMP_BPF" 2>/dev/null; then
+    chmod 600 "$SECCOMP_BPF"
+  fi
+elif [ -z "$SECCOMPILER" ] && [ ! -f "$FC_SECCOMP_BPF" ] && [ ! -f "$SECCOMP_BPF" ]; then
+  warn "seccompiler-bin not found — VMs will use Firecracker built-in filter"
 fi
 
 # Fix ownership for SUDO_USER

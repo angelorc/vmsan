@@ -47,17 +47,24 @@ func Resolve() Paths {
 	}
 }
 
-// resolveSeccompFilter returns the path to a seccomp filter, preferring
-// the Firecracker-provided one (firecracker-default.json) over a custom one.
-// Returns empty string if no filter found — Firecracker will use its built-in.
+// resolveSeccompFilter returns the path to a compiled seccomp BPF filter.
+// Firecracker's --seccomp-filter flag requires a pre-compiled BPF file,
+// not raw JSON. The install script compiles JSON → BPF using seccompiler-bin.
+//
+// Preference order:
+//  1. firecracker-default.bpf — official Firecracker filter (most compatible)
+//  2. default.bpf — vmsan custom filter
+//
+// Returns empty string if no compiled filter found — Firecracker will use
+// its built-in default filter (may be too restrictive on newer kernels).
 func resolveSeccompFilter(base string) string {
 	seccompDir := filepath.Join(base, "seccomp")
-	// Prefer Firecracker's official filter (extracted from release tarball)
-	fc := filepath.Join(seccompDir, "firecracker-default.json")
-	if _, err := os.Stat(fc); err == nil {
-		return fc
+	for _, name := range []string{"firecracker-default.bpf", "default.bpf"} {
+		bpf := filepath.Join(seccompDir, name)
+		if _, err := os.Stat(bpf); err == nil {
+			return bpf
+		}
 	}
-	// Empty string = Firecracker uses its built-in default (safest fallback)
 	return ""
 }
 
