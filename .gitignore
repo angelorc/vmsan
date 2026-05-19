@@ -23,7 +23,6 @@ Thumbs.db
 # Claude / AI
 .claude/
 .docs-to-agent/
-AGENTS.md
 CLAUDE.md
 
 # External source repos
